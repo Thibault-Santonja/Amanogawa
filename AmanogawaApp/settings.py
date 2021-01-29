@@ -53,7 +53,8 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'AmanogawaAPI.apps.AmanogawaAPIConfig',   # Register the API
-    'django.contrib.gis',  # Register the Geo Lib
+    #'django.contrib.gis',  # Register the Geo Lib
+    'rest_framework',
 ]
 
 MIDDLEWARE = [
@@ -92,7 +93,7 @@ WSGI_APPLICATION = 'AmanogawaApp.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.contrib.gis.db.backends.spatialite',  # Base : 'django.db.backends.sqlite3' /
+        'ENGINE': 'django.db.backends.sqlite3',  # Base : 'django.db.backends.sqlite3' /
         # GeoLib : 'django.contrib.gis.db.backends.spatialite'
         'NAME': BASE_DIR / 'db.sqlite3',
     }
