@@ -6,4 +6,4 @@ from .models import Event
 class EventSerializer(serializers.HyperlinkedModelSerializer):
     class Meta:
         model = Event
-        fields = ('begin', 'end', 'name', 'geolocation', 'description', 'wiki_link') #, 'geolocation'
+        fields = ('begin', 'end', 'name', 'geolocation', 'description', 'wiki_link', 'type') #, 'geolocation'
