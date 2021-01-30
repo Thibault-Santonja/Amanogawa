@@ -26,10 +26,6 @@ if os.name == 'nt':
     os.environ['PROJ_LIB'] = OSGEO4W + r"\share\proj"
     os.environ['PATH'] = OSGEO4W + r"\bin;" + os.environ['PATH']
 
-    VENV_BASE = os.environ['VIRTUAL_ENV']
-    os.environ['PATH'] = os.path.join(VENV_BASE, 'Lib\\site-packages\\osgeo') + ';' + os.environ['PATH']
-    os.environ['PROJ_LIB'] = os.path.join(VENV_BASE, 'Lib\\site-packages\\osgeo\\data\\proj') + ';' + os.environ['PATH']
-
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -97,8 +93,7 @@ WSGI_APPLICATION = 'AmanogawaApp.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.contrib.gis.db.backends.spatialite',  # Base : 'django.db.backends.sqlite3' /
-        # GeoLib : 'django.contrib.gis.db.backends.spatialite'
+        'ENGINE': 'django.contrib.gis.db.backends.spatialite',  # Base : 'django.db.backends.sqlite3'
         'NAME': BASE_DIR / 'db.sqlite3',
     }
 }
