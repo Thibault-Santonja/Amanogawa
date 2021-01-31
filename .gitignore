@@ -2,3 +2,4 @@
 .idea
 AmanogawaAPI/migrations
 venv
+/venv/
