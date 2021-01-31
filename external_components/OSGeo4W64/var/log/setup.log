@@ -1,0 +1,127 @@
+2021/01/29 17:44:31 Starting OSGeo4W install, version 2.579
+2021/01/29 17:44:31 using locales .1252
+2021/01/29 17:44:31 io_stream_cygfile: fopen(/etc/setup/setup.rc) failed 2 No such file or directory
+2021/01/29 17:44:31 Current Directory: C:\Users\THIBAU~1\AppData\Local\Temp
+2021/01/29 17:44:31 Root Directory: C:\OSGeo4W64
+2021/01/29 17:44:31 Could not open service McShield for query, start and stop. McAfee may not be installed, or we don't have access.
+2021/01/29 17:44:34 root: C:\OSGeo4W64
+2021/01/29 17:44:34 Selected local directory: C:\Users\THIBAU~1\AppData\Local\Temp
+2021/01/29 17:44:34 Menu name: OSGeo4W
+2021/01/29 17:44:34 net: Direct
+2021/01/29 17:44:39 site: http://osgeo4w-oslandia.com/mirror/
+2021/01/29 17:44:40 io_stream_cygfile: fopen(/etc/setup/installed.db) failed 2 No such file or directory
+2021/01/29 17:44:40 io_stream_cygfile: fopen(/etc/setup/timestamp) failed 2 No such file or directory
+2021/01/29 17:44:47 Adding required dependency boost-libs: Selecting version 1.56.0-2 for installation.
+2021/01/29 17:44:47 Adding required dependency cairo: Selecting version 1.12.14-1 for installation.
+2021/01/29 17:44:47 Adding required dependency curl: Selecting version 7.67.0-1 for installation.
+2021/01/29 17:44:47 Adding required dependency curl-ca-bundle: Selecting version 20191119-1 for installation.
+2021/01/29 17:44:47 Adding required dependency expat: Selecting version 2.1.0-1 for installation.
+2021/01/29 17:44:47 Adding required dependency fcgi: Selecting version 2.4.1-2 for installation.
+2021/01/29 17:44:47 Adding required dependency freexl: Selecting version 1.0.2-1 for installation.
+2021/01/29 17:44:47 Adding required dependency fribidi: Selecting version 0.19.2-1 for installation.
+2021/01/29 17:44:47 Adding required dependency gdal111dll: Selecting version 1.11.3-1 for installation.
+2021/01/29 17:44:47 Adding required dependency geos: Selecting version 3.8.1-1 for installation.
+2021/01/29 17:44:47 Adding required dependency hdf4: Selecting version 4.2.14-1 for installation.
+2021/01/29 17:44:47 Adding required dependency hdf5: Selecting version 1.10.5-5 for installation.
+2021/01/29 17:44:47 Adding required dependency iconv: Selecting version 1.14-1 for installation.
+2021/01/29 17:44:47 Adding required dependency iconv-vc14: Selecting version 1.15-1 for installation.
+2021/01/29 17:44:47 Adding required dependency libgeotiff: Selecting version 1.4.2-1 for installation.
+2021/01/29 17:44:47 Adding required dependency libjpeg: Selecting version 6b-4 for installation.
+2021/01/29 17:44:47 Adding required dependency libjpeg12: Selecting version 6b-4 for installation.
+2021/01/29 17:44:47 Adding required dependency libkml: Selecting version 1.3.0-1 for installation.
+2021/01/29 17:44:47 Adding required dependency liblwgeom: Selecting version 3.0.0-2 for installation.
+2021/01/29 17:44:47 Adding required dependency libmysql: Selecting version 6.1.9-1 for installation.
+2021/01/29 17:44:47 Adding required dependency libpng: Selecting version 1.6.3-1 for installation.
+2021/01/29 17:44:47 Adding required dependency libpng-vc14: Selecting version 1.6.29-1 for installation.
+2021/01/29 17:44:47 Adding required dependency libpq: Selecting version 11.5-1 for installation.
+2021/01/29 17:44:47 Adding required dependency libtiff: Selecting version 4.0.8-1 for installation.
+2021/01/29 17:44:47 Adding required dependency libxml2: Selecting version 2.9.1-1 for installation.
+2021/01/29 17:44:47 Adding required dependency msvc2015: Selecting version 1.0.0-1 for installation.
+2021/01/29 17:44:47 Adding required dependency msvcrt: Selecting version 1.0.3-1 for installation.
+2021/01/29 17:44:47 Adding required dependency msvcrt2008: Selecting version 1.0.0-1 for installation.
+2021/01/29 17:44:47 Adding required dependency msvcrt2010: Selecting version 1.0.0-2 for installation.
+2021/01/29 17:44:47 Adding required dependency msvcrt2012: Selecting version 1.0.0-2 for installation.
+2021/01/29 17:44:47 Adding required dependency msvcrt2015: Selecting version 2.0-2 for installation.
+2021/01/29 17:44:47 Adding required dependency netcdf: Selecting version 4.7.3-2 for installation.
+2021/01/29 17:44:47 Adding required dependency ogdi: Selecting version 4.1.0-1 for installation.
+2021/01/29 17:44:47 Adding required dependency openjpeg: Selecting version 2.3.0-1 for installation.
+2021/01/29 17:44:47 Adding required dependency openssl: Selecting version 1.1.1d-2 for installation.
+2021/01/29 17:44:47 Adding required dependency openssl10: Selecting version 1.0.2j-1 for installation.
+2021/01/29 17:44:47 Adding required dependency proj: Selecting version 6.3.2-1 for installation.
+2021/01/29 17:44:47 Adding required dependency proj-datumgrid: Selecting version 1.8-1 for installation.
+2021/01/29 17:44:47 Adding required dependency proj-hpgn: Selecting version 1.0-1 for installation.
+2021/01/29 17:44:47 Adding required dependency setup: Selecting version 1.0.7-16 for installation.
+2021/01/29 17:44:47 Adding required dependency shell: Selecting version 1.0.2-4 for installation.
+2021/01/29 17:44:47 Adding required dependency spatialite: Selecting version 4.3.0a-6 for installation.
+2021/01/29 17:44:47 Adding required dependency sqlite3: Selecting version 3.29.0-1 for installation.
+2021/01/29 17:44:47 Adding required dependency szip: Selecting version 2.1.1-1 for installation.
+2021/01/29 17:44:47 Adding required dependency xerces-c: Selecting version 3.2.0-1 for installation.
+2021/01/29 17:44:47 Adding required dependency xerces-c-vc10: Selecting version 3.1.1-1 for installation.
+2021/01/29 17:44:47 Adding required dependency xz: Selecting version 5.2.3-1 for installation.
+2021/01/29 17:44:47 Adding required dependency zlib: Selecting version 1.2.8-1 for installation.
+2021/01/29 17:44:47 Adding required dependency zstd: Selecting version 1.4.4-1 for installation.
+2021/01/29 17:44:48 License file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/hdf4/hdf4-4.2.14-1.txt successfully loaded.
+2021/01/29 17:44:49 License file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/hdf5/hdf5-1.10.5-5.txt successfully loaded.
+2021/01/29 17:44:51 License file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/netcdf/netcdf-4.7.3-2.txt successfully loaded.
+2021/01/29 17:44:52 License file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/szip/szip-2.1.1-1.txt successfully loaded.
+2021/01/29 17:44:53 error: Environment variable 'PATH' length exceeds 1024; running with %WINDIR%\system32;%WINDIR%;%WINDIR%\wbem
+2021/01/29 17:44:55 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/boost/boost-libs/boost-libs-1.56.0-2.tar.bz2
+2021/01/29 17:44:56 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/cairo/cairo-1.12.14-1.tar.bz2
+2021/01/29 17:44:56 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/curl/curl-7.67.0-1.tar.bz2
+2021/01/29 17:44:56 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/curl/curl-ca-bundle/curl-ca-bundle-20191119-1.tar.bz2
+2021/01/29 17:44:56 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/expat/expat-2.1.0-1.tar.bz2
+2021/01/29 17:44:56 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/fcgi/fcgi-2.4.1-2.tar.bz2
+2021/01/29 17:44:56 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/freexl/freexl-1.0.2-1.tar.bz2
+2021/01/29 17:44:56 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/_obsolete/fribidi/fribidi-0.19.2-1.tar.bz2
+2021/01/29 17:44:56 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/gdal/gdal-3.1.4-3.tar.bz2
+2021/01/29 17:45:01 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/gdal/gdal111dll/gdal111dll-1.11.3-1.tar.bz2
+2021/01/29 17:45:02 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/geos/geos-3.8.1-1.tar.bz2
+2021/01/29 17:45:02 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/hdf4/hdf4-4.2.14-1.tar.bz2
+2021/01/29 17:45:03 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/hdf5/hdf5-1.10.5-5.tar.bz2
+2021/01/29 17:45:08 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/iconv/iconv-1.14-1.tar.bz2
+2021/01/29 17:45:08 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/iconv-vc14/iconv-vc14-1.15-1.tar.bz2
+2021/01/29 17:45:08 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/libgeotiff/libgeotiff-1.4.2-1.tar.bz2
+2021/01/29 17:45:09 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/libjpeg/libjpeg/libjpeg-6b-4.tar.bz2
+2021/01/29 17:45:09 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/libjpeg/libjpeg12/libjpeg12-6b-4.tar.bz2
+2021/01/29 17:45:09 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/libkml/libkml-1.3.0-1.tar.bz2
+2021/01/29 17:45:11 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/liblwgeom/liblwgeom-3.0.0-2.tar.bz2
+2021/01/29 17:45:11 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/libmysql/libmysql-6.1.9-1.tar.bz2
+2021/01/29 17:45:11 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/libpng/libpng-1.6.3-1.tar.bz2
+2021/01/29 17:45:11 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/libpng-vc14/libpng-vc14-1.6.29-1.tar.bz2
+2021/01/29 17:45:11 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/libpq/libpq-11.5-1.tar.bz2
+2021/01/29 17:45:11 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/libtiff/libtiff-4.0.8-1.tar.bz2
+2021/01/29 17:45:12 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/libxml2/libxml2-2.9.1-1.tar.bz2
+2021/01/29 17:45:12 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/_obsolete/mapserver/mapserver/mapserver-6.4.1-3.tar.bz2
+2021/01/29 17:45:13 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/_obsolete/msvc2015/msvc2015-1.0.0-1.tar.bz2
+2021/01/29 17:45:13 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/msvcrt/msvcrt-1.0.3-1.tar.bz2
+2021/01/29 17:45:13 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/msvcrt/msvcrt2008/msvcrt2008-1.0.0-1.tar.bz2
+2021/01/29 17:45:14 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/msvcrt/msvcrt2010/msvcrt2010-1.0.0-2.tar.bz2
+2021/01/29 17:45:14 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/msvcrt/msvcrt2012/msvcrt2012-1.0.0-2.tar.bz2
+2021/01/29 17:45:15 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/msvcrt/msvcrt2015/msvcrt2015-2.0-2.tar.bz2
+2021/01/29 17:45:15 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/netcdf/netcdf-4.7.3-2.tar.bz2
+2021/01/29 17:45:15 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/ogdi/ogdi-4.1.0-1.tar.bz2
+2021/01/29 17:45:15 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/openjpeg/openjpeg-2.3.0-1.tar.bz2
+2021/01/29 17:45:15 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/openssl/openssl-1.1.1d-2.tar.bz2
+2021/01/29 17:45:15 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/openssl/openssl10/openssl10-1.0.2j-1.tar.bz2
+2021/01/29 17:45:16 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/proj/proj-6.3.2-1.tar.bz2
+2021/01/29 17:45:16 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/proj/proj-datumgrid/proj-datumgrid-1.8-1.tar.bz2
+2021/01/29 17:45:18 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/proj/proj-hpgn/proj-hpgn-1.0-1.tar.bz2
+2021/01/29 17:45:18 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/setup/setup-1.0.7-16.tar.bz2
+2021/01/29 17:45:18 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/shell/shell-1.0.2-4.tar.bz2
+2021/01/29 17:45:18 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/spatialite/spatialite-4.3.0a-6.tar.bz2
+2021/01/29 17:45:20 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/sqlite3/sqlite3-3.29.0-1.tar.bz2
+2021/01/29 17:45:21 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/szip/szip-2.1.1-1.tar.bz2
+2021/01/29 17:45:21 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/xerces-c/xerces-c-3.2.0-1.tar.bz2
+2021/01/29 17:45:21 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/xerces-c/xerces-c-vc10/xerces-c-vc10-3.1.1-1.tar.bz2
+2021/01/29 17:45:21 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/xz/xz-5.2.3-1.tar.bz2
+2021/01/29 17:45:21 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/zlib/zlib-1.2.8-1.tar.bz2
+2021/01/29 17:45:21 Extracting from file://C:\Users\THIBAU~1\AppData\Local\Temp/http%3a%2f%2fosgeo4w-oslandia.com%2fmirror%2f/x86_64/release/zstd/zstd-1.4.4-1.tar.bz2
+2021/01/29 17:45:22 running: cmd.exe /c "C:\OSGeo4W64\\etc\postinstall\msvcrt-2008.bat"
+2021/01/29 17:45:26 running: cmd.exe /c "C:\OSGeo4W64\\etc\postinstall\msvcrt-2010.bat"
+2021/01/29 17:45:31 running: cmd.exe /c "C:\OSGeo4W64\\etc\postinstall\setup.bat"
+2021/01/29 17:45:31 running: cmd.exe /c "C:\OSGeo4W64\\etc\postinstall\shell.bat"
+2021/01/29 17:45:32 running: cmd.exe /c "C:\OSGeo4W64\\etc\postinstall\openssl10.bat"
+2021/01/29 17:45:32 running: cmd.exe /c "C:\OSGeo4W64\\etc\postinstall\openssl.bat"
+2021/01/29 17:45:32 running: cmd.exe /c "C:\OSGeo4W64\\etc\postinstall\netcdf.bat"
+2021/01/29 17:45:49 note: Installation Complete
+2021/01/29 17:45:49 Ending OSGeo4W install
