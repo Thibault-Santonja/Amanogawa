@@ -5,7 +5,7 @@ import withListLoading from '../components/withListLoading';
 import axios from "axios";
 
 
-function App() {
+function Map() {
     const [appState, setAppState] = useState({
         loading: false,
         repos: null,
@@ -42,4 +42,4 @@ function App() {
         </div>
     );
 }
-export default App;
+export default Map;
