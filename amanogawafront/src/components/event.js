@@ -20,7 +20,7 @@ const ShowEvent = (props) => {
 
     function generateList(){
         return event.map((entry, index) => {
-            const {begin, end, location, name, description, link, type} = entry;
+            const {begin, end, location, name, description, link} = entry;
             return (
                 <tr key={index}>
                     <td>{name}</td>
@@ -29,7 +29,6 @@ const ShowEvent = (props) => {
                     <td>{location}</td>
                     <td>{description}</td>
                     <td>{link}</td>
-                    <td>{type}</td>
                 </tr>
             )
             })
@@ -39,16 +38,16 @@ const ShowEvent = (props) => {
         <>
             <Container>
                 <Row>
-                <h1>Events :</h1>
-                    <ListGroup>
-                        {event.map((a)=>{
-                            return (
-                                <ListGroupItem><p>
-                                    {a.name}
-                                </p></ListGroupItem>
-                            )
-                        })}
-                    </ListGroup>
+                    <Col>
+                        <Table className="headerFixAlign" bordered>
+                            <thead>
+                            {generateHeader()}
+                            </thead>
+                            <tbody id="listBody">
+                            {generateList()}
+                            </tbody>
+                        </Table>
+                    </Col>
                 </Row>
             </Container>
         </>
