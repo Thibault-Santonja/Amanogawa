@@ -1,12 +1,12 @@
 import './App.css';
-import {Event} from './pages/event';
+import {Events} from './pages/events';
 
 
 function App() {
   return (
     <div className="App">
       <header className="App-header">
-          <Event />
+          <Events />
       </header>
     </div>
   );
