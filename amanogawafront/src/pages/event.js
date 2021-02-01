@@ -1,6 +1,7 @@
 import React, {useState,useEffect} from 'react';
+import {Row, Col, Container, Table} from "reactstrap";
 import axios from "axios";
-import {ListGroup, ListGroupItem, Row, Col, Container, Table} from "reactstrap";
+import withListLoading from '../components/withListLoading';
 
 const ShowEvent = (props) => {
     let event = props.event;
@@ -65,7 +66,6 @@ const Event = (props) => {
 
     //Data
     function fetchData(){
-        console.log("fetchData");
         axios
             .get('/events/')
             .then((res)=>{
@@ -83,11 +83,11 @@ const Event = (props) => {
     //Render
     return(
         <>
-            {event !== null && event.length > 0 &&
-                <ShowEvent
-                    event={event}
-                />
-            }
+            <h1>Event list</h1>
+            {event !== null /*&& event.length > 0*/ &&
+                <ShowEvent event={event} /> }
+            {event == null &&
+                <withListLoading /> }
         </>
     )
 };
