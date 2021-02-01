@@ -31,6 +31,6 @@ class Event(models.Model):
 #         return self.name
 #
 # class RelativeEvent(models.Model):
-#     first_event     = models.ForeignKey(Events, on_delete=models.CASCADE, related_name='topic_first_event')
-#     second_event    = models.ForeignKey(Events, on_delete=models.CASCADE, related_name='topic_second_event')
+#     first_event     = models.ForeignKey(Event, on_delete=models.CASCADE, related_name='topic_first_event')
+#     second_event    = models.ForeignKey(Event, on_delete=models.CASCADE, related_name='topic_second_event')
 #     type            = models.ForeignKey(RelativeEventType, blank=True, on_delete=models.PROTECT)
