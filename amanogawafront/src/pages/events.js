@@ -2,7 +2,7 @@ import React, {useState,useEffect} from 'react';
 import {Row, Col, Container, Table} from "reactstrap";
 import axios from "axios";
 import withListLoading from '../components/withListLoading';
-
+import {getGeopointData} from '../utils/geoTools'
 
 const ShowEvents = (props) => {
     let events = props.events;
@@ -19,13 +19,6 @@ const ShowEvents = (props) => {
                 <th>Wiki link</th>
             </tr>
         );
-    }
-    function getGeopointData(geopoint){
-        let srid = geopoint.split(';')[0].split('=')[1];
-        let lat = geopoint.split(';')[1].replace('POINT (', '').replace(')', '').split(' ')[1];
-        let lon = geopoint.split(';')[1].replace('POINT (', '').replace(')', '').split(' ')[0];
-
-        return {'longitude':lon, 'latitude':lat, 'srid':srid};
     }
 
     function generateList(){
