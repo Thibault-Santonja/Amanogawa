@@ -1,21 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import '../App.css';
-import Events from '../components/showEvents';
-import withListLoading from '../components/withListLoading';
-import axios from "axios";
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
+import axios from "axios";
+import '../App.css';
+import withListLoading from '../components/withListLoading';
+import {getGeopointData} from '../utils/geoTools'
 
 
 const EventMarker = (props) => {
     let events = props.events;
-
-    function getGeopointData(geopoint) {
-        let srid = geopoint.split(';')[0].split('=')[1];
-        let lat = geopoint.split(';')[1].replace('POINT (', '').replace(')', '').split(' ')[1];
-        let lon = geopoint.split(';')[1].replace('POINT (', '').replace(')', '').split(' ')[0];
-
-        return {'longitude':lon, 'latitude':lat, 'srid':srid};
-    }
 
     return events.map((entry, index) => {
         const {begin, end, geolocation, name, description, wiki_link} = entry;
@@ -67,7 +59,7 @@ function Map() {
             {appState.loading ? (
                 <withListLoading />
             ) : (
-                <MapContainer center={[51.505, -0.09]} zoom={13} scrollWheelZoom={false}>
+                <MapContainer center={[48.215863, 16.391984]} zoom={5} scrollWheelZoom={false}>
                     <link
                         rel="stylesheet"
                         href="https://unpkg.com/leaflet@1.6.0/dist/leaflet.css"
@@ -78,11 +70,6 @@ function Map() {
                         attribution='&copy; <a href="http://osm.org/copyright">OpenStreetMap</a> contributors'
                         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                     />
-                    <Marker position={[51.505, -0.09]}>
-                        <Popup>
-                            A pretty CSS3 popup. <br /> Easily customizable.
-                        </Popup>
-                    </Marker>
                     <EventMarker events={appState.repos} />
                 </MapContainer>
             ) }
