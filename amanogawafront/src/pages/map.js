@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import '../App.css';
-import Events from '../components/events';
+import Events from '../components/showEvents';
 import withListLoading from '../components/withListLoading';
 import axios from "axios";
 

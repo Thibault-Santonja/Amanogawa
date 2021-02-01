@@ -3,12 +3,13 @@ import {Row, Col, Container, Table} from "reactstrap";
 import axios from "axios";
 import withListLoading from '../components/withListLoading';
 
-const ShowEvent = (props) => {
-    let event = props.event;
+const ShowEvents = (props) => {
+    let events = props.events;
 
+    //Logic
     function generateHeader(){
         return (
-            <tr key="listEventHeader" style={{textAlign : "center"}}>
+            <tr key="listEventsHeader" style={{textAlign : "center"}}>
                 <th>Name</th>
                 <th>Begin</th>
                 <th>End</th>
@@ -20,7 +21,7 @@ const ShowEvent = (props) => {
     }
 
     function generateList(){
-        return event.map((entry, index) => {
+        return events.map((entry, index) => {
             const {begin, end, location, name, description, link} = entry;
             return (
                 <tr key={index}>
@@ -35,6 +36,8 @@ const ShowEvent = (props) => {
             })
     }
 
+
+    //Render
     return (
         <>
             <Container>
@@ -55,9 +58,9 @@ const ShowEvent = (props) => {
     )
 };
 
-const Event = (props) => {
+const Events = (props) => {
     //Hooks
-    const [event, setEvent] = useState([]);
+    const [events, setEvents] = useState([]);
 
     //Effect
     useEffect(() => {
@@ -70,7 +73,7 @@ const Event = (props) => {
             .get('/events/')
             .then((res)=>{
                 console.log(res.data);
-                setEvent(res.data);
+                setEvents(res.data);
             })
             .catch(error => {
                 console.error(error);
@@ -83,13 +86,13 @@ const Event = (props) => {
     //Render
     return(
         <>
-            <h1>Event list</h1>
-            {event !== null /*&& event.length > 0*/ &&
-                <ShowEvent event={event} /> }
-            {event == null &&
+            <h1>Events list</h1>
+            {events !== null /*&& events.length > 0*/ &&
+                <ShowEvents events={events} /> }
+            {events == null &&
                 <withListLoading /> }
         </>
     )
 };
 
-export {Event};
+export {Events};
