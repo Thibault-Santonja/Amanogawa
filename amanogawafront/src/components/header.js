@@ -14,18 +14,19 @@ import {
     NavbarText
 } from 'reactstrap';
 
-const Header = (props) => {
+const Header = () => {
     const [isOpen, setIsOpen] = useState(false);
 
     const toggle = () => setIsOpen(!isOpen);
 
     return(
-        <div>
-            <Navbar color="light" light expand="md">
-                <NavbarBrand>Amanogawa</NavbarBrand>
-                <NavbarToggler onClick={toggle} navbar />
+        // remove `expand="md"` from <Navbar ...> to allow toggler
+        <>
+            <Navbar color="dark" dark expand="md">
+                <NavbarBrand href="/" className="mr-auto">Amanogawa</NavbarBrand>
+                <NavbarToggler onClick={toggle}  className="mr-2" />
                 <Collapse isOpen={isOpen} navbar>
-                    <Nav className="mr-auto" navbar>
+                    <Nav navbar>
                         <NavItem>
                             <NavLink href="/events">Events list</NavLink>
                         </NavItem>
@@ -35,7 +36,7 @@ const Header = (props) => {
                     </Nav>
                 </Collapse>
             </Navbar>
-        </div>
+        </>
     )
 };
 

@@ -3,6 +3,7 @@ import {Row, Col, Container, Table} from "reactstrap";
 import axios from "axios";
 import withListLoading from '../components/withListLoading';
 
+
 const ShowEvents = (props) => {
     let events = props.events;
 
@@ -13,24 +14,33 @@ const ShowEvents = (props) => {
                 <th>Name</th>
                 <th>Begin</th>
                 <th>End</th>
-                <th>Location</th>
+                <th>Location (lon, lat)</th>
                 <th>Description</th>
                 <th>Wiki link</th>
             </tr>
         );
     }
+    function getGeopointData(geopoint){
+        let srid = geopoint.split(';')[0].split('=')[1];
+        let lat = geopoint.split(';')[1].replace('POINT (', '').replace(')', '').split(' ')[1];
+        let lon = geopoint.split(';')[1].replace('POINT (', '').replace(')', '').split(' ')[0];
+
+        return {'longitude':lon, 'latitude':lat, 'srid':srid};
+    }
 
     function generateList(){
         return events.map((entry, index) => {
-            const {begin, end, location, name, description, link} = entry;
+            const {begin, end, geolocation, name, description, wiki_link} = entry;
+            let coord = getGeopointData(geolocation)
+
             return (
                 <tr key={index}>
                     <td>{name}</td>
                     <td>{begin}</td>
                     <td>{end}</td>
-                    <td>{location}</td>
+                    <td>[{coord.longitude}, {coord.latitude}]</td>
                     <td>{description}</td>
-                    <td>{link}</td>
+                    <td>{wiki_link}</td>
                 </tr>
             )
             })
