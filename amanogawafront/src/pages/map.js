@@ -19,7 +19,7 @@ const EventMarker = (props) => {
                     <h3>{name}</h3>
                     <p>{begin} - {end}</p>
                     <p>{description}</p>
-                    <a href={wiki_link}>link</a>
+                    {wiki_link? (<a href={wiki_link}>Wiki link</a>) : (<p>No link...</p>)}
                 </Popup>
             </Marker>
         )
