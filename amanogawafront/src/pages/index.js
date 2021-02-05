@@ -8,7 +8,7 @@ import Slider from '@material-ui/core/Slider';
 import logo from '../assets/YoDance.gif';
 
 
-const startTime = -4000;
+const startTime = 0; //-4000; aie aie aie pas de dates négatives.............
 const endTime   = new Date().getFullYear();
 
 
@@ -18,6 +18,7 @@ function valuetext(value) {
 
 
 function setMarks() {
+    const step = 100;
     let label;
     let marks = [
         {
@@ -26,14 +27,14 @@ function setMarks() {
         },
     ];
 
-    for (let i = startTime/1000; i < Math.floor(endTime/1000); i++) {
+    for (let i = startTime / step; i < Math.floor(endTime / step); i++) {
         if (i !== 0)
-            label = (i*1000).toString()
+            label = (i * step).toString()
         else
             label = 'JC'
 
         marks.push({
-            value: i*1000,
+            value: i * step,
             label: label
         })
     }
@@ -67,8 +68,12 @@ class Index extends Component {
         return(
             <>
                 <h1>Welcome !</h1>
-                <p>TODO</p>
+                <br />
                 <img src={logo} alt="loading..." />
+                <br />
+                <br />
+                <h2>TODO</h2>
+
                 <div className="d-flex justify-content-center fixed-bottom">
                     <div className="w-75">
                         <h2>Test timeline :</h2>
