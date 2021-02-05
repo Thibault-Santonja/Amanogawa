@@ -5,6 +5,10 @@ import '../App.css';
 import withListLoading from '../components/withListLoading';
 import {getGeopointData} from '../utils/geoTools'
 
+import TimelineSlider from '../components/timelineRange'
+const startTime = 0; //-4000; aie aie aie pas de dates négatives.............
+const endTime   = new Date().getFullYear();
+
 
 const EventMarker = (props) => {
     let events = props.events;
@@ -59,19 +63,27 @@ function Map() {
             {appState.loading ? (
                 <withListLoading />
             ) : (
-                <MapContainer center={[48.215863, 16.391984]} zoom={5} scrollWheelZoom={false}>
-                    <link
-                        rel="stylesheet"
-                        href="https://unpkg.com/leaflet@1.6.0/dist/leaflet.css"
-                        integrity="sha512-xwE/Az9zrjBIphAcBb3F6JVqxf46+CDLwfLMHloNu6KEQCAWi6HcDUbeOfBIptF7tcCzusKFjFw2yuvEpDL9wQ=="
-                        crossOrigin=""
-                    />
-                    <TileLayer
-                        attribution='&copy; <a href="http://osm.org/copyright">OpenStreetMap</a> contributors'
-                        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                    />
-                    <EventMarker events={appState.repos} />
-                </MapContainer>
+                <>
+                    <MapContainer center={[48.215863, 16.391984]} zoom={5} scrollWheelZoom={false}>
+                        <link
+                            rel="stylesheet"
+                            href="https://unpkg.com/leaflet@1.6.0/dist/leaflet.css"
+                            integrity="sha512-xwE/Az9zrjBIphAcBb3F6JVqxf46+CDLwfLMHloNu6KEQCAWi6HcDUbeOfBIptF7tcCzusKFjFw2yuvEpDL9wQ=="
+                            crossOrigin=""
+                        />
+                        <TileLayer
+                            attribution='&copy; <a href="http://osm.org/copyright">OpenStreetMap</a> contributors'
+                            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                        />
+                        <EventMarker events={appState.repos} />
+                    </MapContainer>
+
+                    <div className="d-flex justify-content-center fixed-bottom"  style={{backgroundColor: 'rgba(250,252,255,0.8)'}} >
+                        <div className="w-75">
+                            <TimelineSlider startTime={startTime} endTime={endTime}/>
+                        </div>
+                    </div>
+                </>
             ) }
         </div>
     );
