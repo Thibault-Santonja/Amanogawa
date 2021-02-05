@@ -8,7 +8,6 @@ import Slider from '@material-ui/core/Slider';
 import logo from '../assets/YoDance.gif';
 
 
-
 const startTime = -4000;
 const endTime   = new Date().getFullYear();
 
@@ -17,32 +16,41 @@ function valuetext(value) {
     return `${value}`;
 }
 
-export default function TimelineSlider(props) {
-    const marks = [
+
+function setMarks() {
+    let label;
+    let marks = [
         {
-            value: -4000,
-            label: '-4000',
-        },
-        {
-            value: 0,
-            label: 'JC',
-        },
-        {
-            value: 1000,
-            label: '1000',
-        },
-        {
-            value: 2000,
-            label: '2000',
+            value: endTime,
+            label: 'Today',
         },
     ];
-    const [value, setValue] = useState([20, 37]);
+
+    for (let i = startTime/1000; i < Math.floor(endTime/1000); i++) {
+        if (i !== 0)
+            label = (i*1000).toString()
+        else
+            label = 'JC'
+
+        marks.push({
+            value: i*1000,
+            label: label
+        })
+    }
+
+    return marks;
+}
+
+
+export default function TimelineSlider(props) {
+    const marks = setMarks()
+    const [dateRange, setDateRange] = useState([0, endTime]);
     const handleChange = (event, newValue) => {
-        setValue(newValue);
+        setDateRange(newValue);
     };
 
     return (<Slider
-        value={value}
+        value={dateRange}
         onChange={handleChange}
         valueLabelDisplay="auto"
         aria-labelledby="range-slider"
@@ -63,6 +71,7 @@ class Index extends Component {
                 <img src={logo} alt="loading..." />
                 <div className="d-flex justify-content-center fixed-bottom">
                     <div className="w-75">
+                        <h2>Test timeline :</h2>
                         <p>Timeline Range Slider : {startTime} to {endTime}</p>
                         <TimelineSlider startTime={startTime} endTime={endTime}/>
                     </div>
