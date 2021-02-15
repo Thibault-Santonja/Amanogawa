@@ -6,8 +6,9 @@ import withListLoading from '../components/withListLoading';
 import {getGeopointData} from '../utils/geoTools'
 
 import TimelineSlider from '../components/timelineRange'
-const startTime = 0; //-4000; aie aie aie pas de dates négatives.............
-const endTime   = new Date().getFullYear();
+const startTime     = -4000; //-4000; aie aie aie pas de dates négatives.............
+const endTime       = new Date().getFullYear();
+const stepNumber    = 20;
 
 
 const EventMarker = (props) => {
@@ -80,7 +81,7 @@ function Map() {
 
                     <div className="d-flex justify-content-center fixed-bottom"  style={{backgroundColor: 'rgba(250,252,255,0.8)'}} >
                         <div className="w-75">
-                            <TimelineSlider startTime={startTime} endTime={endTime}/>
+                            <TimelineSlider startTime={startTime} endTime={endTime} stepNumber={stepNumber}/>
                         </div>
                     </div>
                 </>

@@ -9,33 +9,35 @@ function valuetext(value) {
 }
 
 function setMarks(timelineRange) {
-    const step = 100;
+    const step = Math.round((timelineRange.end - timelineRange.start)/timelineRange.stepNumber);
     let label;
     let marks = [
         {
             value: timelineRange.end,
             label: 'Today',
         },
+        {
+            value: 0,
+            label: 'JC',
+        },
     ];
 
     for (let i = timelineRange.start / step; i < Math.floor(timelineRange.end / step); i++) {
-        if (i !== 0)
+        if (i !== 0) {
             label = (i * step).toString()
-        else
-            label = 'JC'
-
-        marks.push({
-            value: i * step,
-            label: label
-        })
-    }
+            marks.push({
+                value: i * step,
+                label: label
+            })
+        }
+    };
 
     return marks;
 }
 
 
 export default function TimelineSlider(props) {
-    const timelineRange = {start:props.startTime, end:props.endTime};
+    const timelineRange = {start:props.startTime, end:props.endTime, stepNumber:props.stepNumber};
     const marks = setMarks(timelineRange)
     const [dateRange, setDateRange] = useState([0, timelineRange.end]);
 
