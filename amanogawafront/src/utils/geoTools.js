@@ -3,7 +3,7 @@ function getGeopointData(geopoint) {
     let lat = geopoint.split(';')[1].replace('POINT (', '').replace(')', '').split(' ')[1];
     let lon = geopoint.split(';')[1].replace('POINT (', '').replace(')', '').split(' ')[0];
 
-    return {'longitude':lon, 'latitude':lat, 'srid':srid};
+    return {'longitude':parseFloat(lon), 'latitude':parseFloat(lat), 'srid':srid};
 }
 
 export {getGeopointData}
