@@ -18,9 +18,9 @@ function convertDatabase2Date(date) {
     //return pad(parseInt(date.slice(0, 4))-4000, 4) + date.slice(4);
     return (parseInt(date.slice(0, 4)) - 4000).toString() + date.slice(4);
 }
-/*
+
 function convertDate2Database(date) {
     return (parseInt(date.slice(0, 4)) + 4000).toString() + date.slice(4);
 }
-*/
-export {convertDatabase2Date}
+
+export {convertDatabase2Date, convertDate2Database}
