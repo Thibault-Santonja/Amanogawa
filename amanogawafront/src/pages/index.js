@@ -10,6 +10,14 @@ const startTime = 0; //-4000; aie aie aie pas de dates négatives.............
 const endTime   = new Date().getFullYear();
 
 class Index extends Component {
+    // Data
+    handleTimelineRangeComponentDates(date) {
+        console.log({
+            start:  date[0],
+            end:    date[1]
+        });
+    };
+    
     render() {
         return(
             <>
@@ -24,7 +32,7 @@ class Index extends Component {
                     <div className="w-75">
                         <h2>Test timeline :</h2>
                         <p>Timeline Range Slider : {startTime} to {endTime}</p>
-                        <TimelineSlider startTime={startTime} endTime={endTime}/>
+                        <TimelineSlider startTime={startTime} endTime={endTime} stepNumber={20} handleChange={this.handleTimelineRangeComponentDates}/>
                     </div>
                 </div>
             </>
