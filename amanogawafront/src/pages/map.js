@@ -4,6 +4,7 @@ import axios from "axios";
 import '../App.css';
 import withListLoading from '../components/withListLoading';
 import {getGeopointData} from '../utils/geoTools'
+import {convertDatabase2Date, convertDate2Database} from '../utils/dateTools';
 
 import TimelineSlider from '../components/timelineRange'
 const startTime     = -4000; //-4000; aie aie aie pas de dates négatives.............
@@ -22,7 +23,7 @@ const EventMarker = (props) => {
             <Marker position={[coord.latitude, coord.longitude]}>
                 <Popup>
                     <h3>{name}</h3>
-                    <p>{begin} - {end}</p>
+                    <p>{convertDatabase2Date(begin)} - {convertDatabase2Date(end)}</p>
                     <p>{description}</p>
                     {wiki_link? (<a href={wiki_link}>Wiki link</a>) : (<p>No link...</p>)}
                 </Popup>
@@ -37,6 +38,10 @@ function Map() {
         loading: false,
         repos: [],
     });
+    const [dates, setDates] = useState({
+        start: startTime,
+        end: endTime
+    });
 
     // Effect
     useEffect(() => {
@@ -46,9 +51,17 @@ function Map() {
     }, []);
 
     // Data
+    function handleTimelineRangeComponentDates(date) {
+        setDates({
+            start:  date[0],
+            end:    date[1]
+        });
+        fetchData();
+    }
+
     function fetchData() {
         axios
-            .get('/events/')
+            .get('/events/', {params: {start: dates.start+4000, end: dates.end+4001}})
             .then((res)=>{
                 console.log(res.data);
                 setAppState({ loading: false, repos: res.data });
@@ -56,6 +69,7 @@ function Map() {
             .catch(error => {
                 console.error(error);
             });
+        console.log(appState.repos)
     }
 
     // Render
@@ -81,7 +95,7 @@ function Map() {
 
                     <div className="d-flex justify-content-center fixed-bottom"  style={{backgroundColor: 'rgba(250,252,255,0.8)'}} >
                         <div className="w-75">
-                            <TimelineSlider startTime={startTime} endTime={endTime} stepNumber={stepNumber}/>
+                            <TimelineSlider startTime={startTime} endTime={endTime} stepNumber={stepNumber} handleChange={handleTimelineRangeComponentDates}/>
                         </div>
                     </div>
                 </>
