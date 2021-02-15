@@ -2,8 +2,6 @@ from django.db import models
 from django.contrib.gis.db import models as models_geo
 
 
-
-
 # Create your models here.
 # class EventType(models.Model):
 #     name            = models.CharField(max_length=128)
