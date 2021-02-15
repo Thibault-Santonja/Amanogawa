@@ -2,7 +2,8 @@ import React, {useState,useEffect} from 'react';
 import {Row, Col, Container, Table} from "reactstrap";
 import axios from "axios";
 import withListLoading from '../components/withListLoading';
-import {getGeopointData} from '../utils/geoTools'
+import {getGeopointData} from '../utils/geoTools';
+import {convertDatabase2Date} from '../utils/dateTools';
 
 const ShowEvents = (props) => {
     let events = props.events;
@@ -29,9 +30,9 @@ const ShowEvents = (props) => {
             return (
                 <tr key={index}>
                     <td>{name}</td>
-                    <td>{begin}</td>
-                    <td>{end}</td>
-                    <td>[{coord.longitude}, {coord.latitude}]</td>
+                    <td>{convertDatabase2Date(begin)}</td>
+                    <td>{convertDatabase2Date(end)}</td>
+                    <td>[{coord.longitude.toFixed(2)}, {coord.latitude.toFixed(2)}]</td>
                     <td>{description}</td>
                     <td>{wiki_link}</td>
                 </tr>
