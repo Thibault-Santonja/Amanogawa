@@ -1,4 +1,5 @@
 import sqlite3
+import requests
 
 
 def create_connection(db_file):
@@ -23,12 +24,13 @@ def query_wiki_api(api_link):
     :return: event datas
     """
 
-    wiki_name           = None
-    wiki_description    = None
-    wiki_extract        = None
-    wiki_link           = None
+    response = requests.get(api_link)
+    if response.status_code != 200:
+        print("Error on " + api_link + " request : " + str(response.status_code))
+        return None
 
-    return wiki_name, wiki_description, wiki_extract, wiki_link, api_link
+    response = response.json()
+    return response['title'], response['description'], response['extract'], response['content_urls']['desktop']['page'], api_link
 
 
 def update_event(conn, api_link):
@@ -45,9 +47,12 @@ def update_event(conn, api_link):
                   wiki_link         = ?
               WHERE API_wiki_link   = ?'''
 
-    cur = conn.cursor()
-    cur.execute(sql, (query_wiki_api(api_link)))
-    conn.commit()
+    data = (query_wiki_api(api_link))
+
+    if data:
+        cur = conn.cursor()
+        cur.execute(sql, data)
+        conn.commit()
 
 
 def get_api_links(conn):
@@ -63,6 +68,8 @@ def main():
     conn = create_connection(database)
     with conn:
         for api_link in get_api_links(conn):
+            api_link = api_link[0]
+
             if api_link:
                 update_event(conn, api_link)
 
