@@ -11,22 +11,6 @@ const endTime       = new Date().getFullYear();
 const stepNumber    = 20;
 
 
-/*function queryWikiAPI(url) {
-    return new Promise((resolve, reject) => {
-        axios
-            .get(url)
-            .then((res) => {
-                console.log(res.data);
-                resolve(res.data);
-            })
-            .catch(error => {
-                console.error(error);
-                reject(null);
-            });
-    })
-}*/
-
-
 function Map() {
     const [appState, setAppState] = useState({
         loading: false,
