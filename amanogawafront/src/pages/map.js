@@ -7,17 +7,33 @@ import {getGeopointData} from '../utils/geoTools'
 import {convertDatabase2Date, convertDate2Database} from '../utils/dateTools';
 
 import TimelineSlider from '../components/timelineRange'
-const startTime     = -4000; //-4000; aie aie aie pas de dates négatives.............
+
+const startTime     = -4000;
 const endTime       = new Date().getFullYear();
 const stepNumber    = 20;
 
 
+/*function queryWikiAPI(url) {
+    return new Promise((resolve, reject) => {
+        axios
+            .get(url)
+            .then((res) => {
+                console.log(res.data);
+                resolve(res.data);
+            })
+            .catch(error => {
+                console.error(error);
+                reject(null);
+            });
+    })
+}*/
+
 const EventMarker = (props) => {
     let events = props.events;
 
-    return events.map((entry, index) => {
+    return events.map(/*async */(entry, index) => {
         const {begin, end, geolocation, name, description, wiki_link} = entry;
-        let coord = getGeopointData(geolocation)
+        let coord = getGeopointData(geolocation);
 
         return (
             <Marker position={[coord.latitude, coord.longitude]}>
@@ -25,10 +41,12 @@ const EventMarker = (props) => {
                     <h3>{name}</h3>
                     <p>{convertDatabase2Date(begin)} - {convertDatabase2Date(end)}</p>
                     <p>{description}</p>
-                    {wiki_link? (<a href={wiki_link}>Wiki link</a>) : (<p>No link...</p>)}
+                    <a href={wiki_link}>Wiki link</a>
+                    <h4>{/*"Extract"*/}</h4>
+                    <p>{/*extract*/}</p>
                 </Popup>
             </Marker>
-        )
+        );
     })
 }
 
@@ -72,14 +90,14 @@ function Map() {
         console.log(appState.repos)
     }
 
-    // Render
+    // Render [48.215863, 16.391984]
     return (
         <div className='map-container'>
             {appState.loading ? (
                 <withListLoading />
             ) : (
                 <>
-                    <MapContainer center={[48.215863, 16.391984]} zoom={5} scrollWheelZoom={false}>
+                    <MapContainer center={[30, 65]} zoom={4} scrollWheelZoom={false}>
                         <link
                             rel="stylesheet"
                             href="https://unpkg.com/leaflet@1.6.0/dist/leaflet.css"

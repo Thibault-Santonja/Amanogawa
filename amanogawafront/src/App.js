@@ -4,10 +4,15 @@ import {Events} from './pages/events';
 import {Index} from "./pages/index"
 import Map from './pages/map';
 import {Header} from "./components/header";
+import {useEffect} from 'react';
 
 
 function App() {
-  return (
+    useEffect(() => {
+        document.title = "Amanogawa"
+    }, []);
+
+    return (
     <div className="App">
         <Header />
         <BrowserRouter>
@@ -18,7 +23,7 @@ function App() {
             </Switch>
         </BrowserRouter>
     </div>
-  );
+    );
 }
 
 export default App;
