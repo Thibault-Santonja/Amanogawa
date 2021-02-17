@@ -17,7 +17,7 @@ class Index extends Component {
             end:    date[1]
         });
     };
-    
+
     render() {
         return(
             <>

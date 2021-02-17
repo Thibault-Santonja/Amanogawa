@@ -37,6 +37,7 @@ function setMarks(timelineRange) {
 }
 
 
+// source : https://material-ui.com/components/slider/
 export default function TimelineSlider(props) {
     const timelineRange = {start:props.startTime, end:props.endTime, stepNumber:props.stepNumber};
     const marks = setMarks(timelineRange)
