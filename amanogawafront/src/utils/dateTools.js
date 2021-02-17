@@ -1,5 +1,5 @@
-function pad(num, size) {
-    let negative = new Boolean(false);
+/*function pad(num, size) {
+    let negative = Boolean(false);
 
     if (num < 0) {negative = true}
 
@@ -12,7 +12,7 @@ function pad(num, size) {
     }
 
     return num;
-}
+}*/
 
 function convertDatabase2Date(date) {
     //return pad(parseInt(date.slice(0, 4))-4000, 4) + date.slice(4);
