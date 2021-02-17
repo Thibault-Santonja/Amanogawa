@@ -1,12 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
+import { MapContainer, TileLayer } from 'react-leaflet'
 import axios from "axios";
 import '../App.css';
 import withListLoading from '../components/withListLoading';
-import {getGeopointData} from '../utils/geoTools'
-import {convertDatabase2Date, convertDate2Database} from '../utils/dateTools';
-
 import TimelineSlider from '../components/timelineRange'
+import EventMarker from '../components/eventMarker'
 
 const startTime     = -4000;
 const endTime       = new Date().getFullYear();
@@ -28,28 +26,6 @@ const stepNumber    = 20;
     })
 }*/
 
-const EventMarker = (props) => {
-    let events = props.events;
-
-    return events.map(/*async */(entry, index) => {
-        const {begin, end, geolocation, name, description, wiki_link} = entry;
-        let coord = getGeopointData(geolocation);
-
-        return (
-            <Marker position={[coord.latitude, coord.longitude]}>
-                <Popup>
-                    <h3>{name}</h3>
-                    <p>{convertDatabase2Date(begin)} - {convertDatabase2Date(end)}</p>
-                    <p>{description}</p>
-                    <a href={wiki_link}>Wiki link</a>
-                    <h4>{/*"Extract"*/}</h4>
-                    <p>{/*extract*/}</p>
-                </Popup>
-            </Marker>
-        );
-    })
-}
-
 
 function Map() {
     const [appState, setAppState] = useState({
@@ -66,6 +42,10 @@ function Map() {
         setAppState({ loading: true });
 
         fetchData();
+
+        // fixme : React Hook useEffect has a missing dependency: 'fetchData'. Either include it or remove the
+        //  dependency array  react-hooks/exhaustive-deps
+        //  eslint-disable-next-line
     }, []);
 
     // Data
@@ -74,6 +54,7 @@ function Map() {
             start:  date[0],
             end:    date[1]
         });
+
         fetchData();
     }
 
@@ -87,7 +68,6 @@ function Map() {
             .catch(error => {
                 console.error(error);
             });
-        console.log(appState.repos)
     }
 
     // Render [48.215863, 16.391984]
@@ -108,7 +88,7 @@ function Map() {
                             attribution='&copy; <a href="http://osm.org/copyright">OpenStreetMap</a> contributors'
                             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                         />
-                        <EventMarker events={appState.repos} />
+                        {appState.repos.map((entry, index) => <EventMarker event={entry} />)}
                     </MapContainer>
 
                     <div className="d-flex justify-content-center fixed-bottom"  style={{backgroundColor: 'rgba(250,252,255,0.8)'}} >

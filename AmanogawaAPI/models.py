@@ -15,7 +15,9 @@ class Event(models.Model):
     geolocation     = models_geo.PointField()
     name            = models.CharField(max_length=128)
     description     = models.TextField(blank=True)
+    extract         = models.TextField(blank=True)
     wiki_link       = models.URLField(blank=True)
+    API_wiki_link   = models.URLField(blank=True)
     type            = models.CharField(max_length=128, blank=True)
 
     def __str__(self):

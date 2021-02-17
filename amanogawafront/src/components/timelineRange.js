@@ -1,5 +1,4 @@
-import React, {useState, useEffect} from 'react';
-import axios from "axios";
+import React, {useState} from 'react';
 
 // Timeline Range Slider
 import Slider from '@material-ui/core/Slider';
@@ -31,7 +30,7 @@ function setMarks(timelineRange) {
                 label: label
             })
         }
-    };
+    }
 
     return marks;
 }
