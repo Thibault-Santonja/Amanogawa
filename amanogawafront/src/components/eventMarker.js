@@ -1,12 +1,10 @@
-import React, {useState} from "react";
+import React from "react";
 import {Marker, Popup} from "react-leaflet";
-import {Button} from "reactstrap";
 import {getGeopointData} from "../utils/geoTools";
 import {convertDatabase2Date} from "../utils/dateTools";
 
 export default function EventMarker(props) {
     let event = props.event;
-    const [showDetails, setShowDetails] = useState(false);
 
     const eventData = {
         begin: event.begin,
@@ -18,25 +16,26 @@ export default function EventMarker(props) {
         wiki_link: event.wiki_link
     };
 
+    // fixme
+    let desc_full = eventData.descriptionFull;
+    if (eventData.descriptionFull && eventData.descriptionFull.length > 255) {
+        desc_full = eventData.descriptionFull.substring(0, 250) + ' [...]'
+    }
+    
     // Render
     return (
         <Marker position={[eventData.geolocation.latitude, eventData.geolocation.longitude]}>
             <Popup>
                 <h3>{eventData.name}</h3>
                 <p>{convertDatabase2Date(eventData.begin)} - {convertDatabase2Date(eventData.end)}</p>
+
+                <br/><h5>Description</h5>
                 <p>{eventData.description}</p>
-                {eventData.wiki_link ? (
-                    <Button outline color="info" block onClick={setShowDetails(!showDetails)}>More details</Button>
-                ) : (
-                    <Button outline color="info" block disabled>More details (link missed...)</Button>
-                )}
-                {showDetails ? (
-                    <>
-                        <h4>{"Extract"}</h4>
-                        <p>{eventData.extract}</p>
-                        <a href={eventData.wiki_link}>Wiki link</a>
-                    </>
-                ) : (<p></p>)}
+
+                <br/><h5>Extract</h5>
+                <p>{desc_full /*eventData.descriptionFull.substring(0,255)*/}</p>
+
+                <br/><h5><a href={eventData.wiki_link}>See more !</a></h5>
             </Popup>
         </Marker>
     );
