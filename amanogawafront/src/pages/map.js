@@ -30,7 +30,7 @@ function Map() {
         // fixme : React Hook useEffect has a missing dependency: 'fetchData'. Either include it or remove the
         //  dependency array  react-hooks/exhaustive-deps
         //  eslint-disable-next-line
-    }, []);
+    }, [] /*propriétés à surveiller / watcher*/);
 
     // Data
     function handleTimelineRangeComponentDates(date) {

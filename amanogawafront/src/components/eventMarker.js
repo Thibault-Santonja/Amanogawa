@@ -21,7 +21,7 @@ export default function EventMarker(props) {
     if (eventData.descriptionFull && eventData.descriptionFull.length > 255) {
         desc_full = eventData.descriptionFull.substring(0, 250) + ' [...]'
     }
-    
+
     // Render
     return (
         <Marker position={[eventData.geolocation.latitude, eventData.geolocation.longitude]}>
