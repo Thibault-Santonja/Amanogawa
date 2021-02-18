@@ -30,7 +30,13 @@ def query_wiki_api(api_link):
         return None
 
     response = response.json()
-    return response['title'], response['description'], response['extract'], response['content_urls']['desktop']['page'], api_link
+    try:
+        return response['title'], response['description'], response['extract'], response['content_urls']['desktop']['page'], api_link
+    except Exception as e:
+        print("Error on " + api_link + " :")
+        print(e)
+        return None
+
 
 
 def update_event(conn, api_link):
