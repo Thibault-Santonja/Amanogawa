@@ -13,7 +13,7 @@ class Event(models.Model):
     begin           = models.DateField()
     end             = models.DateField(blank=True)
     geolocation     = models_geo.PointField()
-    name            = models.CharField(max_length=128)
+    name            = models.CharField(blank=True, max_length=128)
     description     = models.TextField(blank=True)
     extract         = models.TextField(blank=True)
     wiki_link       = models.URLField(blank=True)
