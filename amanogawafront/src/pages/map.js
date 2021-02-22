@@ -61,7 +61,7 @@ function Map() {
                 <withListLoading />
             ) : (
                 <>
-                    <MapContainer center={[30, 65]} zoom={4} scrollWheelZoom={false}>
+                    <MapContainer center={[30, 65]} zoom={4} scrollWheelZoom={true}>
                         <link
                             rel="stylesheet"
                             href="https://unpkg.com/leaflet@1.6.0/dist/leaflet.css"
