@@ -55,6 +55,7 @@ function Map() {
     }
 
     // Render [48.215863, 16.391984]
+    // https://react-leaflet.js.org/docs/example-tooltips/
     return (
         <div className='map-container'>
             {appState.loading ? (
@@ -73,13 +74,12 @@ function Map() {
                             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                         />
                         {appState.repos.map((entry, index) => <EventMarker event={entry} />)}
-                        <Polygon positions={franceCoord}>
+                        <Polygon positions={franceCoord} pathOptions={{color: 'red'}}>
                             <Popup>
                                 <h3>Hi France !</h3>
                             </Popup>
                         </Polygon>
                     </MapContainer>
-
 
                     <div className="d-flex justify-content-center fixed-bottom"  style={{backgroundColor: 'rgba(250,252,255,0.8)'}} >
                         <div className="w-75">
