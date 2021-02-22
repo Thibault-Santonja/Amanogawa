@@ -13,8 +13,7 @@ const ShowEvents = (props) => {
         return (
             <tr key="listEventsHeader" style={{textAlign : "center"}}>
                 <th>Name</th>
-                <th>Begin</th>
-                <th>End</th>
+                <th>Dates</th>
                 <th>Location (lon, lat)</th>
                 <th>Description</th>
                 <th>Wiki link</th>
@@ -30,8 +29,7 @@ const ShowEvents = (props) => {
             return (
                 <tr key={index}>
                     <td>{name}</td>
-                    <td>{convertDatabase2Date(begin)}</td>
-                    <td>{convertDatabase2Date(end)}</td>
+                    <td>{convertDatabase2Date(begin)} to {convertDatabase2Date(end)}</td>
                     <td>[{coord.longitude.toFixed(2)}, {coord.latitude.toFixed(2)}]</td>
                     <td>{description}</td>
                     <td>{wiki_link}</td>
@@ -90,7 +88,9 @@ const Events = (props) => {
     //Render
     return(
         <>
+            <br/>
             <h1>Events list</h1>
+            <br/>
             {events !== null /*&& events.length > 0*/ &&
                 <ShowEvents events={events} /> }
             {events == null &&

@@ -35,7 +35,7 @@ def query_wiki_api(api_link):
     except Exception as e:
         print("Error on " + api_link + " :")
         print(e)
-        return None
+        return response['title'], '', response['extract'], response['content_urls']['desktop']['page'], api_link  # None
 
 
 
