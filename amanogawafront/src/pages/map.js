@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { MapContainer, TileLayer } from 'react-leaflet'
+import { MapContainer, TileLayer, Polygon } from 'react-leaflet'
 import axios from "axios";
 import '../App.css';
 import withListLoading from '../components/withListLoading';
@@ -73,7 +73,9 @@ function Map() {
                             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                         />
                         {appState.repos.map((entry, index) => <EventMarker event={entry} />)}
+                        <Polygon positions={[[42.3,3.5], [43.6, 7.7], [49.0, 8.2], [51.2, 2.4], [48.5, -4.9], [43.3, -1.9]]}/>
                     </MapContainer>
+
 
                     <div className="d-flex justify-content-center fixed-bottom"  style={{backgroundColor: 'rgba(250,252,255,0.8)'}} >
                         <div className="w-75">
