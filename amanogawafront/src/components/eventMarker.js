@@ -1,12 +1,12 @@
 import React from "react";
-import {Marker, Popup} from "react-leaflet";
+import {Marker, Popup, Circle} from "react-leaflet";
 import {getGeopointData} from "../utils/geoTools";
 import {convertDatabase2Date} from "../utils/dateTools";
 
-const color1 = [0,0,50];  // 0A946B
-const color2 = [80, 18, 79]; // 0B1994
+const color1 = [20,30,100];  // 0A946B
+const color2 = [4, 6, 20]; // 0B1994
 
-function getWeight(fullDate) {return fullDate.substring(0, 4) / (new Date().getFullYear() + 1)}
+function getWeight(fullDate) {return Math.pow(fullDate.substring(0, 4), 2) / Math.pow(new Date().getFullYear() + 1, 2)}
 
 function pickHex(color1, color2, weight) {
     let w = weight * 2 - 1;
@@ -14,7 +14,7 @@ function pickHex(color1, color2, weight) {
     let w2 = 1 - w1;
     return 'rgba(' + Math.round(color1[0] * w1 + color2[0] * w2) + ', ' +
         Math.round(color1[1] * w1 + color2[1] * w2) + ', ' +
-        Math.round(color1[2] * w1 + color2[2] * w2) + ', 0.9)';
+        Math.round(color1[2] * w1 + color2[2] * w2) + ', 0.95)';
 }
 
 export default function EventMarker(props) {
@@ -39,21 +39,22 @@ export default function EventMarker(props) {
 
     // Render
     return (
-        <Marker pathOptions={{color: eventData.color}} position={[eventData.geolocation.latitude, eventData.geolocation.longitude]}
-            >
-            <Popup>
-                <h3>{eventData.name}</h3>
-                <p>{convertDatabase2Date(eventData.begin)} - {convertDatabase2Date(eventData.end)}</p>
+        <Circle pathOptions={{color: eventData.color}} center={[eventData.geolocation.latitude, eventData.geolocation.longitude]} radius={1000}>
+            <Marker position={[eventData.geolocation.latitude, eventData.geolocation.longitude]}>
+                <Popup>
+                    <h3>{eventData.name}</h3>
+                    <p>{convertDatabase2Date(eventData.begin)} - {convertDatabase2Date(eventData.end)}</p>
 
-                <br/><h5>Description</h5>
-                <p>{eventData.description}</p>
+                    <br/><h5>Description</h5>
+                    <p>{eventData.description}</p>
 
-                <br/><h5>Extract</h5>
-                <p>{desc_full /*eventData.descriptionFull.substring(0,255)*/}</p>
+                    <br/><h5>Extract</h5>
+                    <p>{desc_full /*eventData.descriptionFull.substring(0,255)*/}</p>
 
-                <br/><h5><a href={eventData.wiki_link}>See more !</a></h5>
-            </Popup>
-        </Marker>
+                    <br/><h5><a href={eventData.wiki_link}>See more !</a></h5>
+                </Popup>
+            </Marker>
+        </Circle>
     );
 
 }
