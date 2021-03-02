@@ -28,6 +28,9 @@ const Header = () => {
                         <NavItem>
                             <NavLink href="/map">Map</NavLink>
                         </NavItem>
+                        <NavItem>
+                            <NavLink href="/edit">Map</NavLink>
+                        </NavItem>
                     </Nav>
                 </Collapse>
             </Navbar>
