@@ -33,13 +33,13 @@ function Edit() {
                 </FormGroup>
                 <FormGroup>
                     <Label for="dateEnd">Date end</Label>
-                    <Input type="date" name="date" id="dateBegin" placeholder="Date end" />
+                    <Input type="date" name="date" id="dateEnd" placeholder="Date end" />
                 </FormGroup>
                 <FormGroup>
                     <Label for="wikiAPILink">Wikipedia API Link</Label>
                     <Input type="url" name="url" id="wikiAPILink" placeholder="Wikipedia API Link" />
                 </FormGroup>
-                <Button onClick={handleChange}>Submit</Button>
+                <Button onClick={handleChange} >Submit</Button>
             </Form>
         </div>
     )
