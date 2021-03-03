@@ -29,7 +29,7 @@ const Header = () => {
                             <NavLink href="/map">Map</NavLink>
                         </NavItem>
                         <NavItem>
-                            <NavLink href="/edit">Map</NavLink>
+                            <NavLink href="/edit">Edit</NavLink>
                         </NavItem>
                     </Nav>
                 </Collapse>
