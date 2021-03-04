@@ -4,7 +4,6 @@ import {useState} from "react";
 
 
 // Component
-
 function Edit() {
     const [event, setEvent] = useState({
         'name'          : null,
