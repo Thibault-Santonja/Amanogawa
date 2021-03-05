@@ -41,20 +41,11 @@ export default function TimelineSlider(props) {
     const timelineRange = {start:props.startTime, end:props.endTime, stepNumber:props.stepNumber};
     const marks = setMarks(timelineRange)
     const [dateRange, setDateRange] = useState([0, timelineRange.end]);
-    //let timeout = setTimeout(() => {console.log(dateRange)}, 3000);
 
     const handleChange = (event, newValue) => {
         setDateRange(newValue);
         props.handleChange(newValue);
     };
-    /*
-    const callback = () => {
-        axios.get('/events/', {params: {start: dateRange[0], end: dateRange[1]}})
-             .then((res)=>{
-                 console.log(res.data);
-             })
-    };
-    */
 
     return (<Slider
         value={dateRange}
