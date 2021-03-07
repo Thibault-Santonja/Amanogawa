@@ -60,6 +60,7 @@ function Edit() {
                 </Col>
 
                 <Col>
+                    <h1>TO DO, get click on map and add post functions</h1>
                     <MapContainer center={[30, 65]} zoom={4} scrollWheelZoom={true}>
                         <link
                             rel="stylesheet"
