@@ -27,7 +27,7 @@ class Event(models.Model):
 class Country(models.Model):
     creation = models.DateField()
     dissolve = models.DateField(blank=True)
-    geolocations = models_geo.PolygonField(blank=True)
+    geolocations = models_geo.MultiPolygonField(blank=True)
     name = models.CharField(blank=True, max_length=128)
     description = models.TextField(blank=True)
     extract = models.TextField(blank=True)
