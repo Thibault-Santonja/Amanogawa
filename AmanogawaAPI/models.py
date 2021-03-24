@@ -10,15 +10,30 @@ from django.contrib.gis.db import models as models_geo
 #         return self.name
 
 class Event(models.Model):
-    begin           = models.DateField()
-    end             = models.DateField(blank=True)
-    geolocation     = models_geo.PointField()
-    name            = models.CharField(blank=True, max_length=128)
-    description     = models.TextField(blank=True)
-    extract         = models.TextField(blank=True)
-    wiki_link       = models.URLField(blank=True)
-    API_wiki_link   = models.URLField(blank=True)
-    type            = models.CharField(max_length=128, blank=True)
+    begin = models.DateField()
+    end = models.DateField(blank=True)
+    geolocation = models_geo.PointField()
+    name = models.CharField(blank=True, max_length=128)
+    description = models.TextField(blank=True)
+    extract = models.TextField(blank=True)
+    wiki_link = models.URLField(blank=True)
+    API_wiki_link = models.URLField(blank=True)
+    type = models.CharField(max_length=128, blank=True)
+
+    def __str__(self):
+        return self.name
+
+
+class Country(models.Model):
+    creation = models.DateField()
+    dissolve = models.DateField(blank=True)
+    geolocations = models_geo.PolygonField(blank=True)
+    name = models.CharField(blank=True, max_length=128)
+    description = models.TextField(blank=True)
+    extract = models.TextField(blank=True)
+    wiki_link = models.URLField(blank=True)
+    API_wiki_link = models.URLField(blank=True)
+    type = models.CharField(max_length=128, blank=True)
 
     def __str__(self):
         return self.name
