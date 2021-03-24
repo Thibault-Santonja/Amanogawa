@@ -4,7 +4,7 @@ from . import views
 
 router = routers.DefaultRouter()
 router.register(r'events', views.EventViewSet)
-router.register(r'country', views.EventViewSet)
+router.register(r'country', views.CountryViewSet)
 
 # Wire up our API using automatic URL routing.
 # Additionally, we include login URLs for the browsable API.
