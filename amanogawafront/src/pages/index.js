@@ -1,6 +1,7 @@
 import React, {Component} from 'react';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import TimelineSlider from '../components/timelineRange'
+import axios from "axios";
 
 // Resources
 import logo from '../assets/YoDance.gif';
@@ -27,6 +28,9 @@ class Index extends Component {
                 <br />
                 <br />
                 <h2>TODO</h2>
+
+                <button onClick={pushDataTest}>test</button>
+                <p>{tesRes}</p>
 
                 <div className="d-flex justify-content-center fixed-bottom">
                     <div className="w-75">
@@ -55,23 +59,24 @@ let tesRes = "";
 function pushDataTest() {
     let param = {
         'creation': '5945-05-08',
-        'dissolve': null,
+        'dissolve': '6999-12-31',
         'name': 'France',
         'geolocations': franceCoord,
         'description': 'Country primarily located in Western Europe',
-        'extract': 'France, officially the French Republic, is a country primarily located in Western Europe, consisting of metropolitan France and several overseas regions and territories. The metropolitan area of France extends from the Rhine to the Atlantic Ocean and from the Mediterranean Sea to the English Channel and the North Sea. The overseas territories include French Guiana in South America and several islands in the Atlantic, Pacific and Indian Oceans. France borders Belgium, Luxembourg and Germany to the northeast, Switzerland, Monaco and Italy to the east, Andorra and Spain to the south, as well as the Netherlands, Suriname and Brazil in the Americas. The country\'s eighteen integral regions span a combined area of 643,801 km2 (248,573 sq mi) and a total population of 67.4 million. France is a unitary semi-presidential republic with its capital in Paris, the country\'s largest city and main cultural and commercial centre. Other major urban areas include Lyon, Marseille, Toulouse, Bordeaux, Lille and Nice. France, including its overseas territories, has the most time zones of any country, with a total of twelve.',
+        'extract': 'France, officially the French Republic, is a country primarily located in Western Europe, consisting of metropolitan France and several overseas regions and territories. The metropolitan area of France extends from the Rhine to the Atlantic Ocean and from the Mediterranean Sea to the English Channel and the North Sea. The overseas territories include French Guiana in South America and several islands in the Atlantic, Pacific and Indian Oceans.',
         'wiki_link': 'https://en.wikipedia.org/wiki/France',
-        'API_wiki_link': 'https://en.wikipedia.org/api/rest_v1/page/summary/France',
-        'type': null
+        'API_wiki_link': 'https://en.wikipedia.org/api/rest_v1/page/summary/France'
     }
     axios
-        .post('/country/', {params: param})
+        .post('/country/', param)
         .then((res)=>{
             console.log(res.data);
             tesRes = res.data;
         })
         .catch(error => {
             console.error(error);
+            console.log(error.response);
+            tesRes = error.response;
         });
 }
 
