@@ -25,6 +25,20 @@ defmodule AmanogawaWeb.E2EHelpers do
   """
   @spec wait_for_map_ready(Session.t()) :: Session.t()
   def wait_for_map_ready(session) do
+    # Fail fast, with a distinct message, when MapHook degraded because no
+    # WebGL context could be created (`data-map-degraded`, see
+    # `renderWebglFallback`): the generic "events never loaded" timeout
+    # below would otherwise hide the real cause.
+    degraded =
+      session
+      |> Wallaby.Browser.attr(Query.css("#map"), "data-map-degraded")
+
+    if degraded == "true" do
+      raise "MapHook degraded: no WebGL context could be created in this browser " <>
+              "(data-map-degraded=true); the events layer will never load. " <>
+              "Check the chrome flags in config/test.exs."
+    end
+
     assert_has(session, Query.css("#map[data-events-loaded='true']"))
   end
 
