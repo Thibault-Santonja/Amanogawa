@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.tailwindcss.com">
+  </script>
+  <title>Tablatures playground</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@300;500;800&display=swap"
+    rel="stylesheet" />
+  <style type="text/css">
+    :root {
+      --menu-width: 9rem;
+      --logo-main-color: rgba(18, 141, 245, 255);
+      --tab-strings: #000;
+      --tab-note-secondary: #888;
+      --arial: arial;
+    }
+mark {
+  background-color: transparent;
+  display: inline-block;
+}
+mark * {
+  background-color: transparent;
+  display: inline-block;
+}
+    body {
+      font-family: 'M PLUS Rounded 1c', helvetica, verdana;
+      font-weight: 300;
+    }
+    #web-sidebar {
+      width: var(--menu-width);
+    }
+    #page-content {
+      width: calc(100vw - var(--menu-width));
+      /* "size of the page" - "#web-sidebar size" */
+    }
+    .Cwt2ia {
+      fill: var(--logo-main-color);
+    }
+    .Cwta4 {
+      display: block;
+      padding: 9px 6px;
+    }
+    .D2820n {
+      position: relative;
+    }
+    .D28105 svg {
+      font-family: var(--arial);
+      font-size: 13px;
+      font-weight: 300;
+    }
+    .Cw81bf {
+      shape-rendering: auto;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      display: block;
+      margin: 0 auto;
+      max-height: 100%;
+      page-break-inside: avoid;
+      text-rendering: optimizeLegibility;
+      -webkit-user-select: none;
+      user-select: none;
+      width: 100%;
+    }
+    .B6413b {
+      stroke-width: 1.1;
+      stroke: var(--tab-strings);
+      stroke-linecap: square;
+      stroke-width: 1;
+      fill: none;
+      vector-effect: non-scaling-stroke;
+      shape-rendering: optimizespeed;
+    }
+    .h8e1 {
+      fill: black;
+    }
+    .h82c6,
+    .h82d8,
+    .h8cd {
+      fill: var(--tab-note-secondary);
+    }
+    .h81p9 {
+      text-anchor: middle;
+      dominant-baseline: middle;
+      cursor: default;
+      font-size: 14px;
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body class="flex flex-row flex-nowrap items-stretch h-full min-h-screen bg-white w-screen" x-init="setLocale()">
+  <script>
+    const setLocale = () => {
+      if (document.cookie.match("locale=") == null) {
+        document.cookie = `locale=${navigator.language};path=/`;
+        location.reload();
+      }
+    }
+  </script>
+  <menu id="web-sidebar"
+    class="hidden lg:block z-40 flex-none bg-white self-stretch drop-shadow border-r-[1px] border-slate-200 border-solid text-center">
+    <nav class="sticky top-0 py-4" aria-label="Navigation">
+      <h1
+        class="text-white text-2xl font-medium bg-violet-600 rounded-full w-10 h-10 mx-auto flex justify-center items-center">
+        A</h1>
+      <h1 id="test" class="hidden text-violet-600 text-2xl font-medium p-4 flex-none mr-auto">Amanogawa</h1>
+      <hr class="rounded  w-2/3 mx-auto my-5 border-0">
+      <ul>
+        <li>
+          <a class="hover:text-violet-600" href="./../../index.html">Home</a>
+        </li>
+      </ul>
+      <hr class="rounded w-2/3 mx-auto my-5 border-violet-100 border-solid">
+      <ul>
+        <li>
+          <a class="hover:text-violet-600" href="./../../music/all.html">
+            Music
+          </a>
+        </li>
+        <li class="border-r-4 border-violet-600 border-solid w-full">
+          <a class="hover:text-violet-600" href="#">
+            Articles
+          </a>
+        </li>
+        <li>
+          <a class="hover:text-violet-600" href="#">
+            Films
+          </a>
+        </li>
+        <li>
+          <p class="text-slate-300">À venir</p>
+        </li>
+      </ul>
+      <hr class="rounded w-2/3 mx-auto my-5 border-violet-100 border-solid">
+      <ul>
+        <a class="hover:text-violet-600" href="#">
+          Projets
+        </a>
+      </ul>
+    </nav>
+  </menu>
+  <menu id="mobile-sidebar"
+    class="flex lg:hidden z-40 text-center grow transform -translate-x-full transition duration-350 ease-in-out absolute w-full h-screen ">
+    <nav class="sticky top-0 z-50 block lg:hidden absolute bg-white w-1/2 flex-none py-4" aria-label="Navigation">
+      <h1
+        class="text-white text-2xl font-medium bg-violet-600 rounded-full w-10 h-10 mx-auto flex justify-center items-center">
+        A</h1>
+      <h1 id="test" class="hidden text-violet-600 text-2xl font-medium p-4 flex-none mr-auto">Amanogawa</h1>
+      <hr class="rounded  w-2/3 mx-auto my-5 border-0">
+      <ul>
+        <li>
+          <a class="hover:text-violet-600" href="./../../index.html">Home</a>
+        </li>
+      </ul>
+      <hr class="rounded w-2/3 mx-auto my-5 border-violet-100 border-solid">
+      <ul>
+        <li>
+          <a class="hover:text-violet-600" href="./../../music/all.html">
+            Music
+          </a>
+        </li>
+        <li class="border-r-4 border-violet-600 border-solid w-full">
+          <a class="hover:text-violet-600" href="#">
+            Articles
+          </a>
+        </li>
+        <li>
+          <a class="hover:text-violet-600" href="#">
+            Films
+          </a>
+        </li>
+        <li>
+          <p class="text-slate-300">À venir</p>
+        </li>
+      </ul>
+      <hr class="rounded w-2/3 mx-auto my-5 border-violet-100 border-solid">
+      <ul>
+        <a class="hover:text-violet-600" href="#">
+          Projets
+        </a>
+      </ul>
+    </nav>
+    <div class="w-full absolute z-40 w-full h-full lg:hidden bg-gray-800 opacity-50" onclick="showMobileMenu()">
+    </div>
+  </menu>
+  <section id="page-content" class="flex-auto max-h-screen overflow-auto">
+    <header class="bg-white drop-shadow z-30 flex flex-nowrap items-center">
+      <button
+        class="mr-auto cursor-pointer lg:cursor-default inline-block m-4 text-violet-600 hover:text-violet-900 lg:hover:text-violet-600 text-2xl font-medium"
+        onclick="showMobileMenu()" aria-label="Open main menu">
+        <h1>
+          Amanogawa
+        </h1>
+      </button>
+      <div id="search"
+        class="select-none cursor-not-allowed rounded-full bg-slate-100 sm:w-48 h-8 flex justify-end items-center p-2 text-slate-400 border-2 border-slate-200">
+        Search
+      </div>
+      <button
+        class="relative flex flex-nowrap items-center px-4 mx-4 border-l-[1px] border-slate-200 border-solid cursor-pointer"
+        onclick="showProfileMenu()" aria-label="Open profile options">
+        <h2
+          class="text-white text-md font-medium bg-rose-600 rounded-full w-8 h-8 mr-2 flex justify-center items-center">
+          TS
+        </h2>
+        <p class="hidden sm:block hover:text-rose-600">Thibault Santonja</p>
+        <nav id="profile-menu"
+          class="absolute z-40 hidden w-full min-w-max p-2 bg-white rounded shadow mt-24 transition duration-350 ease-in-out flex flex-col right-0"
+          aria-label="Profile menu">
+          <a class="flex items-center justify-center hover:text-rose-600"><svg xmlns="http://www.w3.org/2000/svg"
+              class="icon icon-tabler icon-tabler-user mr-2" width="18" height="18" viewBox="0 0 24 24"
+              stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <path stroke="none" d="M0 0h24v24H0z" />
+              <circle cx="12" cy="7" r="4" />
+              <path d="M6 21v-2a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4v2" />
+            </svg>My profile</a>
+          <a class="flex items-center justify-center hover:text-rose-600">
+            <svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-logout mr-2" width="20"
+              height="20" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path stroke="none" d="M0 0h24v24H0z" />
+              <path d="M14 8v-2a2 2 0 0 0 -2 -2h-7a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h7a2 2 0 0 0 2 -2v-2" />
+              <path d="M7 12h14l-3 -3m0 6l3 -3" />
+            </svg>Logout</a>
+        </nav>
+      </button>
+    </header>
+    <div class="p-4">
+      <div>
+        <h2 class="font-bold text-xl text-center">5 Python Decorators I Use in Almost All My Data Science Projects</h2>
+      </div>
+      <div>
+        <h3 class="mt-8 text-xl font-bold">Decorators provide a new and convenient way for everything from caching to
+          sending not<span class="inline text-lime-600">if</span>ications</h3>
+      </div>
+      <figure>
+        <div role="button" tabindex="0">
+          <div>
+            <picture>
+              <source
+                srcset="https://miro.medium.com/v2/resize:fit:640/0*A4poWcVL8faAsMvC 640w, https://miro.medium.com/v2/resize:fit:720/0*A4poWcVL8faAsMvC 720w, https://miro.medium.com/v2/resize:fit:750/0*A4poWcVL8faAsMvC 750w, https://miro.medium.com/v2/resize:fit:786/0*A4poWcVL8faAsMvC 786w, https://miro.medium.com/v2/resize:fit:828/0*A4poWcVL8faAsMvC 828w, https://miro.medium.com/v2/resize:fit:1100/0*A4poWcVL8faAsMvC 1100w, https://miro.medium.com/v2/resize:fit:1400/0*A4poWcVL8faAsMvC 1400w"
+                sizes="(min-resolution: 4dppx) and (max-width: 700px) 50vw, (-webkit-min-device-pixel-ratio: 4) and (max-width: 700px) 50vw, (min-resolution: 3dppx) and (max-width: 700px) 67vw, (-webkit-min-device-pixel-ratio: 3) and (max-width: 700px) 65vw, (min-resolution: 2.5dppx) and (max-width: 700px) 80vw, (-webkit-min-device-pixel-ratio: 2.5) and (max-width: 700px) 80vw, (min-resolution: 2dppx) and (max-width: 700px) 100vw, (-webkit-min-device-pixel-ratio: 2) and (max-width: 700px) 100vw, 700px"
+                type="image/webp">
+              <source data-tes
+                srcset="https://miro.medium.com/v2/resize:fit:640/0*A4poWcVL8faAsMvC 640w, https://miro.medium.com/v2/resize:fit:720/0*A4poWcVL8faAsMvC 720w, https://miro.medium.com/v2/resize:fit:750/0*A4poWcVL8faAsMvC 750w, https://miro.medium.com/v2/resize:fit:786/0*A4poWcVL8faAsMvC 786w, https://miro.medium.com/v2/resize:fit:828/0*A4poWcVL8faAsMvC 828w, https://miro.medium.com/v2/resize:fit:1100/0*A4poWcVL8faAsMvC 1100w, https://miro.medium.com/v2/resize:fit:1400/0*A4poWcVL8faAsMvC 1400w"
+                sizes="(min-resolution: 4dppx) and (max-width: 700px) 50vw, (-webkit-min-device-pixel-ratio: 4) and (max-width: 700px) 50vw, (min-resolution: 3dppx) and (max-width: 700px) 67vw, (-webkit-min-device-pixel-ratio: 3) and (max-width: 700px) 65vw, (min-resolution: 2.5dppx) and (max-width: 700px) 80vw, (-webkit-min-device-pixel-ratio: 2.5) and (max-width: 700px) 80vw, (min-resolution: 2dppx) and (max-width: 700px) 100vw, (-webkit-min-device-pixel-ratio: 2) and (max-width: 700px) 100vw, 700px">
+              <img
+                alt="Python decorators are excellent way to give new behavior to our functions. It reduces code repetition and help us maintain clean codebase. They are helpful in data science projects in many ways from caching to sending not<span class="inline text-lime-600">if</span>ications."
+                loading="eager" src="https://miro.medium.com/v2/resize:fit:1400/0*A4poWcVL8faAsMvC" width="700"
+                height="466">
+            </picture>
+          </div>
+        </div>
+        <figcaption>Photo by <a href="https://unsplash.com/@miracleday?utm_source=medium&amp;utm_medium=referral"
+            rel="noopener ugc nofollow" target="_blank">Elena Mozhvilo</a> on <a
+            href="https://unsplash.com?utm_source=medium&amp;utm_medium=referral" rel="noopener ugc nofollow"
+            target="_blank">Unsplash</a>
+        </figcaption>
+      </figure>
+      <p>At first, every developer’s goal is to get things working. Slowly, we worry about
+        readability and scalability. This is when we first start thinking about decorators.</p>
+      <p>Decorators are an excellent way to give additional behavior to a function. And
+        there are little things we data scientists often need to inject into a function definition.</p>
+      <p>With decorators, you’d be surprised to see how much you can reduce code repetition
+        and improve readability. I certainly did.</p>
+      <p>Here are the five most common ones I use in almost every data-intensive project.
+      </p>
+      <h3 class="mt-8 text-xl font-bold">1. The retry decorator</h3>
+      <p>In data science projects and software development projects, there are so many
+        instances where we depend on external systems. Things are not in our control all the time.</p>
+      <div>
+        <a rel="noopener follow" target="_blank"
+          href="/the-prefect-way-to-automate-orchestrate-data-pipelines-d4465638bac2">
+          <div>
+            <div>
+              <h3 class="mt-8 text-xl font-bold">The Prefect Way to Automate &amp; Orchestrate Data
+                Pipelines</h3>
+              <div>
+                <h3>I am migrating all my ETL work from Airflow to this
+                  super-cool framework</h3>
+              </div>
+              <div>
+                <p>towardsdatascience.com</p>
+              </div>
+            </div>
+            <div>
+              <div>
+              </div>
+            </div>
+          </div>
+        </a>
+      </div>
+      <p>When an unexpected event occurs, we might want our code to wait a while, allowing
+        the external system to correct itself and rerun.</p>
+      <p>I prefer to implement this retry logic inside a python decorator so that I can
+        annotate any function to apply the retry behavior.</p>
+      <p>Here’s the code for a retry decorator.</p>
+<pre>
+<span>
+<span class="inline text-lime-600">import</span> time<br>
+<span class="inline text-lime-600">from</span> functools <span class="inline text-lime-600">import</span> wraps</span>
+</pre>
+<pre>
+<span><span class="inline text-lime-600">def </span>retry(max_tries=3, delay_seconds=1):<br>    <span class="inline text-lime-600">def </span>decorator_retry(func):<br>        @wraps(func)<br>        <span class="inline text-lime-600">def </span>wrapper_retry(*args, **kwargs):<br>            tries = 0<br>            while tries &lt; max_tries:<br>                <span class="inline text-lime-600">try</span>:<br>                    <span class="inline text-lime-600">return </span>func(*args, **kwargs)<br>                except Exception as e:<br>                    tries += 1<br>                    <span class="inline text-lime-600">if</span> tries == max_tries:<br>                        raise e<br>                    time.sleep(delay_seconds)<br>        <span class="inline text-lime-600">return </span>wrapper_retry<br>    <span class="inline text-lime-600">return </span>decorator_retry</span>
+<span>@retry(max_tries=5, delay_seconds=2)<br><span class="inline text-lime-600">def </span>call_dummy_api():<br>    response = requests.get("https://jsonplaceholder.typicode.com/todos/1")<br>    <span class="inline text-lime-600">return </span>response</span>
+</pre>
+      <p>In the above code, we try to get an API response. <span class="inline text-lime-600">if</span> it fails, we retry the same
+        task 5 times. Between each retry, we wait for 2 seconds.</p>
+      <h3 class="mt-8 text-xl font-bold">2. Caching function results</h3>
+      <p>Some parts of our codebase rarely change their behaviors. Yet, it may take a big
+        chunk of our computation power. In such situations, we can use a decorator to cache function calls.</p>
+      <div>
+        <a rel="noopener follow" target="_blank" href="/poetry-to-complement-virtualenv-44088cc78fd1">
+          <div>
+            <div>
+              <h3 class="mt-8 text-xl font-bold">You Are Not Still Using Virtualenv, Are You?</h3>
+              <div>
+                <h3>There is a better way to manage dependencies, package, and
+                  publish Python projects.</h3>
+              </div>
+              <div>
+                <p>towardsdatascience.com</p>
+              </div>
+            </div>
+            <div>
+              <div>
+              </div>
+            </div>
+          </div>
+        </a>
+      </div>
+      <p>The function will run only once <span class="inline text-lime-600">if</span> the inputs are the same. In every subsequent
+        run, the results will be pulled from the cache. Hence, we don’t have to perform expensive computations all the
+        time.</p>
+<pre>
+<span><span class="inline text-lime-600">def </span>memoize(func):<br>    cache = {}<br>    <span class="inline text-lime-600">def </span>wrapper(*args):<br>        <span class="inline text-lime-600">if</span> args in cache:<br>            <span class="inline text-lime-600">return </span>cache[args]<br>        <span class="inline text-lime-600">else</span>:<br>            result = func(*args)<br>            cache[args] = result<br>            <span class="inline text-lime-600">return </span>result<br>    <span class="inline text-lime-600">return </span>wrapper</span>
+</pre>
+      <p>The decorator uses a dictionary, stores the function args, and returns values. When
+        we execute this function, the decorated will check the dictionary for prior results. The actual function is
+        called only when there’s no stored value before.</p>
+      <p>The following is a Fibonacci number calculating a function. Since this is a
+        recurrent function, the same function called is performed multiple times. But with caching, we can speed up this
+        process.</p>
+<pre>
+<span>
+<span class="inline text-lime-600">@memoize</span>
+<br><span class="inline text-lime-600">def </span>fibonacci(n):<br>    <span class="inline text-lime-600"><span class="inline text-lime-600">if</span></span> n &lt;= <span class="inline text-lime-600">1</span>:<br>        <span class="inline text-lime-600">return</span> n<br>    <span class="inline text-lime-600"><span class="inline text-lime-600">else</span></span>:<br>        <span class="inline text-lime-600">return</span> fibonacci(n-<span class="inline text-lime-600">1</span>) + fibonacci(n-<span class="inline text-lime-600">2</span>)</span>
+</pre>
+      <p>Here are the execution times for this function with and without caching. Note that
+        the cached version only takes a faction of a millisecond to run, whereas the non-cached version almost took a
+        minute.</p>
+<pre>
+<span>Function slow_fibonacci took 53.05560088157654 seconds to run.<br>Function fast_fibonacci took 7.772445678710938e-05 seconds to run.</span>
+</pre>
+      <p>Using a dictionary to hold previous execution data is a straightforward approach.
+        However, there is a more sophisticated way to store caching data. You can use an in-memory database, such as
+        Redis.</p>
+      <h3 class="mt-8 text-xl font-bold">3. Timing functions</h3>
+      <p>This one is no surprise. When working with data-intensive functions, we’re eager to
+        learn how long it takes to run.</p>
+      <p>The usual way of doing this is by collecting two timestamps, one at the beginning
+        and another at the end of the function. We can then compute the duration and print it along with the return
+        values.</p>
+      <p>But doing this again and again for multiple functions is a hassle.</p>
+      <p>Instead, we can have a decorator do it. We can annotate any function that needs a
+        duration printed.</p>
+      <p>Here’s an example Python decorator that prints the running time of a function when
+        it’s called:</p>
+<pre>
+<span>
+<span class="inline text-lime-600">import</span> time<br>
+<span class="inline text-lime-600">def</span> <span class="inline text-lime-600">timing_decorator</span>(<span class="inline text-lime-600">func</span>):<br>    
+  <span class="inline text-lime-600">def</span> <span class="inline text-lime-600">wrapper</span>(<span class="inline text-lime-600">*args, **kwargs</span>):<br>        start_time = time.time()<br>        result = func(*args, **kwargs)<br>        end_time = time.time()<br>        
+    <span class="inline text-lime-600">print</span>(<span class="inline text-lime-600">f"Function </span><span class="inline text-lime-600"><span class="inline text-lime-600">{func.__name__}</span></span><span class="inline text-lime-600"> took </span><span class="inline text-lime-600"><span class="inline text-lime-600">{end_time - start_time}</span></span><span class="inline text-lime-600"> seconds to run."</span>)<br>        
+    <span class="inline text-lime-600">return</span> result<br>    
+  <span class="inline text-lime-600">return</span> wrapper</span>
+</pre>  
+      <p>You can use this decorator to time the execution of a function:</p>
+<pre>
+<span>
+<span class="inline text-lime-600">@timing_decorator</span><br>
+<span class="inline text-lime-600">def</span> <span class="inline text-lime-600">my_function</span>():<br>    <span class="inline text-lime-600"># some code here</span>
+<br>    time.sleep(<span class="inline text-lime-600">1</span>)  <span class="inline text-lime-600"># simulate some time-consuming operation</span>
+<br>    <span class="inline text-lime-600">return</span>
+</span>
+</pre>
+      <p>Calling the function would print the time it takes to run.</p>
+<pre>
+<span>my_function()<br>
+<br>
+<span class="inline text-lime-600">&gt;&gt;&gt; </span>Function my_function took <span class="inline text-lime-600">1.0019128322601318</span> seconds to run.</span>
+</pre>
+      <h3 class="mt-8 text-xl font-bold">4. Logging function calls</h3>
+      <p>This one is very much an extension of the previous decorator. But it has some
+        particular uses.</p>
+      <p><span class="inline text-lime-600">if</span> you follow software design principles, you’d appreciate the single
+        responsibility principle. This essentially means each function will have its one and only one responsibility.
+      </p>
+      <div>
+        <a rel="noopener follow" target="_blank" href="/plotly-dashboards-in-python-28a3bb83702c">
+          <div>
+            <div>
+              <h3 class="mt-8 text-xl font-bold">This is How I Create Dazzling Dashboards Purely in
+                Python.</h3>
+              <div>
+                <h3>Plotly dash apps are the fastest way to build
+                  production-grade dashboards in python.</h3>
+              </div>
+              <div>
+                <p>towardsdatascience.com</p>
+              </div>
+            </div>
+            <div>
+              <div>
+              </div>
+            </div>
+          </div>
+        </a>
+      </div>
+      <p>When you design your code in such a way, you’d also want to log the execution
+        information of your functions. This is where logging decorators come in handy.</p>
+      <p>The following example illustrates this.</p>
+<pre>
+<span>
+<span class="inline text-lime-600">import</span> logging<br>
+<span class="inline text-lime-600">import</span> functools<br>
+<br>logging.basicConfig(level=logging.INFO)<br>
+<br>
+<span class="inline text-lime-600">def</span> <span class="inline text-lime-600">log_execution</span>(<span class="inline text-lime-600">func</span>):<br>
+<span class="inline text-lime-600">    @functools.wraps(<span class="inline text-lime-600">func</span>)</span>
+<br>    <span class="inline text-lime-600">def</span> <span class="inline text-lime-600">wrapper</span>(<span class="inline text-lime-600">*args, **kwargs</span>):<br>        logging.info(<span class="inline text-lime-600">f"Executing <span class="inline text-lime-600">{func.__name__}</span>"</span>)<br>        result = func(*args, **kwargs)<br>        logging.info(<span class="inline text-lime-600">f"Finished executing <span class="inline text-lime-600">{func.__name__}</span>"</span>)<br>        <span class="inline text-lime-600">return</span> result<br>    <span class="inline text-lime-600">return</span> wrapper<br>
+<br>
+<span class="inline text-lime-600">@log_execution</span>
+<br>
+<span class="inline text-lime-600">def</span> <span class="inline text-lime-600">extract_data</span>(<span class="inline text-lime-600">source</span>):<br>    <span class="inline text-lime-600"># extract data from source</span>
+<br>    data = ...<br>
+<br>    <span class="inline text-lime-600">return</span> data<br>
+<br>
+<span class="inline text-lime-600">@log_execution</span>
+<br>
+<span class="inline text-lime-600">def</span> <span class="inline text-lime-600">transform_data</span>(<span class="inline text-lime-600">data</span>):<br>    <span class="inline text-lime-600"># transform data</span>
+<br>    transformed_data = ...<br>
+<br>    <span class="inline text-lime-600">return</span> transformed_data<br>
+<br>
+<span class="inline text-lime-600">@log_execution</span>
+<br>
+<span class="inline text-lime-600">def</span> <span class="inline text-lime-600">load_data</span>(<span class="inline text-lime-600">data, target</span>):<br>    <span class="inline text-lime-600"># load data into target</span>
+<br>    ...<br>
+<br>
+<span class="inline text-lime-600">def</span> <span class="inline text-lime-600">main</span>():<br>    <span class="inline text-lime-600"># extract data</span>
+<br>    data = extract_data(source)<br>
+<br>    <span class="inline text-lime-600"># transform data</span>
+<br>    transformed_data = transform_data(data)<br>
+<br>    <span class="inline text-lime-600"># load data</span>
+<br>    load_data(transformed_data, target)</span>
+</pre>
+      <p>The above code is a simpl<span class="inline text-lime-600">if</span>ied version of an ETL pipeline. We have three separate
+        functions to handle each extract, transform, and load. We have wrapped each of them using our
+        <code>log_execution</code> decorator.
+      </p>
+      <p>Now, whenever the code is executed, you’d see an output similar to this:</p>
+<pre>
+<span>INFO:root:Executing extract_data<br>INFO:root:Finished executing extract_data<br>INFO:root:Executing transform_data<br>INFO:root:Finished executing transform_data<br>INFO:root:Executing load_data<br>INFO:root:Finished executing load_data</span>
+</pre>
+      <p>We could also have the execution time printed inside this decorator. But I’d love
+        to have them both in separate decorators. That way, I can choose which one (or both) to use for a function.</p>
+      <p>Here’s how to use multiple decorators on a single function.</p>
+<pre>
+<span>
+<span class="inline text-lime-600">@log_execution</span>
+<br>
+<span class="inline text-lime-600">@timing_decorator</span>
+<br>
+<span class="inline text-lime-600">def</span> <span class="inline text-lime-600">my_function</span>(<span class="inline text-lime-600">x, y</span>):<br>    time.sleep(<span class="inline text-lime-600">1</span>)<br>    <span class="inline text-lime-600">return</span> x + y</span>
+</pre>
+      <h3 class="mt-8 text-xl font-bold">5. Not<span class="inline text-lime-600">if</span>ication decorator</h3>
+      <p>Finally, a very useful decorator in production systems is the not<span class="inline text-lime-600">if</span>ication
+        decorator.</p>
+      <p>Once again, even with several retries, even a well-tested codebase fails. And when
+        that happens, we need to inform someone about it to take quick action.</p>
+      <p>This isn’t new <span class="inline text-lime-600">if</span> you’ve ever built a data pipeline and hoped it would work fine
+        forever.</p>
+      <p>The following decorator sends an email whenever the execution of the inner function
+        fails. It doesn’t have to be an email not<span class="inline text-lime-600">if</span>ication in your case. You can configure it to send a Teams/slack
+        not<span class="inline text-lime-600">if</span>ication.</p>
+<pre>
+<span>
+<span class="inline text-lime-600">import</span> smtplib<br>
+<span class="inline text-lime-600">import</span> traceback<br>
+<span class="inline text-lime-600">from</span> email.mime.text <span class="inline text-lime-600">import</span> MIMEText<br>
+<br>
+<span class="inline text-lime-600">def</span> <span class="inline text-lime-600">email_on_failure</span>(<span class="inline text-lime-600">sender_email, password, recipient_email</span>):<br>    <span class="inline text-lime-600">def</span> <span class="inline text-lime-600">decorator</span>(<span class="inline text-lime-600">func</span>):<br>        <span class="inline text-lime-600">def</span> <span class="inline text-lime-600">wrapper</span>(<span class="inline text-lime-600">*args, **kwargs</span>):<br>            <span class="inline text-lime-600">try</span>:<br>                <span class="inline text-lime-600">return</span> func(*args, **kwargs)<br>            <span class="inline text-lime-600">except</span> Exception <span class="inline text-lime-600">as</span> e:<br>                <span class="inline text-lime-600"># format the error message and traceback</span>
+<br>                err_msg = <span class="inline text-lime-600">f"Error: <span class="inline text-lime-600">{<span class="inline text-lime-600">str</span>(e)}</span>\n\nTraceback:\n<span class="inline text-lime-600">{traceback.format_exc()}</span>"</span>
+<br>                <br>                <span class="inline text-lime-600"># create the email message</span>
+<br>                message = MIMEText(err_msg)<br>                message[<span class="inline text-lime-600">'Subject'</span>] = <span class="inline text-lime-600">f"<span class="inline text-lime-600">{func.__name__}</span> failed"</span>
+<br>                message[<span class="inline text-lime-600">'From'</span>] = sender_email<br>                message[<span class="inline text-lime-600">'To'</span>] = recipient_email<br>                <br>                <span class="inline text-lime-600"># send the email</span>
+<br>                <span class="inline text-lime-600">with</span> smtplib.SMTP_SSL(<span class="inline text-lime-600">'smtp.gmail.com'</span>, <span class="inline text-lime-600">465</span>) <span class="inline text-lime-600">as</span> smtp:<br>                    smtp.login(sender_email, password)<br>                    smtp.sendmail(sender_email, recipient_email, message.as_string())<br>                    <br>                <span class="inline text-lime-600"># re-raise the exception</span>
+<br>                <span class="inline text-lime-600">raise</span>
+<br>                <br>        <span class="inline text-lime-600">return</span> wrapper<br>    <br>    <span class="inline text-lime-600">return</span> decorator<br>
+<br>
+<span class="inline text-lime-600">@email_on_failure(<span class="inline text-lime-600">sender_email=<span class="inline text-lime-600">'your_email@gmail.com'</span>, password=<span class="inline text-lime-600">'your_password'</span>, recipient_email=<span class="inline text-lime-600">'recipient_email@gmail.com'</span>
+</span>)</span>
+<br>
+<span class="inline text-lime-600">def</span> <span class="inline text-lime-600">my_function</span>():<br>    <span class="inline text-lime-600"># code that might fail</span>
+</span>
+</pre>
+      <h3 class="mt-8 text-xl font-bold">Conclusion</h3>
+      <p>Decorators are a very convenient way to apply new behavior to our functions.
+        Without them, there will be a lot of code repetition.</p>
+      <p>In this post, I’ve discussed my most frequently used decorators. You can extend
+        these for your spec<span class="inline text-lime-600">if</span>ic needs. For instance, you can use a Redis server to store cache responses instead of
+        dictionaries. This will give you more control over the data, such as persistence. Or you could tweak the code to
+        increase the waiting time in the retry decorator progressively.</p>
+      <p>In all of my projects, I use some version of these decorators. Though their
+        behavior d<span class="inline text-lime-600">if</span>fers slightly, these are the common goals I frequently use decorators for.</p>
+      <p>I hope this post helps you.</p>
+    </div>
+  </section>
+  <script>
+    let mobileSideBar = document.getElementById("mobile-sidebar");
+    let mobileMenuVisible = false
+    let profileMenu = document.getElementById("profile-menu");
+    let profileMenuVisible = false
+    const showMobileMenu = () => {
+      mobileMenuVisible = !mobileMenuVisible
+      if (mobileMenuVisible) {
+        mobileSideBar.style.transform = "translateX(0)";
+      } else {
+        mobileSideBar.style.transform = "translateX(-100%)";
+      }
+    };
+    const showProfileMenu = () => {
+      profileMenuVisible = !profileMenuVisible
+      if (profileMenuVisible) {
+        profileMenu.style.transform = "translateY(0)";
+      } else {
+        profileMenu.style.transform = "translateY(-100%)";
+      }
+      profileMenu.classList.toggle("hidden");
+    };
+  </script>
+</body>
+</html>
