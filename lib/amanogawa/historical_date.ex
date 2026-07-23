@@ -84,6 +84,19 @@ defmodule Amanogawa.HistoricalDate do
   end
 
   @doc """
+  The lower bound of `year` (the age of the universe): the single source of
+  truth other modules validating a year against the same domain (`AmanogawaWeb.
+  Params.EventsQuery`, `AmanogawaWeb.Params.ExploreParams`) delegate to,
+  rather than duplicating the literal.
+  """
+  @spec min_year() :: integer()
+  def min_year, do: @min_year
+
+  @doc "The upper bound of `year` (a near future no historical event can exceed)."
+  @spec max_year() :: integer()
+  def max_year, do: @max_year
+
+  @doc """
   Validating constructor. Returns `{:ok, date}` or `{:error, changeset}`.
   """
   @spec new(map()) :: {:ok, t()} | {:error, Ecto.Changeset.t()}

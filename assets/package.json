@@ -1,6 +1,9 @@
 {
   "name": "amanogawa-assets",
   "private": true,
+  "scripts": {
+    "test": "node --test js/map/*.test.js"
+  },
   "dependencies": {
     "maplibre-gl": "5.24.0"
   }

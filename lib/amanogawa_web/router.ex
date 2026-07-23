@@ -23,7 +23,7 @@ defmodule AmanogawaWeb.Router do
   scope "/", AmanogawaWeb do
     pipe_through :browser
 
-    live "/", HomeLive
+    live "/", ExploreLive
   end
 
   scope "/api", AmanogawaWeb.Controllers.Api do

@@ -22,9 +22,11 @@ defmodule AmanogawaWeb.Params.EventsQuery do
           limit: pos_integer()
         }
 
-  # Age of the universe (Wikidata's deepest precision-0 dates), the lower
-  # bound of every temporal query this project can legitimately serve.
-  @min_year -13_800_000_000
+  # Lower bound of every temporal query this project can legitimately
+  # serve: the same domain `Amanogawa.HistoricalDate` enforces on dates
+  # themselves, shared here rather than duplicated so the two can never
+  # drift apart (`AmanogawaWeb.Params.ExploreParams` shares it too).
+  @min_year Amanogawa.HistoricalDate.min_year()
 
   @default_limit 500
   @max_limit 2000
