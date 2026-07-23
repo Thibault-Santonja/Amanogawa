@@ -116,6 +116,51 @@ defmodule AmanogawaWeb.Params.ExploreParamsTest do
     end
   end
 
+  describe "valid_window?/2 (issue #021)" do
+    test "happy path: a well-formed, ordered window inside the domain is valid" do
+      assert ExploreParams.valid_window?(-500, 500)
+    end
+
+    test "edge case: a window narrower than the minimum width is invalid" do
+      refute ExploreParams.valid_window?(500, 500)
+    end
+
+    test "edge case: an inverted window (from > to) is invalid" do
+      refute ExploreParams.valid_window?(500, -500)
+    end
+
+    test "error case: non-integer bounds are invalid, never raise" do
+      refute ExploreParams.valid_window?("abc", "def")
+      refute ExploreParams.valid_window?(1.5, 2.5)
+      refute ExploreParams.valid_window?(nil, nil)
+    end
+
+    test "error case: a bound outside the domain is invalid" do
+      refute ExploreParams.valid_window?(@min_year - 1, 500)
+      refute ExploreParams.valid_window?(-500, @current_year + 1)
+    end
+
+    test "limit case: a window exactly at the minimum width is valid" do
+      assert ExploreParams.valid_window?(500, 501)
+    end
+
+    test "limit case: bounds exactly on the domain's own edges are valid" do
+      assert ExploreParams.valid_window?(@min_year, @current_year)
+    end
+
+    property "invariant: valid_window?/2 accepts exactly the well-formed, in-domain, minimum-width windows" do
+      check all from <- integer(),
+                to <- integer() do
+        expected =
+          from >= @min_year and from <= @current_year and
+            to >= @min_year and to <= @current_year and
+            to - from >= 1
+
+        assert ExploreParams.valid_window?(from, to) == expected
+      end
+    end
+  end
+
   describe "to_query/1" do
     test "round-trips a nominal state through parse/1" do
       state = %{

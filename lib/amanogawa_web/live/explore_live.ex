@@ -25,6 +25,7 @@ defmodule AmanogawaWeb.ExploreLive do
 
   alias Amanogawa.Atlas
   alias AmanogawaWeb.Components.EventPanel
+  alias AmanogawaWeb.Components.TimeLegend
   alias AmanogawaWeb.Params.ExploreParams
   alias AmanogawaWeb.RateLimit
 
@@ -201,15 +202,26 @@ defmodule AmanogawaWeb.ExploreLive do
 
   def handle_event("map_moved", _params, socket), do: {:noreply, socket}
 
-  def handle_event("set_time_window", %{"from" => from, "to" => to}, socket) do
+  # Client -> server intent (issue #021), pushed by `TimelineHook` after
+  # its 150ms drag debounce (`assets/js/hooks/timeline.js`'s `pushWindow`).
+  # Deliberately named differently from `set_time_window`, the server ->
+  # client push consumed by both hooks (`maybe_push_time_window/3` below):
+  # the two directions used to share one name, which is exactly the
+  # ambiguity `.claude/rules/liveview.md`'s "explicit verb" convention
+  # exists to prevent. `replace: true` (mirroring `map_moved`'s own patch
+  # below): a drag debounces at 150ms but can still patch several times
+  # per gesture, and a `push_patch` per tick would otherwise flood the
+  # browser history with intermediate windows nobody would ever want to
+  # navigate back through individually.
+  def handle_event("select_time_window", %{"from" => from, "to" => to}, socket) do
     if ExploreParams.valid_window?(from, to) do
-      {:noreply, push_patch(socket, to: patch_path(socket, from: from, to: to))}
+      {:noreply, push_patch(socket, to: patch_path(socket, from: from, to: to), replace: true)}
     else
       {:noreply, socket}
     end
   end
 
-  def handle_event("set_time_window", _params, socket), do: {:noreply, socket}
+  def handle_event("select_time_window", _params, socket), do: {:noreply, socket}
 
   @impl true
   def render(assigns) do
@@ -235,14 +247,20 @@ defmodule AmanogawaWeb.ExploreLive do
         (pushed by `push_view_state/3` below, the same event the map hook
         already consumes) keeps it in sync with the LiveView-owned state
         afterwards. --%>
-        <div
-          id="timeline-hook"
-          phx-hook="TimelineHook"
-          phx-update="ignore"
-          class="h-full w-full"
-          data-from={@from}
-          data-to={@to}
-        >
+        <div class="relative h-full w-full">
+          <div
+            id="timeline-hook"
+            phx-hook="TimelineHook"
+            phx-update="ignore"
+            class="h-full w-full"
+            data-from={@from}
+            data-to={@to}
+          >
+          </div>
+          <%!-- Outside the hook's `phx-update="ignore"` subtree (issue #022):
+          LiveView re-renders this on every `from`/`to` assign change, unlike
+          the hook's own SVG, which d3 owns entirely. --%>
+          <TimeLegend.time_legend from={@from} to={@to} />
         </div>
       </:timeline>
     </Layouts.app>

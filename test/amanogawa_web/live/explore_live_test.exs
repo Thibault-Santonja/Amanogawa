@@ -244,11 +244,13 @@ defmodule AmanogawaWeb.ExploreLiveTest do
     end
   end
 
-  describe "handle_event: set_time_window" do
-    test "a valid payload patches the URL with from/to", %{conn: conn} do
+  describe "handle_event: select_time_window (issue #021)" do
+    test "a valid payload patches the URL with from/to, replacing history", %{conn: conn} do
       {:ok, lv, _html} = live(conn, ~p"/")
 
-      lv |> element("#map") |> render_hook("set_time_window", %{"from" => -200, "to" => 200})
+      lv
+      |> element("#timeline-hook")
+      |> render_hook("select_time_window", %{"from" => -200, "to" => 200})
 
       assert_patch(lv, ~p"/?from=-200&to=200")
     end
@@ -256,7 +258,7 @@ defmodule AmanogawaWeb.ExploreLiveTest do
     test "a payload missing from/to entirely is ignored, not a crash", %{conn: conn} do
       {:ok, lv, _html} = live(conn, ~p"/")
 
-      lv |> element("#map") |> render_hook("set_time_window", %{})
+      lv |> element("#timeline-hook") |> render_hook("select_time_window", %{})
 
       refute_patched(lv)
       assert Process.alive?(lv.pid)
@@ -265,10 +267,56 @@ defmodule AmanogawaWeb.ExploreLiveTest do
     test "from > to is rejected without crashing", %{conn: conn} do
       {:ok, lv, _html} = live(conn, ~p"/")
 
-      lv |> element("#map") |> render_hook("set_time_window", %{"from" => 200, "to" => -200})
+      lv
+      |> element("#timeline-hook")
+      |> render_hook("select_time_window", %{"from" => 200, "to" => -200})
 
       refute_patched(lv)
       assert Process.alive?(lv.pid)
+    end
+
+    test "non-numeric bounds are rejected without crashing", %{conn: conn} do
+      {:ok, lv, _html} = live(conn, ~p"/")
+
+      lv
+      |> element("#timeline-hook")
+      |> render_hook("select_time_window", %{"from" => "abc", "to" => "def"})
+
+      refute_patched(lv)
+      assert Process.alive?(lv.pid)
+    end
+
+    test "a window narrower than the minimum width is rejected", %{conn: conn} do
+      {:ok, lv, _html} = live(conn, ~p"/")
+
+      lv
+      |> element("#timeline-hook")
+      |> render_hook("select_time_window", %{"from" => 500, "to" => 500})
+
+      refute_patched(lv)
+      assert Process.alive?(lv.pid)
+    end
+
+    test "a window out of the astronomical domain is rejected", %{conn: conn} do
+      {:ok, lv, _html} = live(conn, ~p"/")
+      max_year = Date.utc_today().year
+
+      lv
+      |> element("#timeline-hook")
+      |> render_hook("select_time_window", %{"from" => -200, "to" => max_year + 1})
+
+      refute_patched(lv)
+      assert Process.alive?(lv.pid)
+    end
+
+    test "a window exactly at the minimum width is accepted", %{conn: conn} do
+      {:ok, lv, _html} = live(conn, ~p"/")
+
+      lv
+      |> element("#timeline-hook")
+      |> render_hook("select_time_window", %{"from" => 500, "to" => 501})
+
+      assert_patch(lv, ~p"/?from=500&to=501")
     end
   end
 
@@ -371,6 +419,32 @@ defmodule AmanogawaWeb.ExploreLiveTest do
       {:ok, lv, _html} = live(conn, ~p"/")
 
       refute has_element?(lv, "#event-panel")
+    end
+  end
+
+  describe "time legend (issue #022)" do
+    test "renders the gradient legend with the default window's bounds", %{conn: conn} do
+      {:ok, lv, html} = live(conn, ~p"/")
+
+      assert has_element?(lv, "#time-legend")
+
+      assert html =~
+               "background-image: linear-gradient(to right, var(--time-start-color), var(--time-end-color));"
+    end
+
+    test "the legend's bounds update after select_time_window", %{conn: conn} do
+      {:ok, lv, _html} = live(conn, ~p"/")
+
+      # A narrow window (span 9 years, below `format_axis_year/2`'s
+      # 100-year century threshold) so both bounds render as exact years,
+      # easy to assert on individually.
+      lv
+      |> element("#timeline-hook")
+      |> render_hook("select_time_window", %{"from" => 1900, "to" => 1909})
+
+      html = render(lv)
+      assert html =~ "1900"
+      assert html =~ "1909"
     end
   end
 

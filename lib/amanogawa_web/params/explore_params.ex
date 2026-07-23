@@ -46,6 +46,14 @@ defmodule AmanogawaWeb.Params.ExploreParams do
 
   @min_year HistoricalDate.min_year()
 
+  # Minimum accepted width, in years, of a client-pushed time window
+  # (issue #021's own default): mirrors, but is deliberately not shared
+  # with, the JS drag gesture's own minimum
+  # (`assets/js/hooks/timeline.js`'s `MIN_WINDOW_WIDTH_YEARS`), since the
+  # two enforce the same rule against different domains (see
+  # `valid_window?/2`'s own doc).
+  @min_window_width_years 1
+
   # Mirrors the map hook's initial camera (`assets/js/hooks/map_hook.js`,
   # `INITIAL_CENTER`/`INITIAL_ZOOM`): kept in sync by hand, the two cannot
   # share a literal across the language boundary.
@@ -105,17 +113,41 @@ defmodule AmanogawaWeb.Params.ExploreParams do
   end
 
   @doc """
-  True when `from`/`to` are both valid years and `from <= to`. Used by
-  `AmanogawaWeb.ExploreLive` to validate a client-pushed `set_time_window`
-  payload, for the same "leave state unchanged on invalid input" reason as
-  `valid_view?/3`.
+  True when `from`/`to` are both integers within the domain (inclusive),
+  strictly ordered, and at least `#{@min_window_width_years} an` apart
+  (issue #021's own minimum window width). Used by
+  `AmanogawaWeb.ExploreLive` to validate a client-pushed
+  `select_time_window` payload, for the same "leave state unchanged on
+  invalid input" reason as `valid_view?/3`: unlike `parse/1`, this never
+  falls back to a default, a hostile or malformed payload is rejected
+  outright, so the caller can distinguish "apply this window" from "ignore
+  this request" and never partially applies one bound without the other.
+
+  The domain here is the same one `parse/1` clamps a URL's `from`/`to`
+  into (`Amanogawa.HistoricalDate`'s full astronomical range): wider than
+  `Amanogawa.Atlas.TimeScale`'s own default rendering domain
+  (`-300_000..2_100`), which only bounds what the timeline's symlog scale
+  can *position on the strip* (`assets/js/lib/time_window.js`'s own
+  header comment). A window this function accepts is always valid state
+  to store and query by; whether the timeline hook's drag could have
+  produced it unassisted is a separate, narrower question this function
+  does not answer.
+
+  ## Examples
+
+      iex> AmanogawaWeb.Params.ExploreParams.valid_window?(-500, 500)
+      true
+
+      iex> AmanogawaWeb.Params.ExploreParams.valid_window?(500, -500)
+      false
+
   """
   @spec valid_window?(term(), term()) :: boolean()
   def valid_window?(from, to) do
     is_integer(from) and is_integer(to) and
       from >= @min_year and from <= current_year() and
       to >= @min_year and to <= current_year() and
-      from <= to
+      to - from >= @min_window_width_years
   end
 
   @doc """

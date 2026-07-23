@@ -27,7 +27,8 @@ import {
   eventsCircleLayer,
   eventsLabelLayer,
   eventsSource,
-  textOpacityExpression
+  textOpacityExpression,
+  windowedOpacityExpression
 } from "../map/event_layers.js"
 import {createHoverCard} from "../map/hover_card.js"
 import {fadeTransition} from "../map/style_utils.js"
@@ -40,6 +41,7 @@ import {
   linksLineLayer,
   linksSource
 } from "../map/link_layers.js"
+import {TIME_WINDOW_PREVIEW_EVENT, mapLibreColorExpression, readGradientTokens} from "../lib/time_gradient.js"
 import darkStyle from "../../vendor/map-styles/dark.json"
 import lightStyle from "../../vendor/map-styles/light.json"
 
@@ -72,7 +74,10 @@ const HOVER_DELAY_MS = 150
 
 // Reads the palette tokens the events and event-links layers are styled
 // with (`assets/css/app.css`): never a hardcoded hex value when a token
-// exists.
+// exists. `gradientTokens` (issue #022) is read through the shared
+// `readGradientTokens` (`assets/js/lib/time_gradient.js`), the same
+// function `TimelineHook` and `AmanogawaWeb.Components.TimeLegend`'s CSS
+// ultimately derive from: never re-parsed or hardcoded here.
 function readDesignTokens() {
   const rootStyle = getComputedStyle(document.documentElement)
 
@@ -80,6 +85,7 @@ function readDesignTokens() {
     accentColor: rootStyle.getPropertyValue("--palette-accent").trim(),
     haloColor: rootStyle.getPropertyValue("--palette-surface").trim(),
     textColor: rootStyle.getPropertyValue("--palette-text").trim(),
+    gradientTokens: readGradientTokens(document.documentElement),
     linkColors: {
       part_of: rootStyle.getPropertyValue("--palette-link-part-of").trim(),
       follows: rootStyle.getPropertyValue("--palette-link-follows").trim(),
@@ -100,6 +106,13 @@ const MapHook = {
     this.reducedMotion = this.motionQuery.matches
 
     this.timeWindow = {from: null, to: null}
+    // The window used for the temporal gradient's color/opacity (issue
+    // #022): normally identical to `this.timeWindow`, but updated
+    // immediately (no debounce, no refetch) from `TimelineHook`'s local
+    // drag preview (`onWindowPreview` below) so the map recolors in real
+    // time while the user drags, ahead of the server round trip that
+    // eventually updates `this.timeWindow` and triggers `fetchEvents`.
+    this.previewWindow = {from: null, to: null}
     this.abortController = null
     this.eventsLoadedOnce = false
     this.selectedQid = null
@@ -259,11 +272,32 @@ const MapHook = {
     // and re-fetching identical data on every such patch is wasted work
     // (issue security-review #2).
     this.handleEvent("set_time_window", ({from, to}) => {
+      // The committed window always also becomes the preview window: a
+      // server-pushed window (URL navigation, shared link) is authoritative
+      // and must recolor the map even if no drag preview ever fired for
+      // it (`TimelineHook` may not even be mounted yet on first load).
+      this.previewWindow = {from, to}
+      this.updateGradientPaint()
+
       if (from === this.timeWindow.from && to === this.timeWindow.to) return
 
       this.timeWindow = {from, to}
       this.fetchEvents()
     })
+
+    // Consumed from `TimelineHook`'s local drag rendering (issue #022,
+    // `assets/js/lib/time_gradient.js`'s `TIME_WINDOW_PREVIEW_EVENT`): a
+    // pure style update (`setPaintProperty`), never a data refetch, so it
+    // stays free during a drag that has not yet crossed the 150ms debounce
+    // (`.claude/rules/liveview.md`).
+    this.onWindowPreview = event => {
+      const {from, to} = event.detail
+      if (from === this.previewWindow.from && to === this.previewWindow.to) return
+
+      this.previewWindow = {from, to}
+      this.updateGradientPaint()
+    }
+    window.addEventListener(TIME_WINDOW_PREVIEW_EVENT, this.onWindowPreview)
 
     // Consumed by the LiveView Explore (#018): a server-pushed camera move
     // (URL navigation, shared link). Flagged as programmatic so the
@@ -299,8 +333,58 @@ const MapHook = {
     const tokens = readDesignTokens()
 
     this.map.addSource(EVENTS_SOURCE_ID, eventsSource())
-    this.map.addLayer(eventsCircleLayer({...tokens, reducedMotion: this.reducedMotion}))
+    this.map.addLayer(
+      eventsCircleLayer({
+        ...tokens,
+        reducedMotion: this.reducedMotion,
+        circleColor: this.circleColorExpression(tokens)
+      })
+    )
     this.map.addLayer(eventsLabelLayer({...tokens, reducedMotion: this.reducedMotion}))
+  },
+
+  // The temporal-gradient `circle-color` for `this.previewWindow`, or a
+  // plain accent color while no window is known yet (the brief gap
+  // between `mounted()` and the first `set_time_window`/drag preview):
+  // never a third, hardcoded color, per issue #022's own point d'attention.
+  circleColorExpression(tokens) {
+    const {from, to} = this.previewWindow
+    if (from === null || to === null) return tokens.accentColor
+
+    return mapLibreColorExpression(from, to, tokens.gradientTokens)
+  },
+
+  // The `circle-opacity` for `this.previewWindow`: a plain full-visibility
+  // constant while no window is known yet (mirroring `circleColorExpression`'s
+  // own fallback), the windowed in/out expression otherwise. Shared by the
+  // first-load fade-in (`setEventsData`) and every later window update
+  // (`updateGradientPaint`) so the two never compute it differently.
+  circleOpacityExpression() {
+    const {from, to} = this.previewWindow
+    if (from === null || to === null) return VISIBLE_OPACITY
+
+    return windowedOpacityExpression(from, to)
+  },
+
+  // Re-applies `circle-color` (and, once the first load's fade-in has
+  // happened, `circle-opacity`) for `this.previewWindow` on the existing
+  // layer: `setPaintProperty`, never a source reload or a layer
+  // recreation (issue #022's own point d'attention: MapLibre cannot read
+  // CSS custom properties, so the tokens are re-resolved here, but the
+  // GeoJSON source data itself is untouched).
+  updateGradientPaint() {
+    if (!this.map.getLayer(EVENTS_CIRCLE_LAYER_ID)) return
+
+    const tokens = readDesignTokens()
+    this.map.setPaintProperty(
+      EVENTS_CIRCLE_LAYER_ID,
+      "circle-color",
+      this.circleColorExpression(tokens)
+    )
+
+    if (!this.eventsLoadedOnce) return
+
+    this.map.setPaintProperty(EVENTS_CIRCLE_LAYER_ID, "circle-opacity", this.circleOpacityExpression())
   },
 
   // Adds the `event-links` source and its line layer below the events
@@ -401,7 +485,8 @@ const MapHook = {
 
     if (!this.eventsLoadedOnce) {
       this.eventsLoadedOnce = true
-      this.map.setPaintProperty(EVENTS_CIRCLE_LAYER_ID, "circle-opacity", VISIBLE_OPACITY)
+
+      this.map.setPaintProperty(EVENTS_CIRCLE_LAYER_ID, "circle-opacity", this.circleOpacityExpression())
       this.map.setPaintProperty(EVENTS_LABEL_LAYER_ID, "text-opacity", textOpacityExpression())
     }
   },
@@ -612,6 +697,7 @@ const MapHook = {
 
     this.darkScheme.removeEventListener("change", this.onSchemeChange)
     this.motionQuery.removeEventListener("change", this.onMotionChange)
+    window.removeEventListener(TIME_WINDOW_PREVIEW_EVENT, this.onWindowPreview)
 
     this.map.remove()
   }
