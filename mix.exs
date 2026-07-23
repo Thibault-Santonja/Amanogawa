@@ -5,7 +5,7 @@ defmodule Amanogawa.MixProject do
     [
       app: :amanogawa,
       version: "0.1.0",
-      elixir: "~> 1.17",
+      elixir: "~> 1.19",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
@@ -65,13 +65,6 @@ defmodule Amanogawa.MixProject do
        app: false,
        compile: false,
        depth: 1},
-      {:daisyui,
-       github: "saadeghi/daisyui",
-       tag: "v5.5.20",
-       sparse: "packages/bundle",
-       app: false,
-       compile: false,
-       depth: 1},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
       {:gettext, "~> 1.0"},
@@ -99,20 +92,26 @@ defmodule Amanogawa.MixProject do
       "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"],
-      "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
+      "assets.setup": [
+        "tailwind.install --if-missing",
+        "esbuild.install --if-missing",
+        "cmd --cd assets npm install --no-fund --no-audit"
+      ],
       "assets.build": ["compile", "tailwind amanogawa", "esbuild amanogawa"],
       "assets.deploy": [
         "tailwind amanogawa --minify",
         "esbuild amanogawa --minify",
         "phx.digest"
       ],
-      # Contractual order (fail fast): compile, format, static analysis, tests.
+      # Contractual order (fail fast): compile, format, static analysis,
+      # asset build (needs `mix assets.setup` once), then tests.
       # Mirrored exactly by CI (.github/workflows/ci.yml); keep them in sync.
       precommit: [
         "compile --warnings-as-errors",
         "format --check-formatted",
         "credo --strict",
         "sobelow --exit",
+        "assets.build",
         "test"
       ]
     ]

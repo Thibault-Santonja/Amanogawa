@@ -1,0 +1,7 @@
+{
+  "name": "amanogawa-assets",
+  "private": true,
+  "dependencies": {
+    "maplibre-gl": "5.24.0"
+  }
+}

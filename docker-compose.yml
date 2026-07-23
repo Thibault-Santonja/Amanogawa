@@ -12,7 +12,7 @@ services:
     ports:
       # Host port defaults to 5432; override with POSTGRES_PORT when another
       # PostgreSQL instance already listens on 5432 (see README).
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       # PostgreSQL 18 images keep their data under /var/lib/postgresql
       # (the versioned PGDATA lives below it), so the volume mounts there.
