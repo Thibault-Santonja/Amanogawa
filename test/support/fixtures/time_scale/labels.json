@@ -1,0 +1,35 @@
+{
+  "_comment": "Canonical axis label cases for Amanogawa.Atlas.TimeScale.Format (issue #020), consumed verbatim by both test/amanogawa/atlas/time_scale/format_test.exs (ExUnit) and assets/js/test/time_format.test.js (node:test). Astronomical years follow the project-wide convention (1 BCE = year 0, .claude/rules/geo-temporal.md); the BCE cases use the same conversion as Amanogawa.HistoricalDate.Formatter (astronomical year -489 = 490 av. J.-C., the Battle of Marathon).",
+  "cases": [
+    {
+      "label": "deep past, ka BP regime (coarse step, year at the BP threshold and beyond)",
+      "year": -98050,
+      "step": 1000,
+      "expected": "100 ka BP"
+    },
+    {
+      "label": "antiquity, BCE century regime",
+      "year": -750,
+      "step": 100,
+      "expected": "VIIIe s. av. J.-C."
+    },
+    {
+      "label": "antiquity, plain BCE year (Battle of Marathon)",
+      "year": -489,
+      "step": 1,
+      "expected": "490 av. J.-C."
+    },
+    {
+      "label": "modern era, plain CE year",
+      "year": 1969,
+      "step": 1,
+      "expected": "1969"
+    },
+    {
+      "label": "middle ages, CE century regime",
+      "year": 1100,
+      "step": 100,
+      "expected": "XIIe s."
+    }
+  ]
+}

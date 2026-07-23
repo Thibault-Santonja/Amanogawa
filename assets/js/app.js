@@ -25,12 +25,13 @@ import {LiveSocket} from "phoenix_live_view"
 import {hooks as colocatedHooks} from "phoenix-colocated/amanogawa"
 import topbar from "../vendor/topbar"
 import MapHook from "./hooks/map_hook"
+import TimelineHook from "./hooks/timeline"
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: {...colocatedHooks, MapHook},
+  hooks: {...colocatedHooks, MapHook, TimelineHook},
 })
 
 // Show progress bar on live navigation and form submits

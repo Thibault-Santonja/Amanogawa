@@ -1,0 +1,56 @@
+{
+  "_comment": "Canonical anchors for Amanogawa.Atlas.TimeScale (issue #019), consumed verbatim by both test/amanogawa/atlas/time_scale_test.exs (ExUnit) and assets/js/test/time_scale.test.js (node:test). Positions are computed once (double-precision ln/exp, the same primitives both implementations use) and written in hard, never regenerated at test time: if the default configuration below ever changes, this file must be regenerated and both suites must fail, then pass again, together.",
+  "config": {
+    "min_year": -300000,
+    "max_year": 2100,
+    "pivot": 10000
+  },
+  "tolerance": 1.0e-9,
+  "anchors": [
+    {
+      "label": "domain lower bound",
+      "year": -300000,
+      "position": 0.0
+    },
+    {
+      "label": "100,000 years ago",
+      "year": -100000,
+      "position": 0.29759085221077
+    },
+    {
+      "label": "start of the Neolithic (pivot)",
+      "year": -10000,
+      "position": 0.7695284013713625
+    },
+    {
+      "label": "Battle of Marathon (astronomical year, 490 BCE, F02 anchor)",
+      "year": -490,
+      "position": 0.9330615356863844
+    },
+    {
+      "label": "year 1 BCE (astronomical year 0)",
+      "year": 0,
+      "position": 0.9445989991710988
+    },
+    {
+      "label": "year 1000",
+      "year": 1000,
+      "position": 0.9696692981413294
+    },
+    {
+      "label": "French Revolution",
+      "year": 1789,
+      "position": 0.9910989477867075
+    },
+    {
+      "label": "year 2000",
+      "year": 2000,
+      "position": 0.9971080828460509
+    },
+    {
+      "label": "domain upper bound",
+      "year": 2100,
+      "position": 1.0
+    }
+  ]
+}

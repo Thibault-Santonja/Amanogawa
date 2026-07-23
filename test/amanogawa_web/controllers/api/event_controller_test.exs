@@ -159,6 +159,77 @@ defmodule AmanogawaWeb.Controllers.Api.EventControllerTest do
     end
   end
 
+  describe "GET /api/events/histogram" do
+    test "valid params return 200, JSON content-type, cache headers and a dense bucket list", %{
+      conn: conn
+    } do
+      event_fixture(begin_year: 1789)
+
+      conn = conn |> unique_conn() |> get(~p"/api/events/histogram?from=-1000&to=2000&buckets=5")
+
+      assert json_response(conn, 200)
+      assert [content_type] = get_resp_header(conn, "content-type")
+      assert content_type =~ "application/json"
+      assert [cache_control] = get_resp_header(conn, "cache-control")
+      assert cache_control =~ "public"
+      assert cache_control =~ "max-age="
+
+      body = json_response(conn, 200)
+      assert is_integer(body["from"])
+      assert is_integer(body["to"])
+      assert length(body["buckets"]) == 5
+      assert Enum.sum(Enum.map(body["buckets"], & &1["count"])) == 1
+    end
+
+    test "missing from/to returns 422 with structured errors, never a silent default", %{
+      conn: conn
+    } do
+      conn = conn |> unique_conn() |> get(~p"/api/events/histogram")
+
+      assert %{"errors" => %{"from" => [_from_message], "to" => [_to_message]}} =
+               json_response(conn, 422)
+    end
+
+    test "from >= to returns 422 with structured errors", %{conn: conn} do
+      conn = conn |> unique_conn() |> get(~p"/api/events/histogram?from=500&to=500")
+
+      assert %{"errors" => %{"from" => [_message]}} = json_response(conn, 422)
+    end
+
+    test "buckets out of 1..200 returns 422 with structured errors", %{conn: conn} do
+      conn = conn |> unique_conn() |> get(~p"/api/events/histogram?from=0&to=100&buckets=201")
+
+      assert %{"errors" => %{"buckets" => [_message]}} = json_response(conn, 422)
+    end
+
+    test "a non-integer buckets returns 422 with structured errors", %{conn: conn} do
+      conn = conn |> unique_conn() |> get(~p"/api/events/histogram?from=0&to=100&buckets=abc")
+
+      assert %{"errors" => %{"buckets" => [_message]}} = json_response(conn, 422)
+    end
+
+    test "requested bounds are rounded outward to the cache grid, never narrower", %{conn: conn} do
+      conn = conn |> unique_conn() |> get(~p"/api/events/histogram?from=-1&to=1&buckets=2")
+
+      body = json_response(conn, 200)
+      assert body["from"] <= -1
+      assert body["to"] >= 1
+    end
+
+    test "exceeding the rate limit quota returns 429 with retry-after", %{conn: conn} do
+      ip = unique_ip()
+
+      responses =
+        for _ <- 1..6 do
+          conn |> put_remote_ip(ip) |> get(~p"/api/events/histogram?from=0&to=100")
+        end
+
+      assert Enum.count(responses, &(&1.status == 200)) == 5
+      assert [denied] = Enum.filter(responses, &(&1.status == 429))
+      assert %{"errors" => %{"rate_limit" => [_message]}} = json_response(denied, 429)
+    end
+  end
+
   defp unique_conn(conn), do: put_remote_ip(conn, unique_ip())
 
   defp put_remote_ip(conn, ip), do: %{conn | remote_ip: ip}

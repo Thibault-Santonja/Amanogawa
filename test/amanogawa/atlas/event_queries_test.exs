@@ -5,6 +5,7 @@ defmodule Amanogawa.Atlas.EventQueriesTest do
   import Amanogawa.AtlasFixtures
 
   alias Amanogawa.Atlas
+  alias Amanogawa.Atlas.TimeScale
   alias AmanogawaWeb.Params.EventsQuery
 
   @world %{min_lon: -180.0, min_lat: -90.0, max_lon: 180.0, max_lat: 90.0}
@@ -279,6 +280,132 @@ defmodule Amanogawa.Atlas.EventQueriesTest do
 
       assert {:ok, %{"features" => features}} = Atlas.list_event_links_geojson("Q1")
       assert Enum.map(features, & &1["properties"]["target_qid"]) == ["Q20", "Q30"]
+    end
+  end
+
+  describe "histogram_counts/1" do
+    setup do
+      %{scale: TimeScale.default()}
+    end
+
+    test "happy path: counts events per bucket, edges aligned on TimeScale.year/2", %{
+      scale: scale
+    } do
+      event_fixture(begin_year: -100)
+      event_fixture(begin_year: -100)
+      event_fixture(begin_year: 500)
+      event_fixture(begin_year: 1500)
+
+      counts =
+        Atlas.EventQueries.histogram_counts(%{from: -1000, to: 2000, buckets: 3, scale: scale})
+
+      assert Enum.sum(Map.values(counts)) == 4
+    end
+
+    test "edge case: an empty window yields no counts at all" do
+      event_fixture(begin_year: 2999)
+
+      counts =
+        Atlas.EventQueries.histogram_counts(%{
+          from: -1000,
+          to: 2000,
+          buckets: 10,
+          scale: TimeScale.default()
+        })
+
+      assert counts == %{}
+    end
+
+    test "edge case: an event exactly on the upper bound lands in the last bucket, not overflow",
+         %{scale: scale} do
+      event_fixture(begin_year: 2000)
+
+      counts = Atlas.EventQueries.histogram_counts(%{from: 0, to: 2000, buckets: 4, scale: scale})
+
+      assert counts == %{4 => 1}
+    end
+
+    test "edge case: an event exactly on the lower bound lands in the first bucket", %{
+      scale: scale
+    } do
+      event_fixture(begin_year: 0)
+
+      counts = Atlas.EventQueries.histogram_counts(%{from: 0, to: 2000, buckets: 4, scale: scale})
+
+      assert counts == %{1 => 1}
+    end
+
+    test "limit case: buckets=1 returns a single global count", %{scale: scale} do
+      for year <- [-500, 0, 500, 1000], do: event_fixture(begin_year: year)
+
+      counts =
+        Atlas.EventQueries.histogram_counts(%{from: -1000, to: 2000, buckets: 1, scale: scale})
+
+      assert counts == %{1 => 4}
+    end
+
+    property "conservation: the sum of counts equals the number of events within the window" do
+      scale = TimeScale.default()
+
+      check all from <- integer(-3000..1000),
+                to <- integer((from + 100)..2000),
+                buckets <- integer(1..50),
+                years <- list_of(integer(-3000..2000), max_length: 15),
+                max_runs: 15 do
+        # Each iteration reuses the same sandboxed connection (the sandbox
+        # only rolls back once, at the end of the whole test, not between
+        # `check all` iterations): the corpus is reset here so `expected`
+        # below reflects exactly this iteration's `years`, not a growing
+        # accumulation across every prior run.
+        Repo.delete_all(Amanogawa.Atlas.Event)
+        for year <- years, do: event_fixture(begin_year: year)
+
+        expected = Enum.count(years, &(&1 >= from and &1 <= to))
+
+        counts =
+          Atlas.EventQueries.histogram_counts(%{
+            from: from,
+            to: to,
+            buckets: buckets,
+            scale: scale
+          })
+
+        assert Enum.sum(Map.values(counts)) == expected
+      end
+    end
+  end
+
+  describe "histogram_counts/1 SQL/Elixir cohesion (issue #020 point d'attention)" do
+    test "the SQL width_bucket assignment matches Elixir's TimeScale.position/2-derived bucket" do
+      scale = TimeScale.default()
+      from = -50_000
+      to = 2000
+      buckets = 20
+
+      years = [-50_000, -20_000, -10_000, -5_000, -489, 0, 500, 1000, 1789, 1969, 2000]
+      for year <- years, do: event_fixture(begin_year: year)
+
+      sql_counts =
+        Atlas.EventQueries.histogram_counts(%{from: from, to: to, buckets: buckets, scale: scale})
+
+      expected_counts =
+        years
+        |> Enum.map(&elixir_bucket(scale, from, to, buckets, &1))
+        |> Enum.frequencies()
+
+      assert sql_counts == expected_counts
+    end
+
+    # Mirrors exactly what `Amanogawa.Atlas.EventQueries.histogram_bucket_expr/4`
+    # computes in SQL, but purely in Elixir via `TimeScale.position/2`: the
+    # guard against the two formulas ever silently diverging.
+    defp elixir_bucket(scale, from, to, buckets, year) do
+      low = TimeScale.position(scale, from)
+      high = TimeScale.position(scale, to)
+      position = TimeScale.position(scale, year)
+
+      bucket = trunc((position - low) / (high - low) * buckets) + 1
+      bucket |> max(1) |> min(buckets)
     end
   end
 

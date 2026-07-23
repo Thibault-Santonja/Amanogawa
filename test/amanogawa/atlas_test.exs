@@ -1,10 +1,12 @@
 defmodule Amanogawa.AtlasTest do
   use Amanogawa.DataCase, async: true
+  use ExUnitProperties
 
   import Amanogawa.AtlasFixtures
 
   alias Amanogawa.Atlas
   alias Amanogawa.Atlas.Event
+  alias Amanogawa.Atlas.TimeScale
   alias Amanogawa.Repo
 
   describe "upsert_events/1" do
@@ -313,6 +315,121 @@ defmodule Amanogawa.AtlasTest do
 
     test "error case: an unknown QID returns :not_found" do
       assert Atlas.list_event_links_geojson("Q999999999") == {:error, :not_found}
+    end
+  end
+
+  describe "event_histogram/1" do
+    test "happy path: returns a dense list of buckets summing to the matching event count" do
+      event_fixture(begin_year: -100)
+      event_fixture(begin_year: 500)
+      event_fixture(begin_year: 1789)
+
+      result = Atlas.event_histogram(%{from: -1000, to: 2000, buckets: 5})
+
+      assert result["from"] == -1000
+      assert result["to"] == 2000
+      assert length(result["buckets"]) == 5
+      assert Enum.sum(Enum.map(result["buckets"], & &1["count"])) == 3
+    end
+
+    test "happy path: bucket edges are strictly increasing and start/end at the requested window" do
+      result = Atlas.event_histogram(%{from: -10_000, to: 2000, buckets: 8})
+      buckets = result["buckets"]
+
+      edges = [hd(buckets)["from"] | Enum.map(buckets, & &1["to"])]
+      assert edges == Enum.sort(edges)
+
+      assert hd(buckets)["from"] == -10_000
+      assert List.last(buckets)["to"] == 2000
+    end
+
+    test "edge case: an empty window yields a dense list of zero-count buckets" do
+      result = Atlas.event_histogram(%{from: -1000, to: 2000, buckets: 4})
+
+      # Edges are equidistant in symlog *position* space, not in years
+      # (`Amanogawa.Atlas.TimeScale`'s whole point): computed independently
+      # here via `TimeScale.year/2` rather than hardcoded, so the test does
+      # not silently ossify a wrong assumption of linear spacing.
+      scale = TimeScale.default()
+      low = TimeScale.position(scale, -1000)
+      high = TimeScale.position(scale, 2000)
+
+      expected_edges =
+        [-1000] ++
+          Enum.map(1..3, fn i -> TimeScale.year(scale, low + i * (high - low) / 4) end) ++
+          [2000]
+
+      expected_buckets =
+        expected_edges
+        |> Enum.chunk_every(2, 1, :discard)
+        |> Enum.map(fn [from, to] -> %{"from" => from, "to" => to, "count" => 0} end)
+
+      assert result["buckets"] == expected_buckets
+    end
+
+    test "edge case: an event exactly on a bucket boundary is assigned deterministically" do
+      event_fixture(begin_year: 2000)
+
+      result = Atlas.event_histogram(%{from: 0, to: 2000, buckets: 4})
+
+      assert List.last(result["buckets"])["count"] == 1
+      assert Enum.sum(Enum.map(result["buckets"], & &1["count"])) == 1
+    end
+
+    test "limit case: buckets=1 returns a single bucket spanning the whole window" do
+      event_fixture(begin_year: 0)
+
+      result = Atlas.event_histogram(%{from: -1000, to: 2000, buckets: 1})
+
+      assert [%{"from" => -1000, "to" => 2000, "count" => 1}] = result["buckets"]
+    end
+
+    test "limit case: buckets=200 returns exactly 200 dense buckets" do
+      result = Atlas.event_histogram(%{from: -300_000, to: 2_100, buckets: 200})
+
+      assert length(result["buckets"]) == 200
+    end
+
+    # A window whose span comfortably exceeds its bucket count (at least 50
+    # years/bucket) so the integer-year rounding of interior edges never
+    # collapses two consecutive positions to the same year: below that
+    # margin, the aliasing is an inherent, documented property of
+    # quantizing a continuous position to whole years
+    # (`Amanogawa.Atlas.TimeScale`'s moduledoc), not a bug this property
+    # is meant to catch.
+    property "Property (alignment): bucket edges are strictly increasing and their positions are equidistant" do
+      scale = TimeScale.default()
+
+      check all buckets <- integer(1..50),
+                span <- integer((buckets * 50)..250_000),
+                from <- integer(scale.min_year..(scale.max_year - span)),
+                max_runs: 25 do
+        to = from + span
+
+        result = Atlas.event_histogram(%{from: from, to: to, buckets: buckets})
+        edges = [hd(result["buckets"])["from"] | Enum.map(result["buckets"], & &1["to"])]
+
+        assert edges == Enum.sort(edges)
+        assert edges == Enum.uniq(edges)
+
+        positions = Enum.map(edges, &TimeScale.position(scale, &1))
+        deltas = positions |> Enum.chunk_every(2, 1, :discard) |> Enum.map(fn [a, b] -> b - a end)
+        avg_delta = (List.last(positions) - hd(positions)) / buckets
+
+        # Floating tolerance, not a strict equality: the interior edges are
+        # rounded to whole years before their position is recomputed here,
+        # so each delta only approximates `avg_delta`, especially deep in
+        # the symlog-compressed past where a single year covers a
+        # comparatively large slice of position space.
+        assert Enum.all?(deltas, &(abs(&1 - avg_delta) <= avg_delta * 0.5 + 1.0e-6))
+      end
+    end
+  end
+
+  describe "format_axis_year/2" do
+    test "delegates to Amanogawa.Atlas.TimeScale.Format" do
+      assert Atlas.format_axis_year(1969, 1) == "1969"
+      assert Atlas.format_axis_year(-750, 100) == "VIIIe s. av. J.-C."
     end
   end
 

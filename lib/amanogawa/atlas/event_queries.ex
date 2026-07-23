@@ -109,6 +109,7 @@ defmodule Amanogawa.Atlas.EventQueries do
 
   alias Amanogawa.Atlas.Event
   alias Amanogawa.Atlas.EventLink
+  alias Amanogawa.Atlas.TimeScale
   alias Amanogawa.Repo
 
   @type envelope :: %{min_lon: float(), min_lat: float(), max_lon: float(), max_lat: float()}
@@ -206,6 +207,119 @@ defmodule Amanogawa.Atlas.EventQueries do
       |> Enum.map(&Map.put(&1, :direction, :incoming))
 
     outgoing ++ incoming
+  end
+
+  @type histogram_opts :: %{
+          from: integer(),
+          to: integer(),
+          buckets: pos_integer(),
+          scale: TimeScale.t()
+        }
+
+  @doc """
+  Counts events whose `begin_year` falls in `[opts.from, opts.to]`, grouped
+  by their position on `opts.scale`'s symlog axis (issue #020): one SQL
+  `width_bucket` aggregation, no per-event Elixir loop.
+
+  Returns a sparse map `%{bucket_index => count}`, `bucket_index` 1-based
+  (PostgreSQL's `width_bucket` convention). `Amanogawa.Atlas.event_histogram/1`
+  turns this into the dense, zero-filled response the API contract
+  promises.
+
+  `opts.scale`'s `pivot` and `max_year` are passed as bound query
+  parameters into the `width_bucket` fragment below, never duplicated as
+  literals in the SQL text (`.claude/rules/geo-temporal.md`: the symlog
+  formula lives in exactly one place, `Amanogawa.Atlas.TimeScale`'s
+  moduledoc; this fragment computes the *same* `t(year)` formula, just
+  inline in SQL since a set-based aggregation cannot call back into
+  Elixir per row). `low`/`high` (the bucket boundaries in position space)
+  are `TimeScale.position/2` computed in Elixir from `opts.from`/`opts.to`
+  and passed as parameters too, so PostgreSQL never needs its own copy of
+  the `ln`-based position formula beyond the one `t(year)` fragment.
+
+  An event landing exactly on `opts.to` (`begin_year == opts.to`) is
+  assigned to the *last* bucket, not PostgreSQL's default "count + 1"
+  overflow bucket for an operand `>= high`: the result is clamped into
+  `[1, opts.buckets]` (`least(greatest(..., 1), buckets)`), so the last
+  bucket is closed on both ends while every other bucket boundary stays
+  half-open (`[low, high)`, `width_bucket`'s own semantics). The same
+  clamp absorbs the sub-ULP floating-point disagreement that can occur
+  between PostgreSQL's `ln` and Elixir's `:math.log` for an operand
+  mathematically equal to a boundary (verified against real data by the
+  `Amanogawa.Atlas.EventQueriesTest` DataCase test comparing this
+  fragment's bucket assignment to `TimeScale.position/2`'s).
+  """
+  @spec histogram_counts(histogram_opts()) :: %{pos_integer() => non_neg_integer()}
+  def histogram_counts(%{from: from, to: to, buckets: buckets, scale: scale}) do
+    low = TimeScale.position(scale, from)
+    high = TimeScale.position(scale, to)
+
+    # Built as a map of per-field `dynamic/2` expressions, interpolated as
+    # a whole (`^selects`) rather than pinning the `bucket` fragment alone
+    # inside a literal select map: Ecto only allows a dynamic to appear as
+    # the *entire* select value (`select: ^fields`), not nested inside one
+    # (`select: %{field: ^dynamic(...)}`), per `Ecto.Query`'s "Dynamic
+    # queries" documentation.
+    selects = %{
+      bucket: histogram_bucket_expr(scale, low, high, buckets),
+      count: dynamic([e], count(e.id))
+    }
+
+    # `begin_year` is required at the `Amanogawa.Atlas.Event` changeset
+    # boundary (`.claude/rules/elixir-idioms.md`: no defensive nil-check on
+    # data already validated past that boundary), unlike `geom`
+    # (`list_events/1` above), which is genuinely optional.
+    Event
+    |> where([e], e.begin_year >= ^from and e.begin_year <= ^to)
+    |> select(^selects)
+    |> group_by([e], selected_as(:bucket))
+    |> Repo.all()
+    |> Map.new(fn %{bucket: bucket, count: count} -> {bucket, count} end)
+  end
+
+  # `t(min_year)` (see `Amanogawa.Atlas.TimeScale`'s moduledoc) is constant
+  # for a given scale, computed once in Elixir with the exact same formula
+  # `Amanogawa.Atlas.TimeScale.position/2` uses, and passed as a single
+  # bound parameter below rather than recomputed per row in SQL.
+  defp symlog_t_min(%TimeScale{min_year: min_year, max_year: max_year, pivot: pivot}) do
+    :math.log(1 + (max_year - min_year) / pivot)
+  end
+
+  # The `width_bucket` expression shared by `select` (aliased `:bucket` via
+  # `selected_as/2`) and `group_by` (referencing that alias via
+  # `selected_as/1`) in `histogram_counts/1` above: PostgreSQL requires
+  # grouping by the same expression a computed `select` column comes from,
+  # and `selected_as/1` is what lets `group_by` reference the alias instead
+  # of repeating the SQL text a second time. `begin_year` is bound inside
+  # the fragment string (Ecto interpolates `e.begin_year` positionally,
+  # like every other fragment in this module), everything else
+  # (`max_year`, `pivot`, `t_min`, `low`, `high`, `buckets`) is a query
+  # parameter from `scale` and the caller's window, never a literal.
+  defp histogram_bucket_expr(
+         %TimeScale{max_year: max_year, pivot: pivot} = scale,
+         low,
+         high,
+         buckets
+       ) do
+    t_min = symlog_t_min(scale)
+
+    dynamic(
+      [e],
+      selected_as(
+        fragment(
+          "least(greatest(width_bucket(1 - ln(1 + (?::float - ?) / ?) / ?, ?, ?, ?), 1), ?)",
+          ^max_year,
+          e.begin_year,
+          ^pivot,
+          ^t_min,
+          ^low,
+          ^high,
+          ^buckets,
+          ^buckets
+        ),
+        :bucket
+      )
+    )
   end
 
   defp outgoing_links_query(event_id) do

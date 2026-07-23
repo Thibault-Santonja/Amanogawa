@@ -14,6 +14,7 @@ defmodule Amanogawa.Atlas do
   alias Amanogawa.Atlas.Event
   alias Amanogawa.Atlas.EventLink
   alias Amanogawa.Atlas.EventQueries
+  alias Amanogawa.Atlas.TimeScale
   alias Amanogawa.Repo
   alias Amanogawa.WikimediaUrl
 
@@ -141,6 +142,48 @@ defmodule Amanogawa.Atlas do
 
     %{"type" => "FeatureCollection", "features" => features}
   end
+
+  @doc """
+  Builds the timeline density histogram (issue #020):
+  `%{from:, to:, buckets:}` (`opts`, already validated and bounded by
+  `AmanogawaWeb.Params.HistogramQuery.parse/1`) mapped to
+  `{"from" => ..., "to" => ..., "buckets" => [%{"from" => y0, "to" => y1,
+  "count" => n}, ...]}`, a dense list (`opts.buckets` entries, empty
+  buckets included with `count: 0`), bucket boundaries aligned on
+  `Amanogawa.Atlas.TimeScale`'s symlog position (equal-width in position
+  space, not in years).
+
+  The scale used is always `TimeScale.default/0`: the histogram, the axis
+  ticks (#019), and the map's temporal filter all read the same default
+  domain, so a caller never has to pass its own `TimeScale` here. Bucket
+  edges are the *requested* `opts.from`/`opts.to` at the extremes (not a
+  round-tripped approximation): only the interior edges are computed via
+  `TimeScale.year/2`, so the first bucket's `from` and the last bucket's
+  `to` always match the response's top-level `from`/`to` exactly. Actual
+  counting (the SQL aggregation) is centralized in
+  `Amanogawa.Atlas.EventQueries.histogram_counts/1`.
+  """
+  @spec event_histogram(%{from: integer(), to: integer(), buckets: pos_integer()}) :: map()
+  def event_histogram(%{from: from, to: to, buckets: buckets}) do
+    scale = TimeScale.default()
+    counts = EventQueries.histogram_counts(%{from: from, to: to, buckets: buckets, scale: scale})
+
+    %{
+      "from" => from,
+      "to" => to,
+      "buckets" => bucket_list(scale, from, to, buckets, counts)
+    }
+  end
+
+  @doc """
+  Formats an astronomical year as a timeline axis label (issue #020).
+  Delegates to `Amanogawa.Atlas.TimeScale.Format.format_axis_year/2`,
+  exposed here so callers (the timeline hook's server-rendered
+  counterparts, future components) only ever depend on `Amanogawa.Atlas`'s
+  public API, never reach into `Amanogawa.Atlas.TimeScale.Format`
+  directly.
+  """
+  defdelegate format_axis_year(year, step), to: TimeScale.Format
 
   @doc "Fetches an event by its Wikidata QID, or `nil` if unknown locally."
   @spec get_event_by_qid(String.t()) :: Event.t() | nil
@@ -317,6 +360,34 @@ defmodule Amanogawa.Atlas do
     else
       add_error(changeset, :extract_attribution, "article_url must be a valid Wikimedia URL")
     end
+  end
+
+  # Builds the dense bucket list `event_histogram/1` returns: `from` and
+  # `to` are exact at the extremes (the caller's own `opts.from`/`opts.to`,
+  # never a round-tripped approximation), interior edges come from
+  # `TimeScale.year/2` at positions equally spaced between
+  # `position(from)` and `position(to)`. `counts` (from
+  # `EventQueries.histogram_counts/1`) is sparse and 1-indexed
+  # (PostgreSQL's `width_bucket` convention); a bucket absent from it is a
+  # genuine zero, not a gap, so every bucket index in `1..buckets` is
+  # looked up with a `0` default.
+  defp bucket_list(scale, from, to, buckets, counts) do
+    low = TimeScale.position(scale, from)
+    high = TimeScale.position(scale, to)
+
+    interior_edges =
+      Enum.map(1..(buckets - 1)//1, fn i ->
+        TimeScale.year(scale, low + i * (high - low) / buckets)
+      end)
+
+    edges = [from] ++ interior_edges ++ [to]
+
+    edges
+    |> Enum.chunk_every(2, 1, :discard)
+    |> Enum.with_index(1)
+    |> Enum.map(fn {[edge_from, edge_to], index} ->
+      %{"from" => edge_from, "to" => edge_to, "count" => Map.get(counts, index, 0)}
+    end)
   end
 
   defp insert_event_batch(batch) do

@@ -41,6 +41,29 @@ defmodule AmanogawaWeb.ExploreLiveTest do
       assert has_element?(lv, ~s(#map[data-i18n-text-label="Texte"]))
     end
 
+    test "exposes the TimelineHook DOM contract inside footer#timeline, with the default window",
+         %{conn: conn} do
+      {:ok, lv, _html} = live(conn, ~p"/")
+
+      assert has_element?(
+               lv,
+               ~s(footer#timeline #timeline-hook[phx-hook="TimelineHook"][phx-update="ignore"])
+             )
+
+      assert has_element?(
+               lv,
+               ~s(#timeline-hook[data-from="#{-13_800_000_000}"][data-to="#{Date.utc_today().year}"])
+             )
+    end
+
+    test "the timeline window data-attributes follow a shared time window from the URL", %{
+      conn: conn
+    } do
+      {:ok, lv, _html} = live(conn, ~p"/?from=-500&to=500")
+
+      assert has_element?(lv, ~s(#timeline-hook[data-from="-500"][data-to="500"]))
+    end
+
     test "mount/3 issues no database query (LiveView iron law: no DB in mount)" do
       # Calls `mount/3` directly, as a plain function, rather than through
       # `live/2`: Ecto's query telemetry fires in the process that issued

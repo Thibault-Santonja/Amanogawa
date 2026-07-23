@@ -241,7 +241,16 @@ defmodule Amanogawa.HistoricalDate.Formatter do
     {1, "I"}
   ]
 
-  defp to_roman(number) when number > 0 do
+  @doc """
+  Converts a positive integer to Roman numerals, used for century and
+  millennium labels ("VIIIe siècle", ...).
+
+  Public so `Amanogawa.Atlas.TimeScale.Format` (issue #020, the timeline
+  axis labels) shares the exact same conversion rather than duplicating it:
+  both modules render the same "Ne siècle" convention.
+  """
+  @spec to_roman(pos_integer()) :: String.t()
+  def to_roman(number) when number > 0 do
     {_remaining, roman} =
       Enum.reduce(@roman_numerals, {number, ""}, fn {value, symbol}, {remaining, acc} ->
         count = div(remaining, value)

@@ -228,6 +228,23 @@ defmodule AmanogawaWeb.ExploreLive do
       >
       </div>
       <EventPanel.event_panel :if={@selected_event} event={@selected_event} />
+      <:timeline>
+        <%!-- phx-update="ignore": LiveView never touches this subtree, d3
+        owns it entirely (`.claude/rules/liveview.md`). `data-from`/
+        `data-to` seed the hook's initial window; `set_time_window`
+        (pushed by `push_view_state/3` below, the same event the map hook
+        already consumes) keeps it in sync with the LiveView-owned state
+        afterwards. --%>
+        <div
+          id="timeline-hook"
+          phx-hook="TimelineHook"
+          phx-update="ignore"
+          class="h-full w-full"
+          data-from={@from}
+          data-to={@to}
+        >
+        </div>
+      </:timeline>
     </Layouts.app>
     """
   end
