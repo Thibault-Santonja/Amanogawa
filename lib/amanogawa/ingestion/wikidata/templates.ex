@@ -37,6 +37,23 @@ defmodule Amanogawa.Ingestion.Wikidata.Templates do
   Labels and descriptions are read via `rdfs:label`/`schema:description`
   with an explicit `LANG()` filter rather than `SERVICE wikibase:label`,
   whose support on QLever is not guaranteed.
+
+  ## Relation extraction (`links_page/1`)
+
+  `links_page/1` shares the pagination shape of `events_page/1` (a QID
+  slice, `ORDER BY`, `LIMIT`/`OFFSET`) but a different query shape:
+  `?source ?target ?property` triples for each of `P361` (part of),
+  `P155` (follows), `P156` (followed by), `P793` (significant event) and
+  `P1344` (participant of), unioned together with a `BIND` tagging the
+  originating property. Both `?source` and `?target` are required to
+  belong to the `Q1190554` tree (the slice bounds apply to `?source`
+  only); the blocklist is not applied here, since a relation's usefulness
+  does not depend on either endpoint's class, only on whether it exists
+  locally (`Amanogawa.Atlas.upsert_event_links/1` filters on exactly
+  that). Direction normalization (`P156`'s inversion) and property-to-type
+  mapping happen downstream in `Amanogawa.Ingestion.Wikidata.LinkDecoder`:
+  this template is a faithful, unmapped extraction of each property's raw
+  pairs.
   """
 
   alias Amanogawa.Ingestion.Wikidata.Blocklist
@@ -110,6 +127,15 @@ defmodule Amanogawa.Ingestion.Wikidata.Templates do
     OPTIONAL { ?articleEnV schema:about ?e ; schema:isPartOf <https://en.wikipedia.org/> . }
     OPTIONAL { ?e wikibase:sitelinks ?sitelinkCountV . }\
   """
+
+  # Wikidata properties `links_page/1` extracts, in the fixed order their
+  # UNION branches render: the property tagging the mapping downstream
+  # (`Amanogawa.Ingestion.Wikidata.LinkDecoder`) reads from, never the
+  # order relations are returned in (that is `ORDER BY ?source`).
+  @link_properties ["P361", "P155", "P156", "P793", "P1344"]
+
+  @link_source_root_pattern "?source wdt:P31/wdt:P279* wd:Q1190554 ."
+  @link_target_root_pattern "?target wdt:P31/wdt:P279* wd:Q1190554 ."
 
   @doc """
   Renders the paginated event extraction query for the numeric QID slice
@@ -226,6 +252,66 @@ defmodule Amanogawa.Ingestion.Wikidata.Templates do
       ],
       "GROUP BY ?e"
     )
+  end
+
+  @doc """
+  Renders the paginated relation extraction query for the numeric QID
+  slice `[lower, upper)` on the *source* QID, `limit`/`offset` rows within
+  that slice: `(source, target, property)` triples for each of `P361`,
+  `P155`, `P156`, `P793` and `P1344`, restricted to pairs where both
+  `source` and `target` belong to the `Q1190554` tree (see moduledoc,
+  "Relation extraction").
+
+  Raises `ArgumentError` under the same conditions as `events_page/1`.
+
+  ## Examples
+
+      iex> query = Amanogawa.Ingestion.Wikidata.Templates.links_page(%{lower: 0, upper: 1000, limit: 10, offset: 0})
+      iex> String.contains?(query, "wdt:P361")
+      true
+
+  """
+  @spec links_page(%{
+          lower: non_neg_integer(),
+          upper: non_neg_integer(),
+          limit: pos_integer(),
+          offset: non_neg_integer()
+        }) :: String.t()
+  def links_page(%{lower: lower, upper: upper, limit: limit, offset: offset}) do
+    validate_slice!(lower, upper)
+    validate_positive_integer!(limit, :limit)
+    validate_non_neg_integer!(offset, :offset)
+
+    build_query(
+      "SELECT ?source ?target ?property",
+      [
+        @link_source_root_pattern,
+        link_slice_filter(lower, upper),
+        link_property_patterns(),
+        @link_target_root_pattern
+      ],
+      "ORDER BY ?source\nLIMIT #{limit}\nOFFSET #{offset}"
+    )
+  end
+
+  defp link_slice_filter(lower, upper) do
+    """
+    BIND(xsd:integer(STRAFTER(STR(?source), "http://www.wikidata.org/entity/Q")) AS ?qidNum)
+      FILTER(?qidNum >= #{lower} && ?qidNum < #{upper})\
+    """
+  end
+
+  defp link_property_patterns do
+    Enum.map_join(@link_properties, "\n  UNION\n  ", &link_property_pattern/1)
+  end
+
+  defp link_property_pattern(property) do
+    """
+    {
+        ?source wdt:#{property} ?target .
+        BIND("#{property}" AS ?property)
+      }\
+    """
   end
 
   defp build_query(select_clause, where_fragments, tail) do

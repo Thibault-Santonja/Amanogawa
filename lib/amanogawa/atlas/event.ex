@@ -55,6 +55,14 @@ defmodule Amanogawa.Atlas.Event do
     field :location_source, Ecto.Enum, values: [:direct, :place, :country]
     field :sitelink_count, :integer, default: 0
 
+    # Wikipedia enrichment (#012): `extract_fetched_at` is the cache
+    # freshness marker (set on every attempt, successful or not, see
+    # `summary_changeset/2`), `extract_attribution` the CC BY-SA 4.0
+    # attribution stored alongside the extract it covers.
+    field :extract_fetched_at, :utc_datetime
+    field :thumbnail_url, :string
+    field :extract_attribution, :map
+
     timestamps(type: :utc_datetime)
   end
 
@@ -81,7 +89,21 @@ defmodule Amanogawa.Atlas.Event do
     :end_calendar,
     :geom,
     :location_source,
-    :sitelink_count
+    :sitelink_count,
+    :extract_fetched_at,
+    :thumbnail_url,
+    :extract_attribution
+  ]
+
+  # Cast by both `changeset/2` (fixtures, general-purpose writes) and
+  # `summary_changeset/2` (the enrichment write path,
+  # `Amanogawa.Atlas.put_event_summary/2` and `mark_summary_attempt/1`).
+  @summary_fields [
+    :extract_fr,
+    :extract_en,
+    :thumbnail_url,
+    :extract_attribution,
+    :extract_fetched_at
   ]
 
   @qid_regex ~r/^Q\d+$/
@@ -106,6 +128,25 @@ defmodule Amanogawa.Atlas.Event do
     |> apply_historical_date_invariants(:begin)
     |> apply_historical_date_invariants(:end)
     |> validate_geom_srid()
+    |> validate_attribution()
+  end
+
+  @doc """
+  Builds the changeset for the Wikipedia enrichment write path
+  (`Amanogawa.Atlas.put_event_summary/2`, `mark_summary_attempt/1`): casts
+  only the enrichment columns (`#{inspect(@summary_fields)}`), leaving
+  every Wikidata-sourced column untouched. `attrs` carries whichever subset
+  applies: a successful fetch sets `extract_fr` or `extract_en`,
+  `thumbnail_url`, `extract_attribution` and `extract_fetched_at`; a
+  `:not_found` attempt (`mark_summary_attempt/1`) sets only
+  `extract_fetched_at`, so the cache still treats the article as recently
+  checked without fabricating an extract.
+  """
+  @spec summary_changeset(t(), map()) :: Ecto.Changeset.t()
+  def summary_changeset(event, attrs) do
+    event
+    |> cast(attrs, @summary_fields)
+    |> validate_attribution()
   end
 
   @doc """
@@ -267,6 +308,23 @@ defmodule Amanogawa.Atlas.Event do
       %Geo.Point{srid: 4326} -> changeset
       %Geo.Point{} -> add_error(changeset, :geom, "must have SRID 4326")
       _ -> add_error(changeset, :geom, "must be a Point geometry")
+    end
+  end
+
+  # `extract_attribution` must be able to render "Source: Wikipedia, CC
+  # BY-SA 4.0" with a link on its own: the license alone, without the
+  # article URL, is not sufficient attribution (`.claude/rules/ethics.md`).
+  defp validate_attribution(changeset) do
+    case get_field(changeset, :extract_attribution) do
+      nil ->
+        changeset
+
+      %{"article_url" => url, "license" => license}
+      when is_binary(url) and is_binary(license) ->
+        changeset
+
+      _invalid ->
+        add_error(changeset, :extract_attribution, "must include article_url and license")
     end
   end
 end

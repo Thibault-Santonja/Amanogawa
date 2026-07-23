@@ -122,4 +122,61 @@ defmodule Amanogawa.Ingestion.Wikidata.TemplatesTest do
       assert_raise ArgumentError, fn -> Templates.events_by_qids([123]) end
     end
   end
+
+  describe "links_page/1" do
+    test "unions the five relation properties, each tagging ?property with its own P-id" do
+      query = Templates.links_page(%{lower: 0, upper: 1000, limit: 500, offset: 0})
+
+      assert query =~ "?source wdt:P361 ?target .\n    BIND(\"P361\" AS ?property)"
+      assert query =~ "BIND(\"P155\" AS ?property)"
+      assert query =~ "BIND(\"P156\" AS ?property)"
+      assert query =~ "BIND(\"P793\" AS ?property)"
+      assert query =~ "BIND(\"P1344\" AS ?property)"
+      assert query =~ "UNION"
+    end
+
+    test "requires both source and target to belong to the Q1190554 tree, and does not exclude the blocklist" do
+      query = Templates.links_page(%{lower: 0, upper: 1000, limit: 500, offset: 0})
+
+      assert query =~ "?source wdt:P31/wdt:P279* wd:Q1190554"
+      assert query =~ "?target wdt:P31/wdt:P279* wd:Q1190554"
+      refute query =~ "MINUS { VALUES ?blocked"
+    end
+
+    test "slices on the source QID and renders pagination" do
+      query = Templates.links_page(%{lower: 178_000, upper: 179_300, limit: 250, offset: 500})
+
+      assert query =~
+               "BIND(xsd:integer(STRAFTER(STR(?source), \"http://www.wikidata.org/entity/Q\")) AS ?qidNum)"
+
+      assert query =~ "?qidNum >= 178000 && ?qidNum < 179300"
+      assert query =~ "ORDER BY ?source"
+      assert query =~ "LIMIT 250"
+      assert query =~ "OFFSET 500"
+    end
+
+    test "selects ?source ?target ?property" do
+      query = Templates.links_page(%{lower: 0, upper: 1000, limit: 1, offset: 0})
+
+      assert query =~ "SELECT ?source ?target ?property"
+    end
+
+    test "raises ArgumentError under the same conditions as events_page/1" do
+      assert_raise ArgumentError, fn ->
+        Templates.links_page(%{lower: "0", upper: 1000, limit: 500, offset: 0})
+      end
+
+      assert_raise ArgumentError, fn ->
+        Templates.links_page(%{lower: 0, upper: 1000, limit: 0, offset: 0})
+      end
+
+      assert_raise ArgumentError, fn ->
+        Templates.links_page(%{lower: 0, upper: 1000, limit: 500, offset: -1})
+      end
+
+      assert_raise ArgumentError, fn ->
+        Templates.links_page(%{lower: 1000, upper: 500, limit: 500, offset: 0})
+      end
+    end
+  end
 end

@@ -19,12 +19,17 @@ defmodule Amanogawa.Atlas do
   # comfortably under that limit.
   @max_batch_size 500
 
+  # Default `list_events_to_enrich/1` batch size, overridable per call.
+  @default_enrich_batch_size 50
+
+  @wikipedia_license "CC BY-SA 4.0"
+
   # Columns replaced on conflict when upserting events from Wikidata.
   # Deliberately excludes :id, :inserted_at, :qid (the conflict target) and
-  # the Wikipedia enrichment columns (extract_fr, extract_en, filled by
-  # #012): a Wikidata upsert must never erase enrichment data written by
-  # another pipeline. This list is a contract with #012: any column it adds
-  # to `events` for enrichment purposes must stay out of it.
+  # the Wikipedia enrichment columns (extract_fr, extract_en, thumbnail_url,
+  # extract_attribution, extract_fetched_at, filled by #012): a Wikidata
+  # upsert must never erase enrichment data written by
+  # `Amanogawa.Ingestion.Workers.EnrichSummaries`.
   @wikidata_columns [
     :label_fr,
     :label_en,
@@ -127,6 +132,90 @@ defmodule Amanogawa.Atlas do
   @doc "Counts event links. Used by tests and sync metrics."
   @spec count_event_links() :: non_neg_integer()
   def count_event_links, do: Repo.aggregate(EventLink, :count)
+
+  @doc """
+  Lists events eligible for Wikipedia enrichment (#012): at least one
+  known article (`wiki_url_fr` or `wiki_url_en`) and never fetched, or
+  fetched more than `:max_age_days` ago. Ordered by `sitelink_count`
+  descending, so the most visible events are enriched first when a run is
+  interrupted.
+
+  `opts`:
+
+    * `:limit` - max events returned, default #{@default_enrich_batch_size}.
+    * `:max_age_days` - cache freshness window, default
+      `Application.get_env(:amanogawa, :summary_max_age_days, 30)`.
+  """
+  @spec list_events_to_enrich(keyword()) :: [Event.t()]
+  def list_events_to_enrich(opts \\ []) do
+    limit = Keyword.get(opts, :limit, @default_enrich_batch_size)
+    threshold = DateTime.add(utc_now(), -max_age_days(opts), :day)
+
+    Event
+    |> where([e], not is_nil(e.wiki_url_fr) or not is_nil(e.wiki_url_en))
+    |> where([e], is_nil(e.extract_fetched_at) or e.extract_fetched_at < ^threshold)
+    |> order_by([e], desc: e.sitelink_count)
+    |> limit(^limit)
+    |> Repo.all()
+  end
+
+  @doc """
+  Stores a fetched Wikipedia summary on `event`: `extract_fr` or
+  `extract_en` depending on `attrs.lang`, `thumbnail_url`,
+  `extract_attribution` (CC BY-SA 4.0: article URL, license, language) and
+  `extract_fetched_at` (now).
+
+  `attrs` is the small enrichment-specific map
+  `Amanogawa.Ingestion.Workers.EnrichSummaries` builds from a
+  `Amanogawa.Ingestion.WikipediaClient.Summary`, deliberately not the
+  `Summary` struct itself: Atlas never depends on another context's
+  internal types (`.claude/rules/architecture.md`). Required keys:
+  `:lang` (`:fr` or `:en`), `:extract`, `:article_url`; `:thumbnail_url` is
+  optional (`nil` when the article has no image).
+  """
+  @spec put_event_summary(Event.t(), map()) :: {:ok, Event.t()} | {:error, Ecto.Changeset.t()}
+  def put_event_summary(
+        %Event{} = event,
+        %{lang: lang, extract: extract, article_url: article_url} = attrs
+      )
+      when lang in [:fr, :en] do
+    changeset_attrs =
+      %{
+        thumbnail_url: Map.get(attrs, :thumbnail_url),
+        extract_attribution: %{
+          "article_url" => article_url,
+          "license" => @wikipedia_license,
+          "lang" => Atom.to_string(lang)
+        },
+        extract_fetched_at: utc_now()
+      }
+      |> Map.put(extract_field(lang), extract)
+
+    event
+    |> Event.summary_changeset(changeset_attrs)
+    |> Repo.update()
+  end
+
+  @doc """
+  Marks a Wikipedia enrichment attempt on `event` without storing an
+  extract: stamps `extract_fetched_at` alone. Used for a `:not_found`
+  article, so the cache stops retrying it before `:max_age_days` expires
+  (points d'attention #012: without this, the worker would retry the same
+  missing articles on every run).
+  """
+  @spec mark_summary_attempt(Event.t()) :: {:ok, Event.t()} | {:error, Ecto.Changeset.t()}
+  def mark_summary_attempt(%Event{} = event) do
+    event
+    |> Event.summary_changeset(%{extract_fetched_at: utc_now()})
+    |> Repo.update()
+  end
+
+  defp max_age_days(opts) do
+    Keyword.get(opts, :max_age_days) || Application.get_env(:amanogawa, :summary_max_age_days, 30)
+  end
+
+  defp extract_field(:fr), do: :extract_fr
+  defp extract_field(:en), do: :extract_en
 
   defp insert_event_batch(batch) do
     {count, _} =

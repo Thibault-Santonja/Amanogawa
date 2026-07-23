@@ -4,6 +4,7 @@ defmodule Amanogawa.IngestionTest do
   alias Amanogawa.Ingestion
   alias Amanogawa.Ingestion.SyncRun
   alias Amanogawa.Ingestion.Workers.ImportEvents
+  alias Amanogawa.Ingestion.Workers.ImportLinks
   alias Amanogawa.Repo
 
   describe "start_events_import/1 happy path" do
@@ -68,6 +69,70 @@ defmodule Amanogawa.IngestionTest do
       {:ok, sync_run} = Ingestion.start_events_import()
 
       assert {:error, changeset} = Ingestion.resume_events_import(sync_run)
+      refute changeset.valid?
+    end
+  end
+
+  describe "start_links_import/1 happy path" do
+    test "creates a running SyncRun of kind :links and enqueues the first page job" do
+      assert {:ok, %SyncRun{kind: :links, status: :running} = sync_run} =
+               Ingestion.start_links_import()
+
+      assert_enqueued(worker: ImportLinks, args: %{"sync_run_id" => sync_run.id})
+    end
+
+    test "carries limit and dry_run into the first job's args" do
+      assert {:ok, sync_run} = Ingestion.start_links_import(limit: 100, dry_run: true)
+
+      assert_enqueued(
+        worker: ImportLinks,
+        args: %{"sync_run_id" => sync_run.id, "limit" => 100, "dry_run" => true}
+      )
+    end
+  end
+
+  describe "start_links_import/1 error cases" do
+    test "refuses a second concurrent import of the same kind" do
+      assert {:ok, _first} = Ingestion.start_links_import()
+      assert {:error, :already_running} = Ingestion.start_links_import()
+    end
+
+    test "does not refuse starting :links while an :events run of a different kind is running" do
+      {:ok, _events_run} = Ingestion.start_events_import()
+
+      assert {:ok, _links_run} = Ingestion.start_links_import()
+    end
+
+    test "allows starting a new import once the previous one is closed" do
+      {:ok, first} = Ingestion.start_links_import()
+
+      first
+      |> SyncRun.close_changeset(%{status: :completed})
+      |> Repo.update!()
+
+      assert {:ok, _second} = Ingestion.start_links_import()
+    end
+  end
+
+  describe "resume_links_import/1" do
+    test "reopens a failed run to running and enqueues a job for the same sync_run_id" do
+      {:ok, sync_run} = Ingestion.start_links_import()
+
+      failed =
+        sync_run
+        |> SyncRun.close_changeset(%{status: :failed, last_error: "boom"})
+        |> Repo.update!()
+
+      assert {:ok, %SyncRun{status: :running, last_error: nil}} =
+               Ingestion.resume_links_import(failed)
+
+      assert_enqueued(worker: ImportLinks, args: %{"sync_run_id" => sync_run.id})
+    end
+
+    test "rejects resuming a run that is not failed" do
+      {:ok, sync_run} = Ingestion.start_links_import()
+
+      assert {:error, changeset} = Ingestion.resume_links_import(sync_run)
       refute changeset.valid?
     end
   end

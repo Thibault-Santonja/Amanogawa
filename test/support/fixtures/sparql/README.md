@@ -195,6 +195,59 @@ an entity URI that is a statement node rather than a plain QID entity
 (`http://www.wikidata.org/entity/statement/Q31900-...`), and a `beginTime`
 literal that does not match the RDF time format at all.
 
+## links_page.json (#011)
+
+QLever (`https://qlever.dev/api/wikidata`) returned `502 Bad Gateway` on
+every attempt at capture time (2026-07-23), including the exact
+`Templates.links_page/1` query for the `[178000, 179300)` slice this
+fixture's sibling `events_page.json` uses: the property-path membership
+check on both `?source` and `?target` (`wdt:P31/wdt:P279* wd:Q1190554`
+twice) is also too expensive for WDQS's 60s budget over that range
+(`.claude/skills/wikidata-query/SKILL.md`: this shape needs QLever's
+absence of a timeout).
+
+Real relation data was instead captured from WDQS
+(`https://query.wikidata.org/sparql`), same User-Agent, anchored on a
+`VALUES ?source { ... }` list of real `Q1190554` QIDs already used
+elsewhere in this directory (`events_page.json`, `marathon.json`) rather
+than the live slice filter, which keeps the property-path cost bounded
+enough for WDQS to answer:
+
+```sparql
+PREFIX wd: <http://www.wikidata.org/entity/>
+PREFIX wdt: <http://www.wikidata.org/prop/direct/>
+
+SELECT ?source ?target ?property WHERE {
+  VALUES ?source { wd:Q178510 wd:Q178842 wd:Q178975 wd:Q178809 wd:Q188709 wd:Q208433 wd:Q844930 }
+  VALUES (?prop ?property) {
+    (wdt:P361 "P361") (wdt:P155 "P155") (wdt:P156 "P156")
+    (wdt:P793 "P793") (wdt:P1344 "P1344")
+  }
+  ?source ?prop ?target .
+}
+```
+
+(a companion query with `?source` swapped for the known reverse partners
+`wd:Q917167`, `wd:Q1524`, `wd:Q13534153` confirmed the real, symmetric
+`P155`/`P156` duplicate kept in this fixture: Q178975 `P156` Q917167 and
+Q917167 `P155` Q178975 both hold on Wikidata, and normalize to the same
+link).
+
+Nine bindings: seven distinct relations covering all five properties
+(`P361` x2, `P155` x1 beyond the duplicate below, `P156`/`P155` as one
+real symmetric duplicate pair on `Q178975`/`Q917167`, `P793` x1, `P1344`
+x1), plus a ninth binding not found in the samples queried: a self-link
+(`source == target`). Genuine Wikidata self-links on these properties are
+rare data-quality artifacts, not something a handful of targeted queries
+is likely to surface; this one row was added by hand, reusing a real QID
+already present in the fixture (`Q179250`, the French invasion of
+Russia), the same convention as `hostile_bindings.json`.
+
+Used by `Amanogawa.Ingestion.Wikidata.LinkDecoderTest` (decoding,
+deduplication, self-link rejection) and
+`Amanogawa.Ingestion.Workers.ImportLinksTest` (end-to-end counts against a
+partially preloaded local corpus).
+
 ## prehistory.json (#009)
 
 Not captured: no real, richly-annotated `Q1190554` occurrence with a

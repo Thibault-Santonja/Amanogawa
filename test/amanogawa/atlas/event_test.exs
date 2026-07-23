@@ -215,6 +215,55 @@ defmodule Amanogawa.Atlas.EventTest do
     end
   end
 
+  describe "summary_changeset/2 happy path" do
+    test "sets an extract, thumbnail, attribution and fetch timestamp without touching Wikidata columns" do
+      event = %Event{qid: "Q31900", label_fr: "Bataille de Marathon", begin_year: -489}
+
+      attrs = %{
+        extract_fr: "Un résumé.",
+        thumbnail_url: "https://example.org/thumb.jpg",
+        extract_attribution: %{
+          "article_url" => "https://fr.wikipedia.org/wiki/Bataille_de_Marathon",
+          "license" => "CC BY-SA 4.0",
+          "lang" => "fr"
+        },
+        extract_fetched_at: DateTime.truncate(DateTime.utc_now(), :second)
+      }
+
+      changeset = Event.summary_changeset(event, attrs)
+
+      assert changeset.valid?
+      assert get_field(changeset, :extract_fr) == "Un résumé."
+      assert get_field(changeset, :label_fr) == "Bataille de Marathon"
+    end
+
+    test "a not_found attempt only stamps extract_fetched_at" do
+      event = %Event{qid: "Q31900", begin_year: -489}
+      now = DateTime.truncate(DateTime.utc_now(), :second)
+
+      changeset = Event.summary_changeset(event, %{extract_fetched_at: now})
+
+      assert changeset.valid?
+      assert get_field(changeset, :extract_fetched_at) == now
+      assert get_field(changeset, :extract_fr) == nil
+    end
+  end
+
+  describe "summary_changeset/2 error case" do
+    test "an attribution missing the article URL is rejected" do
+      event = %Event{qid: "Q31900", begin_year: -489}
+
+      changeset =
+        Event.summary_changeset(event, %{
+          extract_attribution: %{"license" => "CC BY-SA 4.0"}
+        })
+
+      refute changeset.valid?
+
+      assert "must include article_url and license" in errors_on(changeset).extract_attribution
+    end
+  end
+
   property "flattening any generated HistoricalDate and reading it back round-trips" do
     check all date <- historical_date() do
       flat = Event.flatten_date(date, :begin)

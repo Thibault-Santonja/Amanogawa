@@ -47,6 +47,19 @@ config :amanogawa, Amanogawa.Ingestion.SparqlClient.QLever,
   backoff_base_ms: 1,
   retry_after_unit_ms: 1
 
+# Ingestion pipelines depend only on the Amanogawa.Ingestion.WikipediaClient
+# behaviour; tests stub it with Mox, never hitting the real Wikipedia REST
+# API.
+config :amanogawa, :wikipedia_client, Amanogawa.Ingestion.WikipediaClientMock
+
+# The Rest adapter's own tests exercise Req against a Req.Test stub (no
+# network) and use a near-zero backoff base and Retry-After unit so
+# 429/backoff scenarios run fast instead of actually sleeping for seconds.
+config :amanogawa, Amanogawa.Ingestion.WikipediaClient.Rest,
+  plug: {Req.Test, Amanogawa.Ingestion.WikipediaClient.Rest},
+  backoff_base_ms: 1,
+  retry_after_unit_ms: 1
+
 # Oban runs in manual testing mode: jobs are asserted with Oban.Testing
 # (enqueued jobs, `perform_job/2`) instead of executing through real queues,
 # so tests never race a background poller.
@@ -56,6 +69,21 @@ config :amanogawa, Oban, testing: :manual
 # pages per slice against small fixtures instead of the production
 # millions-of-QIDs plan.
 config :amanogawa, Amanogawa.Ingestion.Workers.ImportEvents,
+  page_size: 3,
+  slice_width: 10,
+  max_qid: 20
+
+# Tiny batch size and no inter-batch delay so summaries enrichment tests
+# exercise several batches against small fixtures without actually
+# scheduling/waiting on Oban's `schedule_in`.
+config :amanogawa, Amanogawa.Ingestion.Workers.EnrichSummaries,
+  batch_size: 2,
+  inter_batch_delay_seconds: 0
+
+# Tiny pagination plan (same shape as ImportEvents above) so relation
+# import tests exercise several slices and several pages per slice against
+# small fixtures instead of the production millions-of-QIDs plan.
+config :amanogawa, Amanogawa.Ingestion.Workers.ImportLinks,
   page_size: 3,
   slice_width: 10,
   max_qid: 20
