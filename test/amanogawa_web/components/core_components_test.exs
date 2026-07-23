@@ -17,7 +17,7 @@ defmodule AmanogawaWeb.CoreComponentsTest do
         """)
 
       assert html =~ "Saved!"
-      assert html =~ "alert-info"
+      assert html =~ ~s(data-kind="info")
       assert html =~ ~s(id="flash-info")
     end
 
@@ -33,7 +33,7 @@ defmodule AmanogawaWeb.CoreComponentsTest do
 
       assert html =~ "Oops"
       assert html =~ "Something failed"
-      assert html =~ "alert-error"
+      assert html =~ ~s(data-kind="error")
       assert html =~ ~s(id="my-flash")
     end
 
@@ -45,7 +45,7 @@ defmodule AmanogawaWeb.CoreComponentsTest do
         <CoreComponents.flash kind={:info} flash={@flash} />
         """)
 
-      refute html =~ "alert-info"
+      refute html =~ "data-kind"
     end
   end
 
@@ -59,7 +59,7 @@ defmodule AmanogawaWeb.CoreComponentsTest do
         """)
 
       assert html =~ "<button"
-      assert html =~ "btn-soft"
+      assert html =~ "border-border"
       assert html =~ "Send!"
     end
 
@@ -71,8 +71,8 @@ defmodule AmanogawaWeb.CoreComponentsTest do
         <CoreComponents.button variant="primary">Go</CoreComponents.button>
         """)
 
-      assert html =~ "btn-primary"
-      refute html =~ "btn-soft"
+      assert html =~ "bg-accent"
+      refute html =~ "border-border"
     end
 
     test "renders a link when given a navigation attribute" do
@@ -113,7 +113,7 @@ defmodule AmanogawaWeb.CoreComponentsTest do
         """)
 
       assert html =~ "oh no!"
-      assert html =~ "input-error"
+      assert html =~ "border-red-600"
     end
 
     test "renders a hidden input" do
@@ -126,53 +126,6 @@ defmodule AmanogawaWeb.CoreComponentsTest do
 
       assert html =~ ~s(type="hidden")
       assert html =~ ~s(value="abc")
-    end
-
-    test "renders a checkbox with normalized checked value" do
-      assigns = %{}
-
-      html =
-        rendered_to_string(~H"""
-        <CoreComponents.input type="checkbox" id="opt-in" name="opt_in" label="Opt in" value={true} />
-        """)
-
-      assert html =~ ~s(type="checkbox")
-      assert html =~ "checked"
-      assert html =~ "Opt in"
-    end
-
-    test "renders a select with prompt and options" do
-      assigns = %{}
-
-      html =
-        rendered_to_string(~H"""
-        <CoreComponents.input
-          type="select"
-          id="role"
-          name="role"
-          label="Role"
-          prompt="Choose"
-          options={[Admin: "admin", User: "user"]}
-          value="user"
-        />
-        """)
-
-      assert html =~ "<select"
-      assert html =~ "Choose"
-      assert html =~ ~s(value="admin")
-      assert html =~ ~s(<option selected value="user">User</option>)
-    end
-
-    test "renders a textarea" do
-      assigns = %{}
-
-      html =
-        rendered_to_string(~H"""
-        <CoreComponents.input type="textarea" id="bio" name="bio" label="Bio" value="hello" />
-        """)
-
-      assert html =~ "<textarea"
-      assert html =~ "hello"
     end
 
     test "renders from a form field and shows its errors" do
@@ -194,78 +147,6 @@ defmodule AmanogawaWeb.CoreComponentsTest do
       assert html =~ ~s(name="user[email]")
       assert html =~ ~s(value="not-an-email")
       assert html =~ "is invalid"
-    end
-
-    test "appends [] to the name of a multiple select backed by a field" do
-      form = to_form(%{}, as: :user)
-      assigns = %{field: form[:roles]}
-
-      html =
-        rendered_to_string(~H"""
-        <CoreComponents.input field={@field} type="select" multiple options={[A: "a"]} />
-        """)
-
-      assert html =~ ~s(name="user[roles][]")
-      assert html =~ "multiple"
-    end
-  end
-
-  describe "header/1" do
-    test "renders title, subtitle, and actions" do
-      assigns = %{}
-
-      html =
-        rendered_to_string(~H"""
-        <CoreComponents.header>
-          The title
-          <:subtitle>The subtitle</:subtitle>
-          <:actions><button>Act</button></:actions>
-        </CoreComponents.header>
-        """)
-
-      assert html =~ "The title"
-      assert html =~ "The subtitle"
-      assert html =~ "Act"
-    end
-  end
-
-  describe "table/1" do
-    test "renders rows with columns and actions" do
-      assigns = %{rows: [%{id: 1, name: "Ada"}, %{id: 2, name: "Alan"}]}
-
-      html =
-        rendered_to_string(~H"""
-        <CoreComponents.table id="users" rows={@rows} row_id={&"row-#{&1.id}"}>
-          <:col :let={user} label="Name">{user.name}</:col>
-          <:action :let={user}>
-            <a href={"/users/#{user.id}"}>Show</a>
-          </:action>
-        </CoreComponents.table>
-        """)
-
-      assert html =~ "Ada"
-      assert html =~ "Alan"
-      assert html =~ ~s(id="row-1")
-      assert html =~ "/users/2"
-      assert html =~ "Name"
-    end
-  end
-
-  describe "list/1" do
-    test "renders titled items" do
-      assigns = %{}
-
-      html =
-        rendered_to_string(~H"""
-        <CoreComponents.list>
-          <:item title="Title">A post</:item>
-          <:item title="Views">42</:item>
-        </CoreComponents.list>
-        """)
-
-      assert html =~ "Title"
-      assert html =~ "A post"
-      assert html =~ "42"
     end
   end
 

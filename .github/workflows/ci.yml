@@ -57,6 +57,15 @@ jobs:
       - name: Install dependencies
         run: mix deps.get
 
+      - name: Cache npm packages
+        uses: actions/cache@v6
+        with:
+          path: assets/node_modules
+          key: npm-${{ runner.os }}-${{ hashFiles('assets/package-lock.json') }}
+
+      - name: Install asset toolchain and packages
+        run: mix assets.setup
+
       - name: Run the precommit quality gate
         run: mix precommit
 
