@@ -47,10 +47,16 @@ defmodule AmanogawaWeb.E2EHelpers do
     Wallaby.Browser.execute_script(
       session,
       "var r = document.querySelector('#map').getBoundingClientRect();" <>
-        "return [r.width, r.height, window.innerWidth, window.innerHeight];",
-      fn [w, h, iw, ih] ->
+        "var shell = document.querySelector('main#map-zone');" <>
+        "var sr = shell ? shell.getBoundingClientRect() : {width: -1, height: -1};" <>
+        "return [r.width, r.height, window.innerWidth, window.innerHeight," <>
+        " document.styleSheets.length, sr.height," <>
+        " CSS.supports('height', '100dvh'), getComputedStyle(document.body).height];",
+      fn [w, h, iw, ih, sheets, shell_h, dvh, body_h] ->
         if h < 10 or w < 10 do
-          raise "#map collapsed to #{w}x#{h} (viewport #{iw}x#{ih}): " <>
+          raise "#map collapsed to #{w}x#{h} (viewport #{iw}x#{ih}, " <>
+                  "stylesheets #{sheets}, map-zone height #{shell_h}, " <>
+                  "dvh supported #{dvh}, body height #{body_h}): " <>
                   "the layout gives the map zero size in this browser."
         end
       end
