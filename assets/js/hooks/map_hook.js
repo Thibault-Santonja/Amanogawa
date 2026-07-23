@@ -152,16 +152,26 @@ const MapHook = {
     this.linksAbortController = null
     this.linksOpacityFrame = null
 
-    this.map = new maplibregl.Map({
-      container: this.el,
-      style: this.darkScheme.matches ? darkStyle : lightStyle,
-      center: INITIAL_CENTER,
-      zoom: INITIAL_ZOOM,
-      attributionControl: {compact: true},
-      // MapLibre already skips camera easing when the user prefers reduced
-      // motion; also disable symbol fade-in so labels appear instantly.
-      fadeDuration: this.reducedMotion ? 0 : 300
-    })
+    // MapLibre throws when no WebGL context can be created (no GPU, old
+    // browser, headless without a software rasterizer). Degrade to a
+    // localized message instead of leaving an uncaught error that also
+    // takes down every other hook on the page.
+    try {
+      this.map = new maplibregl.Map({
+        container: this.el,
+        style: this.darkScheme.matches ? darkStyle : lightStyle,
+        center: INITIAL_CENTER,
+        zoom: INITIAL_ZOOM,
+        attributionControl: {compact: true},
+        // MapLibre already skips camera easing when the user prefers reduced
+        // motion; also disable symbol fade-in so labels appear instantly.
+        fadeDuration: this.reducedMotion ? 0 : 300
+      })
+    } catch (_error) {
+      this.map = null
+      this.renderWebglFallback()
+      return
+    }
 
     this.debouncedFetchEvents = debounce(() => this.fetchEvents(), FETCH_DEBOUNCE_MS)
     this.debouncedPushMapMoved = debounce(() => this.pushMapMoved(), MAP_MOVED_DEBOUNCE_MS)
@@ -729,7 +739,30 @@ const MapHook = {
     )
   },
 
+  // WebGL unavailable: replace the map area with a localized message
+  // (translated server-side, `data-i18n-webgl-fallback`) and a marker
+  // attribute so tests and support can tell degraded mode apart from a
+  // blank map. The hook stays mounted but inert: `mounted()` returned
+  // before registering any listener or handler, and `destroyed()` guards
+  // on `this.map`.
+  renderWebglFallback() {
+    this.el.dataset.mapDegraded = "true"
+
+    const message = document.createElement("p")
+    message.className =
+      "flex h-full items-center justify-center px-6 text-center text-sm text-text-muted"
+    message.textContent =
+      this.el.dataset.i18nWebglFallback ||
+      "Interactive map unavailable: this browser does not provide WebGL."
+    this.el.replaceChildren(message)
+  },
+
   destroyed() {
+    if (!this.map) {
+      this.hoverCard.destroy()
+      return
+    }
+
     this.debouncedFetchEvents.cancel()
     this.debouncedPushMapMoved.cancel()
     if (this.abortController) this.abortController.abort()

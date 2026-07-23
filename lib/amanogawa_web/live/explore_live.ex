@@ -263,6 +263,9 @@ defmodule AmanogawaWeb.ExploreLive do
         phx-update="ignore"
         class="absolute inset-0"
         data-i18n-text-label={gettext("Texte")}
+        data-i18n-webgl-fallback={
+          gettext("Carte interactive indisponible : ce navigateur ne fournit pas WebGL.")
+        }
         data-e2e-test-api={@expose_e2e_test_api}
       >
       </div>

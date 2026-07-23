@@ -94,7 +94,12 @@ config :wallaby,
           # d'attention: documented here since this is the one place this
           # tradeoff is made, not a claim that it is guaranteed to work on
           # every Chrome/chromedriver build CI happens to install).
-          "--use-gl=swiftshader",
+          # Chrome 129+ gates software WebGL behind an explicit opt in:
+          # angle routes gl calls to swiftshader, and the unsafe flag
+          # re-enables the software fallback that plain
+          # `--use-gl=swiftshader` no longer provides.
+          "--use-angle=swiftshader",
+          "--enable-unsafe-swiftshader",
           "--enable-webgl",
           "--ignore-gpu-blocklist"
         ]
