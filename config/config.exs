@@ -14,6 +14,72 @@ config :amanogawa,
 # Use the custom Postgrex type module so PostGIS geometries map to Geo structs
 config :amanogawa, Amanogawa.Repo, types: Amanogawa.PostgresTypes
 
+# SPARQL client used by the ingestion pipelines (Amanogawa.Ingestion.SparqlClient
+# port). Overridden with a Mox mock in config/test.exs.
+config :amanogawa, :sparql_client, Amanogawa.Ingestion.SparqlClient.QLever
+
+# QLever adapter configuration (ADR 0003): connection/receive timeouts and the
+# base backoff delay on HTTP 429 before honoring a Retry-After header.
+config :amanogawa, Amanogawa.Ingestion.SparqlClient.QLever,
+  base_url: "https://qlever.dev/api/wikidata",
+  connect_timeout: :timer.seconds(15),
+  receive_timeout: :timer.seconds(120),
+  backoff_base_ms: 500,
+  retry_after_unit_ms: 1000
+
+# Wikipedia REST client used by the summaries enrichment pipeline
+# (Amanogawa.Ingestion.WikipediaClient port). Overridden with a Mox mock in
+# config/test.exs.
+config :amanogawa, :wikipedia_client, Amanogawa.Ingestion.WikipediaClient.Rest
+
+# Wikipedia REST adapter configuration (ADR 0003): connection/receive
+# timeouts and the base backoff delay on HTTP 429 before honoring a
+# Retry-After header (mirrors the QLever adapter above).
+config :amanogawa, Amanogawa.Ingestion.WikipediaClient.Rest,
+  connect_timeout: :timer.seconds(10),
+  receive_timeout: :timer.seconds(30),
+  backoff_base_ms: 500,
+  retry_after_unit_ms: 1000
+
+# Cache freshness window for Wikipedia summaries (ADR 0003): a summary is
+# never re-fetched before this many days have passed since its last fetch
+# attempt (successful or not, see Amanogawa.Atlas.mark_summary_attempt/1).
+config :amanogawa, :summary_max_age_days, 30
+
+# Batch size and inter-batch delay for the summaries enrichment pipeline
+# (batch lent, .claude/rules/ethics.md): each job enriches a small batch,
+# then schedules its successor after this delay to smooth the load instead
+# of hammering the Wikipedia REST API back to back.
+config :amanogawa, Amanogawa.Ingestion.Workers.EnrichSummaries,
+  batch_size: 50,
+  inter_batch_delay_seconds: 30
+
+# Background jobs (ingestion pipelines): a single :ingestion queue at
+# concurrency 1 enforces the "one SPARQL query at a time" etiquette rule
+# (.claude/rules/ethics.md); :wikipedia likewise enforces "one Wikipedia
+# request at a time". Transient backoff is handled by each adapter itself,
+# durable resume by the sync_run cursor/selection.
+#
+# Monthly ingestion sync (ADR 0003, #013), off-peak (UTC), through
+# Amanogawa.Ingestion.Workers.ScheduledSync (the only worker Oban.Plugins.
+# Cron targets, itself delegating to the Amanogawa.Ingestion facade):
+# events first on the 1st, links the next day (needs events populated
+# first), summaries the day after (the 30-day extract cache means a
+# monthly run only refreshes what expired). Disabled in test
+# (config/test.exs): a schedule must never fire during the test suite.
+config :amanogawa, Oban,
+  engine: Oban.Engines.Basic,
+  repo: Amanogawa.Repo,
+  queues: [ingestion: 1, wikipedia: 1],
+  plugins: [
+    {Oban.Plugins.Cron,
+     crontab: [
+       {"0 2 1 * *", Amanogawa.Ingestion.Workers.ScheduledSync, args: %{"kind" => "events"}},
+       {"0 2 2 * *", Amanogawa.Ingestion.Workers.ScheduledSync, args: %{"kind" => "links"}},
+       {"0 2 3 * *", Amanogawa.Ingestion.Workers.ScheduledSync, args: %{"kind" => "summaries"}}
+     ]}
+  ]
+
 # French is the source and default locale of the user-facing text.
 config :amanogawa, AmanogawaWeb.Gettext, default_locale: "fr"
 

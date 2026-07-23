@@ -16,7 +16,7 @@ Règle de sécurité : aucune interpolation brute dans les requêtes. Les templa
 Pièges Wikidata à traiter explicitement ici (`.claude/memory/data-sources.md`, skill `wikidata-query`) :
 
 - Précision temporelle : lire `p:P585/psv:P585` puis `wikibase:timeValue` et `wikibase:timePrecision`. Le raccourci `wdt:P585` masque la précision et rend impossible la troncature des faux "1er janvier".
-- Décalage RDF : le SPARQL livre les années négatives en convention astronomique XSD 1.1 (458 av. J.-C. = `-0457`). La normalisation est portée par `HistoricalDate.Wikidata.from_rdf/1` (#006) ; un test de régression sur la bataille de Marathon (Q46335) verrouille le comportement.
+- Décalage RDF : le SPARQL livre les années négatives en convention astronomique XSD 1.1 (458 av. J.-C. = `-0457`). La normalisation est portée par `HistoricalDate.Wikidata.from_rdf/1` (#006) ; un test de régression sur la bataille de Marathon (Q31900) verrouille le comportement.
 - Coordonnées : P625 direct d'abord, sinon héritées du lieu (P276 -> P625), avec provenance (`:direct` | `:place`) tracée jusqu'au stockage.
 - Bruit de l'arbre `Q1190554` : saisons sportives, élections, épisodes, concerts, matchs ; exclusion par liste noire de classes maintenue en module.
 - QLever : SPARQL 1.1 incomplet, utiliser `MINUS` plutôt que `FILTER NOT EXISTS`.
@@ -48,7 +48,7 @@ Pièges Wikidata à traiter explicitement ici (`.claude/memory/data-sources.md`,
   - parsing WKT `Point(lon lat)` vers `%Geo.Point{}` SRID 4326 (attention à l'ordre longitude puis latitude du WKT) ;
   - priorité coordonnées directes, sinon lieu, `location_source` renseigné en conséquence ;
   - bindings invalides (date non parsable, WKT malformé, QID absent) : l'événement est écarté et compté, jamais de crash du lot ; retour `{events, rejected_count}`.
-- [ ] Enregistrer les fixtures réelles QLever dans `test/support/fixtures/sparql/` : une page nominale d'événements variés (précisions 7, 9, 11 ; coordonnées directes et héritées ; sitelinks présents et absents), la bataille de Marathon (Q46335, réponse réelle, année RDF `-0489`), et des cas hostiles (précision manquante, WKT malformé, année très négative).
+- [ ] Enregistrer les fixtures réelles QLever dans `test/support/fixtures/sparql/` : une page nominale d'événements variés (précisions 7, 9, 11 ; coordonnées directes et héritées ; sitelinks présents et absents), la bataille de Marathon (Q31900, réponse réelle, année RDF `-0489`), et des cas hostiles (précision manquante, WKT malformé, année très négative).
 
 ---
 
@@ -60,7 +60,7 @@ Pièges Wikidata à traiter explicitement ici (`.claude/memory/data-sources.md`,
 - [ ] **Edge case** : événement avec coordonnées héritées uniquement -> `location_source: :place` ; événement sans article fr ni en ; précision 7 (siècle) -> month/day nil ; événement avec date de début ET de fin.
 - [ ] **Error case** : rendu de template avec paramètre non entier ou QID malformé -> `ArgumentError` ; `decode/1` sur binding à WKT malformé ou date non parsable écarte l'entrée et incrémente `rejected_count` sans lever.
 - [ ] **Limit case** : tranche vide (0 binding) ; OFFSET 0 et LIMIT 1 ; année -123000 (préhistoire) décodée correctement.
-- [ ] **Régression décalage RDF** : sur la fixture réelle de la bataille de Marathon (Q46335), le RDF livre l'année `-0489` ; le décodeur produit `begin.year == -489`, soit 490 av. J.-C. en convention astronomique (ADR 0006). Ce test documente explicitement pourquoi aucune correction d'année n'est appliquée au canal RDF (voir points d'attention).
+- [ ] **Régression décalage RDF** : sur la fixture réelle de la bataille de Marathon (Q31900), le RDF livre l'année `-0489` ; le décodeur produit `begin.year == -489`, soit 490 av. J.-C. en convention astronomique (ADR 0006). Ce test documente explicitement pourquoi aucune correction d'année n'est appliquée au canal RDF (voir points d'attention).
 
 ### Property-based tests (si applicable)
 

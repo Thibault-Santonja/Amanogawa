@@ -13,7 +13,7 @@ Le contexte Atlas est le read model servi à l'interface : il stocke les événe
 
 Le modèle est fixé par `.claude/memory/domain-model.md` et l'ADR 0006 :
 
-- Un événement est identifié métier par son QID Wikidata (`Q46335`), clé unique d'upsert ; l'identifiant interne est un UUID v7.
+- Un événement est identifié métier par son QID Wikidata (`Q31900`), clé unique d'upsert ; l'identifiant interne est un UUID v7.
 - Les dates begin/end sont des `HistoricalDate` (#006) stockées en colonnes plates (`begin_year`, `begin_month`, `begin_day`, `begin_precision`, `begin_calendar`, idem `end_*`) pour l'indexation et le tri.
 - La géométrie est un `geometry(Point, 4326)` PostGIS, avec provenance tracée (`location_source`) car la majorité des coordonnées sont héritées du lieu (P276 -> P625).
 - `sitelink_count` sert de proxy d'importance pour l'affichage par niveau de zoom.

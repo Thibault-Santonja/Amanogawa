@@ -20,7 +20,7 @@ Fondé sur l'ADR 0003 et l'étude `docs/studies/2026-07-sources-donnees-historiq
 ### Pièges connus (à traiter explicitement)
 
 - Précision lue via `psv:`/`wikibase:timePrecision` (jamais `wdt:` seul).
-- Années négatives : le canal RDF/SPARQL est déjà en convention astronomique (490 av. J.-C. = année -489), c'est le canal JSON des dumps qui livre -490 et demande un décalage de +1. Normalisation testée sur un événement BCE connu (bataille de Marathon, Q46335 : valeur interne -489).
+- Années négatives : le canal RDF/SPARQL est déjà en convention astronomique (490 av. J.-C. = année -489), c'est le canal JSON des dumps qui livre -490 et demande un décalage de +1. Normalisation testée sur un événement BCE connu (bataille de Marathon, Q31900 : valeur interne -489).
 - Faux "1er janvier" : si precision <= 9, tronquer mois/jour.
 - Provenance des coordonnées tracée : `:direct` (P625), `:place` (P276 -> P625).
 

@@ -20,6 +20,8 @@ defmodule Amanogawa.DataCase do
 
   using do
     quote do
+      use Oban.Testing, repo: Amanogawa.Repo
+
       alias Amanogawa.Repo
 
       import Ecto
