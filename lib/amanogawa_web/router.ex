@@ -13,9 +13,24 @@ defmodule AmanogawaWeb.Router do
     plug AmanogawaWeb.Plugs.ContentSecurityPolicy
   end
 
+  # Public JSON endpoints consumed by the map/timeline hooks (ADR 0005, ADR
+  # 0007): read-only, no session, rate limited per IP.
+  pipeline :api do
+    plug :accepts, ["json"]
+    plug AmanogawaWeb.Plugs.RateLimit
+  end
+
   scope "/", AmanogawaWeb do
     pipe_through :browser
 
-    live "/", HomeLive
+    live "/", ExploreLive
+  end
+
+  scope "/api", AmanogawaWeb.Controllers.Api do
+    pipe_through :api
+
+    get "/events", EventController, :index
+    get "/events/:qid/summary", EventController, :summary
+    get "/events/:qid/links", EventController, :links
   end
 end

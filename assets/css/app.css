@@ -35,6 +35,16 @@
   --palette-text-muted: oklch(45% 0.015 262);
   --palette-accent: oklch(48% 0.16 262);
   --palette-danger: oklch(55% 0.22 27);
+
+  /* Event relation lines by type (issue #017), read at runtime by the map
+     hook via getComputedStyle, same mechanism as the event marker colors
+     above: NEVER duplicate these values anywhere else. */
+  --palette-link-part-of: oklch(55% 0.02 262);
+  --palette-link-follows: oklch(58% 0.13 200);
+  --palette-link-cause: oklch(58% 0.19 40);
+  --palette-link-effect: oklch(55% 0.21 25);
+  --palette-link-significant: oklch(52% 0.17 300);
+  --palette-link-default: oklch(60% 0.02 262);
 }
 
 /* Dark mode: the system decides (no toggle, no dark class). */
@@ -51,6 +61,13 @@
     --palette-text-muted: oklch(70% 0.01 262);
     --palette-accent: oklch(72% 0.13 262);
     --palette-danger: oklch(72% 0.19 25);
+
+    --palette-link-part-of: oklch(70% 0.015 262);
+    --palette-link-follows: oklch(75% 0.12 200);
+    --palette-link-cause: oklch(75% 0.17 40);
+    --palette-link-effect: oklch(72% 0.19 25);
+    --palette-link-significant: oklch(75% 0.15 300);
+    --palette-link-default: oklch(75% 0.015 262);
   }
 }
 
@@ -77,6 +94,12 @@
   --color-danger: var(--palette-danger);
   --color-time-start: var(--time-start-color);
   --color-time-end: var(--time-end-color);
+  --color-link-part-of: var(--palette-link-part-of);
+  --color-link-follows: var(--palette-link-follows);
+  --color-link-cause: var(--palette-link-cause);
+  --color-link-effect: var(--palette-link-effect);
+  --color-link-significant: var(--palette-link-significant);
+  --color-link-default: var(--palette-link-default);
 }
 
 /* Reduced motion: neutralize CSS transitions and animations globally.

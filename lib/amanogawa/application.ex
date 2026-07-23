@@ -13,6 +13,7 @@ defmodule Amanogawa.Application do
       {DNSCluster, query: Application.get_env(:amanogawa, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Amanogawa.PubSub},
       {Oban, Application.fetch_env!(:amanogawa, Oban)},
+      AmanogawaWeb.RateLimit,
       # Start to serve requests, typically the last entry
       AmanogawaWeb.Endpoint
     ]

@@ -71,6 +71,8 @@ defmodule Amanogawa.MixProject do
       {:jason, "~> 1.2"},
       {:req, "~> 0.5"},
       {:oban, "~> 2.19"},
+      {:hammer, "~> 7.4"},
+      {:remote_ip, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
@@ -106,7 +108,8 @@ defmodule Amanogawa.MixProject do
         "phx.digest"
       ],
       # Contractual order (fail fast): compile, format, static analysis,
-      # asset build (needs `mix assets.setup` once), then tests.
+      # asset build (needs `mix assets.setup` once), JS unit tests, then
+      # the Elixir test suite.
       # Mirrored exactly by CI (.github/workflows/ci.yml); keep them in sync.
       precommit: [
         "compile --warnings-as-errors",
@@ -114,6 +117,7 @@ defmodule Amanogawa.MixProject do
         "credo --strict",
         "sobelow --exit",
         "assets.build",
+        "cmd --cd assets npm test",
         "test"
       ]
     ]

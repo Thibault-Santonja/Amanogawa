@@ -80,6 +80,16 @@ config :amanogawa, Oban,
      ]}
   ]
 
+# Rate limiting for public JSON endpoints (issue #014, `.claude/rules/
+# security.md`): Hammer, ETS backend, fixed window, keyed by client IP in
+# AmanogawaWeb.Plugs.RateLimit. `:limit` requests are allowed per
+# `:scale_ms` window; both are read at request time (not baked into the
+# router at compile time), so config/runtime.exs can override the quota per
+# environment without a rebuild.
+config :amanogawa, AmanogawaWeb.RateLimit,
+  limit: 120,
+  scale_ms: :timer.minutes(1)
+
 # French is the source and default locale of the user-facing text.
 config :amanogawa, AmanogawaWeb.Gettext, default_locale: "fr"
 

@@ -47,6 +47,7 @@ Fondé sur les ADR 0005 (hooks) et 0007 (diffusion GeoJSON bornée).
 | #016 Hover card + fiche événement + lien Wikipedia | 003-hover-card-fiche-evenement.md | 12h |
 | #017 Lignes de relations entre événements | 004-lignes-relations.md | 8h |
 | #018 LiveView Explore : état, URL partageable | 005-liveview-explore.md | 12h |
+| #029 Tests E2E du parcours critique (report acté à la revue de F03) | 006-tests-e2e-parcours-critique.md | 12h |
 
 ## Dépendances
 

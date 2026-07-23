@@ -23,6 +23,17 @@ end
 config :amanogawa, AmanogawaWeb.Endpoint,
   http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
+# List of trusted reverse-proxy IPs/CIDRs the `RemoteIp` plug
+# (`AmanogawaWeb.Endpoint`) trusts to set `X-Forwarded-For`/`Forwarded`
+# headers (issue security-review #4). Read in every environment, not just
+# :prod: empty by default (`TRUSTED_PROXIES` unset), which is a no-op and
+# keeps dev/test behavior unchanged (no test ever sends a forwarding
+# header, so this never fires there regardless). Only set `TRUSTED_PROXIES`
+# on a deployment that actually sits behind a reverse proxy/load balancer;
+# setting it without one would let any direct client spoof its own IP.
+trusted_proxies = System.get_env("TRUSTED_PROXIES", "") |> String.split(",", trim: true)
+config :amanogawa, :trusted_proxies, trusted_proxies
+
 if config_env() == :dev do
   # Reload browser tabs when matching files change.
   config :amanogawa, AmanogawaWeb.Endpoint,
@@ -78,6 +89,14 @@ if config_env() == :prod do
       """
 
   config :amanogawa, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
+
+  # Public JSON endpoint rate limit (issue #014): overridable per deployment
+  # without a rebuild, since AmanogawaWeb.Plugs.RateLimit reads this config
+  # at request time rather than at router compile time. Window stays fixed
+  # at one minute; only the quota is meant to be tuned per environment.
+  config :amanogawa, AmanogawaWeb.RateLimit,
+    limit: String.to_integer(System.get_env("RATE_LIMIT_PER_MINUTE", "120")),
+    scale_ms: :timer.minutes(1)
 
   config :amanogawa, AmanogawaWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],

@@ -6,6 +6,36 @@ defmodule Amanogawa.HistoricalDateTest do
 
   alias Amanogawa.HistoricalDate
 
+  describe "min_year/0 and max_year/0" do
+    test "min_year is the exact lower bound enforced by changeset/2" do
+      assert HistoricalDate.min_year() == -13_800_000_000
+
+      assert HistoricalDate.changeset(%HistoricalDate{}, %{
+               year: HistoricalDate.min_year(),
+               precision: 0
+             }).valid?
+
+      refute HistoricalDate.changeset(%HistoricalDate{}, %{
+               year: HistoricalDate.min_year() - 1,
+               precision: 0
+             }).valid?
+    end
+
+    test "max_year is the exact upper bound enforced by changeset/2" do
+      assert HistoricalDate.max_year() == 3_000
+
+      assert HistoricalDate.changeset(%HistoricalDate{}, %{
+               year: HistoricalDate.max_year(),
+               precision: 0
+             }).valid?
+
+      refute HistoricalDate.changeset(%HistoricalDate{}, %{
+               year: HistoricalDate.max_year() + 1,
+               precision: 0
+             }).valid?
+    end
+  end
+
   describe "changeset/2 happy path" do
     test "accepts a full date (day precision)" do
       changeset =

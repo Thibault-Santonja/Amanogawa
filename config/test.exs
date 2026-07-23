@@ -89,3 +89,34 @@ config :amanogawa, Amanogawa.Ingestion.Workers.ImportLinks,
   page_size: 3,
   slice_width: 10,
   max_qid: 20
+
+# Small quota so AmanogawaWeb.Controllers.Api.EventControllerTest can reach
+# the 429 path in a handful of requests. Every other conn test that hits
+# /api/events uses its own fake remote IP (distinct rate-limit bucket), so
+# this low quota never bleeds into unrelated tests.
+#
+# scale_ms is 24h, not 1 minute: Hammer's fixed-window algorithm buckets
+# hits into `div(now, scale_ms)` slices aligned on the wall clock (see
+# `deps/hammer/lib/hammer/ets/fix_window.ex`), not a window that starts
+# counting from the first hit. With a 1-minute scale, a wall-clock minute
+# boundary crossed mid-test (between any of the 6 requests fired in a tight
+# loop) silently resets the counter, so fewer than 6 hits land in the same
+# window and the test never reaches its expected 429 (flaky, reproduced by
+# running the suite at HH:MM:59.9). A 24h window makes that boundary
+# practically unreachable within a single test run, while every other test
+# hitting /api/events still uses its own fake remote IP (a distinct
+# Hammer key), so this generous window causes no cross-test bleed.
+config :amanogawa, AmanogawaWeb.RateLimit,
+  limit: 5,
+  scale_ms: :timer.hours(24)
+
+# Small, dedicated quota so AmanogawaWeb.ExploreLiveTest can reach the
+# "throttled, selection ignored" path in a handful of hits. Every other
+# test invoking select_event uses the LiveView's default connect_info peer
+# (127.0.0.1) at most once or twice, far under this quota; the tests that
+# specifically exercise it set their own unique remote_ip on the test conn
+# (mirrors event_controller_test.exs's unique_ip pattern), so this low
+# quota never bleeds into unrelated tests.
+config :amanogawa, AmanogawaWeb.ExploreLive,
+  selection_rate_limit: 3,
+  selection_rate_limit_scale_ms: :timer.minutes(1)

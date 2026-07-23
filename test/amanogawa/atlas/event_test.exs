@@ -195,21 +195,56 @@ defmodule Amanogawa.Atlas.EventTest do
       refute changeset.valid?
       assert "must be a Point geometry" in errors_on(changeset).geom
     end
+
+    test "a non-Wikimedia wiki_url_fr is rejected" do
+      attrs = Map.put(@valid_attrs, :wiki_url_fr, "https://evil.example.com/wiki/X")
+      changeset = Event.changeset(%Event{}, attrs)
+
+      refute changeset.valid?
+      assert "must be a valid Wikimedia URL" in errors_on(changeset).wiki_url_fr
+    end
+
+    test "a non-https wiki_url_en is rejected" do
+      attrs = Map.put(@valid_attrs, :wiki_url_en, "http://en.wikipedia.org/wiki/X")
+      changeset = Event.changeset(%Event{}, attrs)
+
+      refute changeset.valid?
+      assert "must be a valid Wikimedia URL" in errors_on(changeset).wiki_url_en
+    end
+
+    test "a thumbnail_url on a Wikipedia article host (not upload.wikimedia.org) is rejected" do
+      attrs = Map.put(@valid_attrs, :thumbnail_url, "https://fr.wikipedia.org/wiki/X")
+      changeset = Event.changeset(%Event{}, attrs)
+
+      refute changeset.valid?
+      assert "must be a valid Wikimedia URL" in errors_on(changeset).thumbnail_url
+    end
+
+    test "a wiki_url_fr / thumbnail_url on a Wikimedia host is accepted" do
+      attrs =
+        Map.merge(@valid_attrs, %{
+          wiki_url_fr: "https://fr.wikipedia.org/wiki/Bataille_de_Marathon",
+          thumbnail_url: "https://upload.wikimedia.org/wikipedia/commons/a/ab/Marathon.jpg"
+        })
+
+      assert Event.changeset(%Event{}, attrs).valid?
+    end
   end
 
   describe "changeset/2 limit cases" do
     test "very long labels, URLs and extracts actually INSERT (text columns, no varchar limit)" do
       long_text = String.duplicate("a", 10_000)
-      long_url = "https://fr.wikipedia.org/wiki/" <> String.duplicate("b", 1_500)
+      long_wiki_url = "https://fr.wikipedia.org/wiki/" <> String.duplicate("b", 1_500)
+      long_thumbnail_url = "https://upload.wikimedia.org/" <> String.duplicate("b", 1_500)
 
       attrs =
         Map.merge(@valid_attrs, %{
           label_fr: long_text,
           label_en: long_text,
           extract_fr: long_text,
-          wiki_url_fr: long_url,
-          wiki_url_en: long_url,
-          thumbnail_url: long_url,
+          wiki_url_fr: long_wiki_url,
+          wiki_url_en: long_wiki_url,
+          thumbnail_url: long_thumbnail_url,
           kind: String.duplicate("Q", 1) <> String.duplicate("9", 400)
         })
 
@@ -220,8 +255,8 @@ defmodule Amanogawa.Atlas.EventTest do
 
       reloaded = Repo.get!(Event, inserted.id)
       assert reloaded.label_fr == long_text
-      assert reloaded.wiki_url_fr == long_url
-      assert reloaded.thumbnail_url == long_url
+      assert reloaded.wiki_url_fr == long_wiki_url
+      assert reloaded.thumbnail_url == long_thumbnail_url
     end
 
     test "a deeply prehistoric begin_year within the bigint domain actually INSERTS" do
@@ -265,7 +300,7 @@ defmodule Amanogawa.Atlas.EventTest do
 
       attrs = %{
         extract_fr: "Un résumé.",
-        thumbnail_url: "https://example.org/thumb.jpg",
+        thumbnail_url: "https://upload.wikimedia.org/wikipedia/commons/a/ab/Marathon.jpg",
         extract_attribution: %{
           "article_url" => "https://fr.wikipedia.org/wiki/Bataille_de_Marathon",
           "license" => "CC BY-SA 4.0",
@@ -305,6 +340,16 @@ defmodule Amanogawa.Atlas.EventTest do
       refute changeset.valid?
 
       assert "must include article_url and license" in errors_on(changeset).extract_attribution
+    end
+
+    test "a thumbnail_url outside upload.wikimedia.org is rejected" do
+      event = %Event{qid: "Q31900", begin_year: -489}
+
+      changeset =
+        Event.summary_changeset(event, %{thumbnail_url: "https://evil.example.com/thumb.jpg"})
+
+      refute changeset.valid?
+      assert "must be a valid Wikimedia URL" in errors_on(changeset).thumbnail_url
     end
   end
 

@@ -8,11 +8,14 @@ defmodule Amanogawa.Atlas do
   `Amanogawa.Repo` directly from another context.
   """
 
+  import Ecto.Changeset, only: [add_error: 3]
   import Ecto.Query
 
   alias Amanogawa.Atlas.Event
   alias Amanogawa.Atlas.EventLink
+  alias Amanogawa.Atlas.EventQueries
   alias Amanogawa.Repo
+  alias Amanogawa.WikimediaUrl
 
   # PostgreSQL allows at most 65535 bound parameters per statement; with
   # around twenty columns per event row, 500 rows per batch stays
@@ -117,10 +120,75 @@ defmodule Amanogawa.Atlas do
     {:ok, %{created: created, skipped_missing: skipped}}
   end
 
+  @doc """
+  Lists events for the map viewport as a GeoJSON `FeatureCollection`
+  (issue #014, ADR 0007): `opts` is the normalized output of
+  `AmanogawaWeb.Params.EventsQuery.parse/1` (bbox envelopes, `from`/`to`
+  year window, `limit`), already bounded server-side by the caller.
+
+  Read-only and side-effect free. The query itself, including every
+  PostGIS fragment, is centralized in `Amanogawa.Atlas.EventQueries`; this
+  function only shapes the result into GeoJSON, the boundary where
+  PostGIS geometry becomes wire format (`.claude/rules/geo-temporal.md`:
+  "convert to GeoJSON only at the web edge").
+  """
+  @spec list_events_geojson(EventQueries.opts()) :: map()
+  def list_events_geojson(opts) do
+    features =
+      opts
+      |> EventQueries.list_events()
+      |> Enum.map(&event_row_to_feature/1)
+
+    %{"type" => "FeatureCollection", "features" => features}
+  end
+
   @doc "Fetches an event by its Wikidata QID, or `nil` if unknown locally."
   @spec get_event_by_qid(String.t()) :: Event.t() | nil
   def get_event_by_qid(qid) do
     Repo.get_by(Event, qid: qid)
+  end
+
+  @doc """
+  Fetches the hover card / summary of `qid` (issue #016): `{:ok, summary}`
+  with `qid`, `label` (fr, falling back to en), `extract` (fr, falling back
+  to en, plain text as stored by #012, `nil` when neither exists yet),
+  `thumbnail_url`, `wiki_url` (fr, falling back to en), `extract_language`
+  (`"fr"` or `"en"`, `nil` alongside a `nil` extract) and `fetched_at` (the
+  attribution timestamp), or `{:error, :not_found}` for an unknown QID.
+
+  Format validation of `qid` is the caller's responsibility
+  (`AmanogawaWeb.Params.EventId`, `.claude/rules/security.md`): this
+  function only looks the QID up, it never raises on a malformed one.
+  """
+  @spec get_event_summary(String.t()) :: {:ok, map()} | {:error, :not_found}
+  def get_event_summary(qid) do
+    case get_event_by_qid(qid) do
+      nil -> {:error, :not_found}
+      event -> {:ok, event_summary(event)}
+    end
+  end
+
+  @doc """
+  Lists the typed relations of `qid` as a GeoJSON `FeatureCollection`
+  (issue #017): `{:error, :not_found}` for an unknown QID, otherwise
+  `{:ok, feature_collection}` with one `LineString` feature per relation
+  whose two endpoints both carry a geometry, ordered from `qid` to the
+  related event.
+
+  An event known locally but without its own geometry yields an empty
+  collection rather than an error: no line can be anchored without a
+  starting point, but the event itself is not "unknown". The query
+  (including the source/target join and the `geom IS NOT NULL` filter on
+  each side) lives in `Amanogawa.Atlas.EventQueries`, this function only
+  shapes the result into GeoJSON, the boundary where PostGIS geometry
+  becomes wire format (`.claude/rules/geo-temporal.md`).
+  """
+  @spec list_event_links_geojson(String.t()) :: {:ok, map()} | {:error, :not_found}
+  def list_event_links_geojson(qid) do
+    case get_event_by_qid(qid) do
+      nil -> {:error, :not_found}
+      event -> {:ok, event_links_feature_collection(event)}
+    end
   end
 
   @doc """
@@ -188,6 +256,15 @@ defmodule Amanogawa.Atlas do
   internal types (`.claude/rules/architecture.md`). Required keys:
   `:lang` (`:fr` or `:en`), `:extract`, `:article_url`; `:thumbnail_url` is
   optional (`nil` when the article has no image).
+
+  `article_url` is validated (`Amanogawa.WikimediaUrl.valid?/1`, defense in
+  depth: `Amanogawa.Ingestion.WikipediaClient.Rest` always populates it
+  from the response's own `content_urls.desktop.page`, itself already a
+  Wikimedia URL by construction, but this is the write boundary, the one
+  place a malformed or hostile value would otherwise reach storage
+  regardless of how it got here). An invalid `article_url` fails the same
+  way any other invalid changeset field does: `{:error, changeset}`,
+  nothing is written.
   """
   @spec put_event_summary(Event.t(), map()) :: {:ok, Event.t()} | {:error, Ecto.Changeset.t()}
   def put_event_summary(
@@ -209,6 +286,7 @@ defmodule Amanogawa.Atlas do
 
     event
     |> Event.summary_changeset(changeset_attrs)
+    |> validate_article_url(article_url)
     |> Repo.update()
   end
 
@@ -232,6 +310,14 @@ defmodule Amanogawa.Atlas do
 
   defp extract_field(:fr), do: :extract_fr
   defp extract_field(:en), do: :extract_en
+
+  defp validate_article_url(changeset, article_url) do
+    if WikimediaUrl.valid?(article_url) do
+      changeset
+    else
+      add_error(changeset, :extract_attribution, "article_url must be a valid Wikimedia URL")
+    end
+  end
 
   defp insert_event_batch(batch) do
     {count, _} =
@@ -291,6 +377,83 @@ defmodule Amanogawa.Atlas do
 
   defp atom_key(key) when is_atom(key), do: key
   defp atom_key(key) when is_binary(key), do: String.to_existing_atom(key)
+
+  defp event_row_to_feature(row) do
+    %{
+      "type" => "Feature",
+      "geometry" => Geo.JSON.encode!(row.geom),
+      "properties" => %{
+        "qid" => row.qid,
+        "label" => row.label,
+        "year" => row.year,
+        "precision" => row.precision,
+        "importance" => row.importance
+      }
+    }
+  end
+
+  defp event_summary(event) do
+    {extract, extract_language} = extract_with_language(event)
+
+    %{
+      qid: event.qid,
+      label: event.label_fr || event.label_en,
+      extract: extract,
+      thumbnail_url: event.thumbnail_url,
+      wiki_url: event.wiki_url_fr || event.wiki_url_en,
+      extract_language: extract_language,
+      fetched_at: event.extract_fetched_at
+    }
+  end
+
+  defp extract_with_language(%Event{extract_fr: extract_fr}) when is_binary(extract_fr),
+    do: {extract_fr, "fr"}
+
+  defp extract_with_language(%Event{extract_en: extract_en}) when is_binary(extract_en),
+    do: {extract_en, "en"}
+
+  defp extract_with_language(%Event{}), do: {nil, nil}
+
+  # No geometry on the selected event itself: nothing to anchor a line to,
+  # regardless of how many relations it has.
+  defp event_links_feature_collection(%Event{geom: nil}) do
+    %{"type" => "FeatureCollection", "features" => []}
+  end
+
+  defp event_links_feature_collection(event) do
+    features =
+      event.id
+      |> EventQueries.list_links()
+      |> Enum.map(&link_row_to_feature(event, &1))
+
+    %{"type" => "FeatureCollection", "features" => features}
+  end
+
+  # Coordinates run from the selected event to the related one, whichever
+  # side of the relation it sits on (`direction` carries which). A
+  # degenerate LineString (both endpoints at the same point) is kept as-is:
+  # rare, harmless to render (MapLibre draws a zero-length line, invisible
+  # but not an error), and excluding it would need a floating-point
+  # coordinate equality check that is not worth its complexity for a case
+  # with no observed real-world occurrence.
+  defp link_row_to_feature(event, row) do
+    line = %Geo.LineString{
+      coordinates: [event.geom.coordinates, row.target_geom.coordinates],
+      srid: 4326
+    }
+
+    %{
+      "type" => "Feature",
+      "geometry" => Geo.JSON.encode!(line),
+      "properties" => %{
+        "link_type" => Atom.to_string(row.type),
+        "direction" => Atom.to_string(row.direction),
+        "target_qid" => row.target_qid,
+        "target_label" => row.target_label,
+        "target_year" => row.target_year
+      }
+    }
+  end
 
   defp utc_now, do: DateTime.truncate(DateTime.utc_now(), :second)
 end

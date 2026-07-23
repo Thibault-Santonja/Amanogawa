@@ -34,7 +34,7 @@ defmodule Amanogawa.Ingestion.Wikidata.EventDecoder do
       (a Wikidata label past that length is display noise, not data worth
       rejecting a whole event over);
     * article URLs (`articleFr`/`articleEn`) must satisfy
-      `Amanogawa.Ingestion.WikimediaUrl.valid?/1` (https, Wikimedia host,
+      `Amanogawa.WikimediaUrl.valid?/1` (https, Wikimedia host,
       at most 2048 characters), otherwise the binding is rejected: a
       non-Wikimedia article URL means the binding cannot be trusted;
     * `sitelinkCount` is clamped into `0..1_000_000` (a malformed or absent
@@ -66,7 +66,7 @@ defmodule Amanogawa.Ingestion.Wikidata.EventDecoder do
   alias Amanogawa.HistoricalDate
   alias Amanogawa.Ingestion.SparqlClient.Result
   alias Amanogawa.Ingestion.Wikidata.ExtractedEvent
-  alias Amanogawa.Ingestion.WikimediaUrl
+  alias Amanogawa.WikimediaUrl
 
   @qid_uri_regex ~r{\Ahttp://www\.wikidata\.org/entity/(Q\d+)\z}
 
@@ -193,7 +193,7 @@ defmodule Amanogawa.Ingestion.Wikidata.EventDecoder do
   # An absent article URL is fine (most events have no article in one of
   # the two languages); a present but invalid one (not https, not a
   # Wikimedia host, longer than the accepted bound) rejects the binding:
-  # see `Amanogawa.Ingestion.WikimediaUrl`.
+  # see `Amanogawa.WikimediaUrl`.
   defp extract_wiki_url(binding, key) do
     case fetch_value(binding, key) do
       {:ok, url} -> if WikimediaUrl.valid?(url), do: {:ok, url}, else: :error
