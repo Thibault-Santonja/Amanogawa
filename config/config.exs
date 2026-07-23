@@ -14,6 +14,19 @@ config :amanogawa,
 # Use the custom Postgrex type module so PostGIS geometries map to Geo structs
 config :amanogawa, Amanogawa.Repo, types: Amanogawa.PostgresTypes
 
+# SPARQL client used by the ingestion pipelines (Amanogawa.Ingestion.SparqlClient
+# port). Overridden with a Mox mock in config/test.exs.
+config :amanogawa, :sparql_client, Amanogawa.Ingestion.SparqlClient.QLever
+
+# QLever adapter configuration (ADR 0003): connection/receive timeouts and the
+# base backoff delay on HTTP 429 before honoring a Retry-After header.
+config :amanogawa, Amanogawa.Ingestion.SparqlClient.QLever,
+  base_url: "https://qlever.dev/api/wikidata",
+  connect_timeout: :timer.seconds(15),
+  receive_timeout: :timer.seconds(120),
+  backoff_base_ms: 500,
+  retry_after_unit_ms: 1000
+
 # French is the source and default locale of the user-facing text.
 config :amanogawa, AmanogawaWeb.Gettext, default_locale: "fr"
 

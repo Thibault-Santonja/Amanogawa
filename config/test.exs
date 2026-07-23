@@ -34,3 +34,15 @@ config :phoenix_live_view,
 # Sort query params output of verified routes for robust url comparisons
 config :phoenix,
   sort_verified_routes_query_params: true
+
+# Ingestion pipelines depend only on the Amanogawa.Ingestion.SparqlClient
+# behaviour; tests stub it with Mox, never hitting a real SPARQL endpoint.
+config :amanogawa, :sparql_client, Amanogawa.Ingestion.SparqlClientMock
+
+# The QLever adapter's own tests exercise Req against a Req.Test stub (no
+# network) and use a near-zero backoff base and Retry-After unit so
+# 429/backoff scenarios run fast instead of actually sleeping for seconds.
+config :amanogawa, Amanogawa.Ingestion.SparqlClient.QLever,
+  plug: {Req.Test, Amanogawa.Ingestion.SparqlClient.QLever},
+  backoff_base_ms: 1,
+  retry_after_unit_ms: 1
