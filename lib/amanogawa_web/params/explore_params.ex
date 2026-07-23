@@ -24,6 +24,7 @@ defmodule AmanogawaWeb.Params.ExploreParams do
   """
 
   alias Amanogawa.HistoricalDate
+  alias AmanogawaWeb.Params.EventId
 
   @type t :: %{
           from: integer(),
@@ -51,13 +52,6 @@ defmodule AmanogawaWeb.Params.ExploreParams do
   @min_lng -180.0
   @max_lng 180.0
 
-  # A Wikidata QID, as carried by `AmanogawaWeb.Params.ExploreParams`'s two
-  # callers (event selection and event kind filters). Kept local rather
-  # than reused from `Amanogawa.Atlas.Event`: that module is internal to
-  # the Atlas context and never called from the web layer
-  # (`.claude/rules/architecture.md`).
-  @qid_regex ~r/\AQ\d+\z/
-
   # Hard cap on the number of `kinds` filters accepted from a single URL:
   # every user-controlled input is bounded server-side
   # (`.claude/rules/security.md`), and no legitimate filter UI needs more.
@@ -83,10 +77,13 @@ defmodule AmanogawaWeb.Params.ExploreParams do
     }
   end
 
-  @doc "True when `value` matches the Wikidata QID format (`Q` followed by digits)."
+  @doc """
+  True when `value` matches the Wikidata QID format (`Q` followed by
+  digits, bounded length). Delegates to `AmanogawaWeb.Params.EventId`, the
+  single definition shared with the events API endpoints (#016, #017).
+  """
   @spec valid_qid?(term()) :: boolean()
-  def valid_qid?(value) when is_binary(value), do: Regex.match?(@qid_regex, value)
-  def valid_qid?(_other), do: false
+  def valid_qid?(value), do: EventId.valid?(value)
 
   @doc """
   True when `z`/`lat`/`lng` are all within their valid ranges.

@@ -171,6 +171,47 @@ defmodule Amanogawa.Atlas.EventQueriesTest do
     end
   end
 
+  describe "list_links/1 properties" do
+    @link_types ~w(part_of follows cause effect significant)a
+
+    property "every feature returned by list_event_links_geojson/1 has two positions, world-bound coordinates, and a valid link_type" do
+      check all relation_count <- integer(0..8),
+                types <- list_of(member_of(@link_types), length: relation_count),
+                max_runs: 20 do
+        center = event_fixture(qid: unique_qid())
+
+        Enum.each(types, fn type ->
+          target =
+            event_fixture(
+              qid: unique_qid(),
+              geom: %Geo.Point{coordinates: {random_lon(), random_lat()}, srid: 4326}
+            )
+
+          event_link_fixture(source_id: center.id, target_id: target.id, type: type)
+        end)
+
+        assert {:ok, %{"features" => features}} = Atlas.list_event_links_geojson(center.qid)
+        assert length(features) == relation_count
+
+        for feature <- features do
+          assert feature["geometry"]["type"] == "LineString"
+          assert [_first, _second] = coordinates = feature["geometry"]["coordinates"]
+
+          for [lon, lat] <- coordinates do
+            assert lon >= -180.0 and lon <= 180.0
+            assert lat >= -90.0 and lat <= 90.0
+          end
+
+          assert feature["properties"]["link_type"] in Enum.map(@link_types, &Atom.to_string/1)
+        end
+      end
+    end
+
+    defp random_lon, do: :rand.uniform() * 360 - 180
+    defp random_lat, do: :rand.uniform() * 180 - 90
+    defp unique_qid, do: "Q#{System.unique_integer([:positive])}"
+  end
+
   defp within_any_envelope?(lon, lat, envelopes) do
     Enum.any?(envelopes, fn envelope ->
       lon >= envelope.min_lon and lon <= envelope.max_lon and

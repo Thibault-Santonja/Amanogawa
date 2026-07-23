@@ -4,15 +4,19 @@ defmodule AmanogawaWeb.Plugs.ContentSecurityPolicy do
 
   No third-party script, style, or font is ever allowed. Beyond `'self'`,
   the policy only opens what the map requires: MapLibre workers run from
-  `blob:` URLs, decoded images use `data:`/`blob:`, and vector tiles,
-  glyphs, and sprites are fetched from the OpenFreeMap origin. The LiveView
-  websocket origin is derived from the endpoint configuration.
+  `blob:` URLs, decoded images use `data:`/`blob:`, vector tiles, glyphs,
+  and sprites are fetched from the OpenFreeMap origin, and event
+  thumbnails (issue #016) are fetched from the Wikimedia upload origin,
+  the only host `Amanogawa.Ingestion.WikimediaUrl` ever lets a
+  `thumbnail_url` point to. The LiveView websocket origin is derived from
+  the endpoint configuration.
   """
   @behaviour Plug
 
   import Plug.Conn
 
   @tiles_origin "https://tiles.openfreemap.org"
+  @wikimedia_images_origin "https://upload.wikimedia.org"
 
   @doc """
   Returns the origin serving map tiles, glyphs, and sprites.
@@ -22,6 +26,16 @@ defmodule AmanogawaWeb.Plugs.ContentSecurityPolicy do
   """
   @spec tiles_origin() :: String.t()
   def tiles_origin, do: @tiles_origin
+
+  @doc """
+  Returns the origin serving Wikipedia article thumbnails (issue #016).
+
+  Exposed for the same reason as `tiles_origin/0`: tests assert the CSP
+  and the actual data source (`Amanogawa.Ingestion.WikimediaUrl`) never
+  drift apart.
+  """
+  @spec wikimedia_images_origin() :: String.t()
+  def wikimedia_images_origin, do: @wikimedia_images_origin
 
   @impl Plug
   def init(opts), do: opts
@@ -38,7 +52,7 @@ defmodule AmanogawaWeb.Plugs.ContentSecurityPolicy do
         "default-src 'self'",
         "script-src 'self'",
         "style-src 'self'",
-        "img-src 'self' data: blob:",
+        "img-src 'self' data: blob: #{@wikimedia_images_origin}",
         "font-src 'self'",
         "connect-src 'self' #{websocket_origin(endpoint)} #{@tiles_origin}",
         "worker-src blob:",

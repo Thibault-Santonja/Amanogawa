@@ -64,6 +64,99 @@ defmodule AmanogawaWeb.Controllers.Api.EventControllerTest do
     end
   end
 
+  describe "GET /api/events/:qid/summary" do
+    test "a known QID returns 200 with the expected fields", %{conn: conn} do
+      event_fixture(
+        qid: "Q31900",
+        label_fr: "Bataille de Marathon",
+        extract_fr: "Resume francais",
+        wiki_url_fr: "https://fr.wikipedia.org/wiki/Bataille_de_Marathon",
+        thumbnail_url: "https://upload.wikimedia.org/wikipedia/commons/a/ab/Marathon.jpg"
+      )
+
+      conn = conn |> unique_conn() |> get(~p"/api/events/Q31900/summary")
+
+      assert [content_type] = get_resp_header(conn, "content-type")
+      assert content_type =~ "application/json"
+
+      body = json_response(conn, 200)
+
+      assert body == %{
+               "qid" => "Q31900",
+               "label" => "Bataille de Marathon",
+               "extract" => "Resume francais",
+               "thumbnail_url" =>
+                 "https://upload.wikimedia.org/wikipedia/commons/a/ab/Marathon.jpg",
+               "wiki_url" => "https://fr.wikipedia.org/wiki/Bataille_de_Marathon",
+               "extract_language" => "fr",
+               "fetched_at" => nil
+             }
+    end
+
+    test "an unknown but well-formed QID returns 404", %{conn: conn} do
+      conn = conn |> unique_conn() |> get(~p"/api/events/Q999999999/summary")
+
+      assert %{"errors" => %{"qid" => [_message]}} = json_response(conn, 404)
+    end
+
+    test "a malformed QID returns 400 without touching the database", %{conn: conn} do
+      conn = conn |> unique_conn() |> get(~p"/api/events/not-a-qid/summary")
+
+      assert %{"errors" => %{"qid" => [_message]}} = json_response(conn, 400)
+    end
+
+    test "a hostile QID is rejected with 400", %{conn: conn} do
+      conn = conn |> unique_conn() |> get("/api/events/#{URI.encode("Q1' OR 1=1")}/summary")
+
+      assert json_response(conn, 400)
+    end
+  end
+
+  describe "GET /api/events/:qid/links" do
+    test "an event with relations returns 200 and the expected FeatureCollection", %{conn: conn} do
+      center = event_fixture(qid: "Q1", geom: %Geo.Point{coordinates: {2.35, 48.85}, srid: 4326})
+
+      target =
+        event_fixture(qid: "Q2", geom: %Geo.Point{coordinates: {12.5, 41.9}, srid: 4326})
+
+      event_link_fixture(source_id: center.id, target_id: target.id, type: :cause)
+
+      conn = conn |> unique_conn() |> get(~p"/api/events/Q1/links")
+
+      assert [content_type] = get_resp_header(conn, "content-type")
+      assert content_type =~ "application/json"
+
+      body = json_response(conn, 200)
+      assert body["type"] == "FeatureCollection"
+      assert [feature] = body["features"]
+      assert feature["geometry"]["type"] == "LineString"
+      assert feature["properties"]["link_type"] == "cause"
+      assert feature["properties"]["target_qid"] == "Q2"
+    end
+
+    test "an event without any relation returns 200 with an empty FeatureCollection", %{
+      conn: conn
+    } do
+      event_fixture(qid: "Q1")
+
+      conn = conn |> unique_conn() |> get(~p"/api/events/Q1/links")
+
+      assert %{"type" => "FeatureCollection", "features" => []} = json_response(conn, 200)
+    end
+
+    test "an unknown but well-formed QID returns 404", %{conn: conn} do
+      conn = conn |> unique_conn() |> get(~p"/api/events/Q999999999/links")
+
+      assert %{"errors" => %{"qid" => [_message]}} = json_response(conn, 404)
+    end
+
+    test "a malformed QID returns 400 without touching the database", %{conn: conn} do
+      conn = conn |> unique_conn() |> get(~p"/api/events/not-a-qid/links")
+
+      assert %{"errors" => %{"qid" => [_message]}} = json_response(conn, 400)
+    end
+  end
+
   defp unique_conn(conn), do: put_remote_ip(conn, unique_ip())
 
   defp put_remote_ip(conn, ip), do: %{conn | remote_ip: ip}

@@ -195,6 +195,73 @@ defmodule AmanogawaWeb.ExploreLiveTest do
     end
   end
 
+  describe "event panel content (issue #016)" do
+    test "shows the formatted begin date, extract, attribution and a Wikipedia link", %{
+      conn: conn
+    } do
+      event =
+        event_fixture(
+          label_fr: "Bataille de Marathon",
+          begin_year: -489,
+          begin_precision: 9,
+          extract_fr: "Resume de la bataille",
+          wiki_url_fr: "https://fr.wikipedia.org/wiki/Bataille_de_Marathon"
+        )
+
+      {:ok, lv, html} = live(conn, ~p"/?sel=#{event.qid}")
+
+      assert html =~ "490 av. J.-C."
+      assert html =~ "Resume de la bataille"
+      assert html =~ "CC BY-SA 4.0"
+
+      assert has_element?(
+               lv,
+               ~s(a[href="https://fr.wikipedia.org/wiki/Bataille_de_Marathon"][target="_blank"][rel="noopener noreferrer"])
+             )
+    end
+
+    test "an extract containing a script tag is rendered escaped, never executed", %{conn: conn} do
+      event = event_fixture(extract_fr: "<script>alert(1)</script>")
+
+      {:ok, _lv, html} = live(conn, ~p"/?sel=#{event.qid}")
+
+      assert html =~ "&lt;script&gt;alert(1)&lt;/script&gt;"
+      refute html =~ "<script>alert(1)</script>"
+    end
+
+    test "an event without a thumbnail renders no img tag inside the panel", %{conn: conn} do
+      event = event_fixture(thumbnail_url: nil)
+
+      {:ok, lv, _html} = live(conn, ~p"/?sel=#{event.qid}")
+
+      refute has_element?(lv, "#event-panel img")
+    end
+
+    test "an event with a thumbnail renders it with the label as alt text", %{conn: conn} do
+      event =
+        event_fixture(
+          label_fr: "Bataille de Marathon",
+          thumbnail_url: "https://upload.wikimedia.org/wikipedia/commons/a/ab/Marathon.jpg"
+        )
+
+      {:ok, lv, _html} = live(conn, ~p"/?sel=#{event.qid}")
+
+      assert has_element?(
+               lv,
+               ~s(#event-panel img[src="https://upload.wikimedia.org/wikipedia/commons/a/ab/Marathon.jpg"][alt="Bataille de Marathon"])
+             )
+    end
+
+    test "an event without an extract shows no attribution or Wikipedia link", %{conn: conn} do
+      event = event_fixture(extract_fr: nil, extract_en: nil, wiki_url_fr: nil, wiki_url_en: nil)
+
+      {:ok, lv, html} = live(conn, ~p"/?sel=#{event.qid}")
+
+      refute html =~ "CC BY-SA"
+      refute has_element?(lv, "#event-panel a[target=\"_blank\"]")
+    end
+  end
+
   describe "browser navigation" do
     test "re-applying a previous URL through handle_params restores its state", %{conn: conn} do
       event = event_fixture(label_fr: "Prise de la Bastille")

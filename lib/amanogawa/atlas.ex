@@ -147,6 +147,49 @@ defmodule Amanogawa.Atlas do
   end
 
   @doc """
+  Fetches the hover card / summary of `qid` (issue #016): `{:ok, summary}`
+  with `qid`, `label` (fr, falling back to en), `extract` (fr, falling back
+  to en, plain text as stored by #012, `nil` when neither exists yet),
+  `thumbnail_url`, `wiki_url` (fr, falling back to en), `extract_language`
+  (`"fr"` or `"en"`, `nil` alongside a `nil` extract) and `fetched_at` (the
+  attribution timestamp), or `{:error, :not_found}` for an unknown QID.
+
+  Format validation of `qid` is the caller's responsibility
+  (`AmanogawaWeb.Params.EventId`, `.claude/rules/security.md`): this
+  function only looks the QID up, it never raises on a malformed one.
+  """
+  @spec get_event_summary(String.t()) :: {:ok, map()} | {:error, :not_found}
+  def get_event_summary(qid) do
+    case get_event_by_qid(qid) do
+      nil -> {:error, :not_found}
+      event -> {:ok, event_summary(event)}
+    end
+  end
+
+  @doc """
+  Lists the typed relations of `qid` as a GeoJSON `FeatureCollection`
+  (issue #017): `{:error, :not_found}` for an unknown QID, otherwise
+  `{:ok, feature_collection}` with one `LineString` feature per relation
+  whose two endpoints both carry a geometry, ordered from `qid` to the
+  related event.
+
+  An event known locally but without its own geometry yields an empty
+  collection rather than an error: no line can be anchored without a
+  starting point, but the event itself is not "unknown". The query
+  (including the source/target join and the `geom IS NOT NULL` filter on
+  each side) lives in `Amanogawa.Atlas.EventQueries`, this function only
+  shapes the result into GeoJSON, the boundary where PostGIS geometry
+  becomes wire format (`.claude/rules/geo-temporal.md`).
+  """
+  @spec list_event_links_geojson(String.t()) :: {:ok, map()} | {:error, :not_found}
+  def list_event_links_geojson(qid) do
+    case get_event_by_qid(qid) do
+      nil -> {:error, :not_found}
+      event -> {:ok, event_links_feature_collection(event)}
+    end
+  end
+
+  @doc """
   Flattens an `Amanogawa.HistoricalDate` (or `nil`) into `begin_*`/`end_*`
   attributes for `upsert_events/1` rows. Delegates to
   `Amanogawa.Atlas.Event.flatten_date/2`, exposed here so other contexts
@@ -325,6 +368,69 @@ defmodule Amanogawa.Atlas do
         "year" => row.year,
         "precision" => row.precision,
         "importance" => row.importance
+      }
+    }
+  end
+
+  defp event_summary(event) do
+    {extract, extract_language} = extract_with_language(event)
+
+    %{
+      qid: event.qid,
+      label: event.label_fr || event.label_en,
+      extract: extract,
+      thumbnail_url: event.thumbnail_url,
+      wiki_url: event.wiki_url_fr || event.wiki_url_en,
+      extract_language: extract_language,
+      fetched_at: event.extract_fetched_at
+    }
+  end
+
+  defp extract_with_language(%Event{extract_fr: extract_fr}) when is_binary(extract_fr),
+    do: {extract_fr, "fr"}
+
+  defp extract_with_language(%Event{extract_en: extract_en}) when is_binary(extract_en),
+    do: {extract_en, "en"}
+
+  defp extract_with_language(%Event{}), do: {nil, nil}
+
+  # No geometry on the selected event itself: nothing to anchor a line to,
+  # regardless of how many relations it has.
+  defp event_links_feature_collection(%Event{geom: nil}) do
+    %{"type" => "FeatureCollection", "features" => []}
+  end
+
+  defp event_links_feature_collection(event) do
+    features =
+      event.id
+      |> EventQueries.list_links()
+      |> Enum.map(&link_row_to_feature(event, &1))
+
+    %{"type" => "FeatureCollection", "features" => features}
+  end
+
+  # Coordinates run from the selected event to the related one, whichever
+  # side of the relation it sits on (`direction` carries which). A
+  # degenerate LineString (both endpoints at the same point) is kept as-is:
+  # rare, harmless to render (MapLibre draws a zero-length line, invisible
+  # but not an error), and excluding it would need a floating-point
+  # coordinate equality check that is not worth its complexity for a case
+  # with no observed real-world occurrence.
+  defp link_row_to_feature(event, row) do
+    line = %Geo.LineString{
+      coordinates: [event.geom.coordinates, row.target_geom.coordinates],
+      srid: 4326
+    }
+
+    %{
+      "type" => "Feature",
+      "geometry" => Geo.JSON.encode!(line),
+      "properties" => %{
+        "link_type" => Atom.to_string(row.type),
+        "direction" => Atom.to_string(row.direction),
+        "target_qid" => row.target_qid,
+        "target_label" => row.target_label,
+        "target_year" => row.target_year
       }
     }
   end

@@ -30,7 +30,14 @@ defmodule AmanogawaWeb.Plugs.ContentSecurityPolicyTest do
       assert parsed["default-src"] == ["'self'"]
       assert parsed["script-src"] == ["'self'"]
       assert parsed["style-src"] == ["'self'"]
-      assert parsed["img-src"] == ["'self'", "data:", "blob:"]
+
+      assert parsed["img-src"] == [
+               "'self'",
+               "data:",
+               "blob:",
+               ContentSecurityPolicy.wikimedia_images_origin()
+             ]
+
       assert parsed["font-src"] == ["'self'"]
       assert parsed["worker-src"] == ["blob:"]
       assert parsed["child-src"] == ["blob:"]
@@ -70,7 +77,8 @@ defmodule AmanogawaWeb.Plugs.ContentSecurityPolicyTest do
 
       allowed = [
         "ws://#{host}:#{port}",
-        ContentSecurityPolicy.tiles_origin()
+        ContentSecurityPolicy.tiles_origin(),
+        ContentSecurityPolicy.wikimedia_images_origin()
       ]
 
       assert Enum.sort(Enum.uniq(remote_sources)) == Enum.sort(allowed)

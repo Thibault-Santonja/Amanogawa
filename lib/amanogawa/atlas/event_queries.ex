@@ -108,6 +108,7 @@ defmodule Amanogawa.Atlas.EventQueries do
   import Ecto.Query
 
   alias Amanogawa.Atlas.Event
+  alias Amanogawa.Atlas.EventLink
   alias Amanogawa.Repo
 
   @type envelope :: %{min_lon: float(), min_lat: float(), max_lon: float(), max_lat: float()}
@@ -124,6 +125,14 @@ defmodule Amanogawa.Atlas.EventQueries do
           precision: integer(),
           importance: integer(),
           geom: Geo.Point.t()
+        }
+  @type link_row :: %{
+          type: EventLink.link_type(),
+          direction: :outgoing | :incoming,
+          target_qid: String.t(),
+          target_label: String.t() | nil,
+          target_year: integer(),
+          target_geom: Geo.Point.t()
         }
 
   @doc """
@@ -152,6 +161,61 @@ defmodule Amanogawa.Atlas.EventQueries do
       geom: e.geom
     })
     |> Repo.all()
+  end
+
+  @doc """
+  Lists the typed relations of the event identified by `event_id` (issue
+  #017): one row per relation where `event_id` is either the source or the
+  target, `direction` telling which. Only relations whose *other* endpoint
+  has a geometry are returned: an event without `geom` cannot anchor a
+  line, so it is excluded there rather than surfacing a feature that
+  cannot be drawn. The `event_id` side's own geometry is the caller's
+  concern (`Amanogawa.Atlas.list_event_links_geojson/1`), not filtered
+  here.
+  """
+  @spec list_links(Ecto.UUID.t()) :: [link_row()]
+  def list_links(event_id) do
+    outgoing =
+      event_id
+      |> outgoing_links_query()
+      |> Repo.all()
+      |> Enum.map(&Map.put(&1, :direction, :outgoing))
+
+    incoming =
+      event_id
+      |> incoming_links_query()
+      |> Repo.all()
+      |> Enum.map(&Map.put(&1, :direction, :incoming))
+
+    outgoing ++ incoming
+  end
+
+  defp outgoing_links_query(event_id) do
+    EventLink
+    |> where([l], l.source_id == ^event_id)
+    |> join(:inner, [l], t in Event, on: l.target_id == t.id)
+    |> where([_l, t], not is_nil(t.geom))
+    |> select([l, t], %{
+      type: l.type,
+      target_qid: t.qid,
+      target_label: coalesce(t.label_fr, t.label_en),
+      target_year: t.begin_year,
+      target_geom: t.geom
+    })
+  end
+
+  defp incoming_links_query(event_id) do
+    EventLink
+    |> where([l], l.target_id == ^event_id)
+    |> join(:inner, [l], s in Event, on: l.source_id == s.id)
+    |> where([_l, s], not is_nil(s.geom))
+    |> select([l, s], %{
+      type: l.type,
+      target_qid: s.qid,
+      target_label: coalesce(s.label_fr, s.label_en),
+      target_year: s.begin_year,
+      target_geom: s.geom
+    })
   end
 
   defp bbox_condition(envelopes) do

@@ -15,15 +15,16 @@ defmodule AmanogawaWeb.ExploreLive do
   `handle_params/3` stays the single source of truth and the browser's
   back/forward buttons replay state for free.
 
-  The event panel is intentionally minimal (qid, label, a close button):
-  the full hover card and event sheet are #016, not yet delivered. This
-  LiveView only poses the contract it will plug into (`selected_qid`
-  assign, `select_event`/`deselect_event` events, `event_selected`/
-  `event_deselected` pushed to the hook).
+  The event panel itself (`AmanogawaWeb.Components.EventPanel`, issue
+  #016) is fed from the `selected_event` assign loaded here; the hover
+  card and the relation lines traced on the map (issue #017) are owned
+  entirely by the JS hook, driven by the `event_selected`/
+  `event_deselected` events pushed below.
   """
   use AmanogawaWeb, :live_view
 
   alias Amanogawa.Atlas
+  alias AmanogawaWeb.Components.EventPanel
   alias AmanogawaWeb.Params.ExploreParams
 
   @impl true
@@ -123,36 +124,8 @@ defmodule AmanogawaWeb.ExploreLive do
     ~H"""
     <Layouts.app flash={@flash}>
       <div id="map" phx-hook="MapHook" phx-update="ignore" class="absolute inset-0"></div>
-      <.event_panel :if={@selected_event} event={@selected_event} />
+      <EventPanel.event_panel :if={@selected_event} event={@selected_event} />
     </Layouts.app>
-    """
-  end
-
-  # Minimal event panel (#018 point d'attention: pose the location for
-  # #016's full hover card and event sheet, does not build them).
-  attr :event, :map, required: true
-
-  defp event_panel(assigns) do
-    ~H"""
-    <aside
-      id="event-panel"
-      class="absolute inset-y-0 right-0 w-full max-w-sm overflow-y-auto border-l border-border bg-surface p-4 shadow-lg sm:w-96"
-    >
-      <div class="flex items-start justify-between gap-2">
-        <h2 class="text-lg font-semibold text-text">
-          {@event.label_fr || @event.label_en || @event.qid}
-        </h2>
-        <button
-          type="button"
-          phx-click="deselect_event"
-          aria-label={gettext("Fermer")}
-          class="shrink-0 text-text-muted hover:text-text"
-        >
-          <.icon name="hero-x-mark" class="size-5" />
-        </button>
-      </div>
-      <p class="mt-1 text-sm text-text-muted">{@event.qid}</p>
-    </aside>
     """
   end
 
