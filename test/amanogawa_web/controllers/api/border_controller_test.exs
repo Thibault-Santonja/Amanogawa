@@ -56,7 +56,7 @@ defmodule AmanogawaWeb.Controllers.Api.BorderControllerTest do
       assert %{"errors" => %{"year" => [_message]}} = json_response(conn, 400)
     end
 
-    test "carries an ETag and a public Cache-Control header", %{conn: conn} do
+    test "carries an ETag and a public Cache-Control header capped at one hour", %{conn: conn} do
       conn = conn |> unique_conn() |> get(~p"/api/borders?year=0")
 
       assert [etag] = get_resp_header(conn, "etag")
@@ -64,7 +64,10 @@ defmodule AmanogawaWeb.Controllers.Api.BorderControllerTest do
 
       assert [cache_control] = get_resp_header(conn, "cache-control")
       assert cache_control =~ "public"
-      assert cache_control =~ "max-age="
+      # One hour, not longer: within max-age a client never revalidates,
+      # so this caps how long a fresh import can stay invisible to an
+      # already-primed client (the ETag only matters after expiry).
+      assert cache_control =~ "max-age=3600"
     end
 
     test "a matching If-None-Match returns 304 with no body", %{conn: conn} do
@@ -113,6 +116,37 @@ defmodule AmanogawaWeb.Controllers.Api.BorderControllerTest do
       second = conn |> unique_conn() |> get(~p"/api/borders?year=500")
 
       assert get_resp_header(first, "etag") != get_resp_header(second, "etag")
+    end
+
+    test "the ETag changes when the row count changes even if max(updated_at) does not", %{
+      conn: conn
+    } do
+      # Two imports landing within the same second share max(updated_at)
+      # (truncated to the second); pinning both rows' updated_at to the
+      # same instant reproduces that exactly. The count(*) folded into the
+      # hash is what must still invalidate the cache.
+      same_instant = ~U[2026-01-01 00:00:00Z]
+      polity = polity_fixture(name: "Roman Empire")
+
+      first_border = border_fixture(polity_id: polity.id, from_year: -100, to_year: 100)
+
+      first_border
+      |> Ecto.Changeset.change(updated_at: same_instant)
+      |> Amanogawa.Repo.update!()
+
+      first = conn |> unique_conn() |> get(~p"/api/borders?year=0")
+      assert [first_etag] = get_resp_header(first, "etag")
+
+      second_border = border_fixture(polity_id: polity.id, from_year: -100, to_year: 100)
+
+      second_border
+      |> Ecto.Changeset.change(updated_at: same_instant)
+      |> Amanogawa.Repo.update!()
+
+      second = conn |> unique_conn() |> get(~p"/api/borders?year=0")
+      assert [second_etag] = get_resp_header(second, "etag")
+
+      assert first_etag != second_etag
     end
 
     test "exceeding the rate limit quota returns 429 with retry-after", %{conn: conn} do

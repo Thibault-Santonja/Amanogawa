@@ -15,6 +15,8 @@ defmodule Mix.Tasks.Amanogawa.Import.HistoricalBasemapsTest do
         end)
 
       assert output =~ "importing tranches"
+      assert output =~ "borders purged (previous \"historical_basemaps\" rows):"
+      assert output =~ "orphan polities purged:"
       assert output =~ "tranches imported"
       assert output =~ "tranches excluded"
       assert output =~ "unrecognized files"
@@ -56,5 +58,67 @@ defmodule Mix.Tasks.Amanogawa.Import.HistoricalBasemapsTest do
         end)
       end
     end
+  end
+
+  describe "error case: unreadable tranche file" do
+    test "a tranche without a features array raises Mix.Error (non-zero exit), not a crash dump" do
+      dir = tmp_dir!()
+      File.write!(Path.join(dir, "world_bc5000.geojson"), ~s({"type":"NotAFeatureCollection"}))
+
+      assert_raise Mix.Error, ~r/Import failed while reading/, fn ->
+        capture_io(fn -> Mix.Task.rerun("amanogawa.import.historical_basemaps", [dir]) end)
+      end
+    end
+  end
+
+  describe "error case: anti-wipe guard" do
+    test "a directory whose tranches all fail after a good import aborts, data survives" do
+      capture_io(fn -> Mix.Task.rerun("amanogawa.import.historical_basemaps", [@fixture_dir]) end)
+      previous_count = Atlas.count_borders()
+      assert previous_count > 0
+
+      dir = tmp_dir!()
+
+      File.write!(
+        Path.join(dir, "world_bc5000.geojson"),
+        ~s({"features":[{"type":"Feature","properties":{"NAME":"Broken"},"geometry":null}]})
+      )
+
+      assert_raise Mix.Error, ~r/Pass --force/, fn ->
+        capture_io(fn -> Mix.Task.rerun("amanogawa.import.historical_basemaps", [dir]) end)
+      end
+
+      assert Atlas.count_borders() == previous_count
+    end
+
+    test "--force deliberately empties the source" do
+      capture_io(fn -> Mix.Task.rerun("amanogawa.import.historical_basemaps", [@fixture_dir]) end)
+      assert Atlas.count_borders() > 0
+
+      dir = tmp_dir!()
+
+      File.write!(
+        Path.join(dir, "world_bc5000.geojson"),
+        ~s({"features":[{"type":"Feature","properties":{"NAME":"Broken"},"geometry":null}]})
+      )
+
+      capture_io(fn ->
+        assert :ok == Mix.Task.rerun("amanogawa.import.historical_basemaps", [dir, "--force"])
+      end)
+
+      assert Atlas.count_borders() == 0
+    end
+  end
+
+  defp tmp_dir! do
+    dir =
+      Path.join(
+        System.tmp_dir!(),
+        "historical_basemaps_task_test_#{System.unique_integer([:positive])}"
+      )
+
+    File.mkdir_p!(dir)
+    ExUnit.Callbacks.on_exit(fn -> File.rm_rf(dir) end)
+    dir
   end
 end

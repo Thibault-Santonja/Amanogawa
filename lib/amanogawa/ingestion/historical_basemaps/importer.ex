@@ -6,7 +6,7 @@ defmodule Amanogawa.Ingestion.HistoricalBasemaps.Importer do
   keeps only the ones strictly before the Cliopatria junction
   (`Amanogawa.Ingestion.HistoricalBasemaps.Parser.slice_intervals/1`), and
   imports all of them into `atlas.borders` under one `source` in a single
-  purge-then-reinsert transaction (`Amanogawa.Atlas.replace_borders/2`):
+  purge-then-reinsert transaction (`Amanogawa.Atlas.replace_borders/3`):
   every tranche's features are lazily concatenated
   (`Amanogawa.Ingestion.Borders.Importer.stream_rows/3` +
   `Stream.concat/1`) before that single call, so an earlier tranche's rows
@@ -24,6 +24,7 @@ defmodule Amanogawa.Ingestion.HistoricalBasemaps.Importer do
 
   @type summary :: %{
           purged: non_neg_integer(),
+          purged_polities: non_neg_integer(),
           total: non_neg_integer(),
           repaired: non_neg_integer(),
           inserted: non_neg_integer(),
@@ -44,11 +45,15 @@ defmodule Amanogawa.Ingestion.HistoricalBasemaps.Importer do
   matches historical-basemaps' `world[_bc]<year>.geojson` convention and
   whose year is strictly before -3400. Files matching neither condition
   are reported (`:unrecognized_files` for a name the pattern does not
-  match at all, `:tranches_excluded` for a recognized year `>= -3400`),
-  never raised.
+  match at all or whose year is implausible, `:tranches_excluded` for a
+  recognized year `>= -3400`), never raised.
+
+  `opts`: `:force` (default `false`), passed through to
+  `Amanogawa.Atlas.replace_borders/3`'s anti-wipe guard (see
+  `Amanogawa.Ingestion.Borders.Importer.import/4`).
   """
-  @spec import(Path.t()) :: {:ok, summary()}
-  def import(dir_path) do
+  @spec import(Path.t(), keyword()) :: {:ok, summary()} | {:error, term()}
+  def import(dir_path, opts \\ []) do
     {recognized, unrecognized_files} =
       dir_path |> discover_geojson_files() |> classify_filenames()
 
@@ -70,14 +75,18 @@ defmodule Amanogawa.Ingestion.HistoricalBasemaps.Importer do
       end)
       |> Enum.unzip()
 
-    {:ok, border_stats} = Atlas.replace_borders(@source, Stream.concat(rows_streams))
+    case Atlas.replace_borders(@source, Stream.concat(rows_streams), opts) do
+      {:ok, border_stats} ->
+        {:ok,
+         border_stats
+         |> Map.merge(merge_counters(counters_list))
+         |> Map.put(:tranches_imported, sorted_years(included))
+         |> Map.put(:tranches_excluded, sorted_years(excluded))
+         |> Map.put(:unrecognized_files, unrecognized_files)}
 
-    {:ok,
-     border_stats
-     |> Map.merge(merge_counters(counters_list))
-     |> Map.put(:tranches_imported, sorted_years(included))
-     |> Map.put(:tranches_excluded, sorted_years(excluded))
-     |> Map.put(:unrecognized_files, unrecognized_files)}
+      {:error, _reason} = error ->
+        error
+    end
   end
 
   defp discover_geojson_files(dir_path) do

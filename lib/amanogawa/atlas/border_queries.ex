@@ -42,7 +42,7 @@ defmodule Amanogawa.Atlas.BorderQueries do
   side bounded; this module is what keeps the *writing* side bounded).
 
   Internal to the Atlas context: called only by `Amanogawa.Atlas.
-  replace_borders/2`.
+  replace_borders/3`.
   """
 
   import Ecto.Query
@@ -109,14 +109,23 @@ defmodule Amanogawa.Atlas.BorderQueries do
     FROM computed
     WHERE NOT ST_IsEmpty(geom)
   ),
+  measured AS (
+    -- area_km2 is precomputed at import time over geom_medium (the level
+    -- the web edge serves, so the area a client filters labels by matches
+    -- what it renders) rather than per read request (F05 quality finding:
+    -- ST_Area over a geography cast is too expensive to recompute on
+    -- every GET /api/borders).
+    SELECT *, ST_Area(geom_medium::geography) / 1000000.0 AS area_km2
+    FROM leveled
+  ),
   ins AS (
     INSERT INTO atlas.borders
       (id, polity_id, geom, geom_medium, geom_low, from_year, to_year, source, "precision",
-       inserted_at, updated_at)
+       area_km2, inserted_at, updated_at)
     SELECT
       id, polity_id, geom, geom_medium, geom_low, from_year, to_year, source, precision,
-      $10::timestamp, $10::timestamp
-    FROM leveled
+      area_km2, $10::timestamp, $10::timestamp
+    FROM measured
     RETURNING id
   )
   SELECT
@@ -133,6 +142,45 @@ defmodule Amanogawa.Atlas.BorderQueries do
   end
 
   @doc """
+  Deletes every `atlas.polities` row of `source` no longer referenced by
+  any border (F05 quality finding: a purge-then-reinsert that drops an
+  entity would otherwise leave its polity row behind forever). Returns the
+  deleted count. Called by `Amanogawa.Atlas.replace_borders/3` inside its
+  transaction, after the new rows are in, so polities still referenced by
+  the fresh import always survive.
+  """
+  @spec purge_orphan_polities(String.t()) :: non_neg_integer()
+  def purge_orphan_polities(source) do
+    still_referenced = from b in Border, where: b.polity_id == parent_as(:polity).id
+
+    orphans =
+      from p in Polity,
+        as: :polity,
+        where: p.source == ^source,
+        where: not exists(still_referenced)
+
+    {count, _} = Repo.delete_all(orphans)
+    count
+  end
+
+  @doc """
+  Counts pairs of borders of `source` on the same polity where one row's
+  `to_year` equals another's `from_year` (see `Amanogawa.Atlas.
+  count_boundary_year_overlaps/1` for the interval-convention rationale).
+  Each ordered pair counts once.
+  """
+  @spec count_boundary_year_overlaps(String.t()) :: non_neg_integer()
+  def count_boundary_year_overlaps(source) do
+    Border
+    |> join(:inner, [b1], b2 in Border,
+      on: b1.polity_id == b2.polity_id and b1.to_year == b2.from_year and b1.id != b2.id
+    )
+    |> where([b1, b2], b1.source == ^source and b2.source == ^source)
+    |> select([b1, b2], count())
+    |> Repo.one()
+  end
+
+  @doc """
   Lists the polygons active at `year` (issue #025, `from_year <= year AND
   to_year >= year`, both bounds inclusive), joined to their polity's
   `name`, at the default web simplification level (`geom_medium`, #023: the
@@ -140,11 +188,13 @@ defmodule Amanogawa.Atlas.BorderQueries do
 
   `geometry` is already `ST_AsGeoJSON` text (ADR 0007: GeoJSON serialization
   happens here, in the query module, never in the controller or the
-  client); `area_km2` is `ST_Area` over the geography cast of the same
-  simplified geometry (not the full-precision `geom`: the area a client
-  filters labels by should match what it actually renders, and computing
-  it against `geom` would be needlessly more expensive for a value this
-  query already returns per row).
+  client), capped at 5 decimal digits per coordinate (about 1 meter of
+  precision at the equator: far beyond what a simplified historical
+  border legitimately claims, and a substantial payload saving over the
+  9-digit default); `area_km2` is the value precomputed at import time by
+  `insert_batch/3` over the same simplified geometry (the area a client
+  filters labels by matches what it actually renders), never recomputed
+  per request.
 
   Ordered by polity name then border id, for a deterministic response
   (`Amanogawa.Atlas.list_borders_geojson/1`'s feature order is otherwise at
@@ -161,8 +211,8 @@ defmodule Amanogawa.Atlas.BorderQueries do
       name: p.name,
       source: b.source,
       precision: b.precision,
-      geometry: fragment("ST_AsGeoJSON(?)", b.geom_medium),
-      area_km2: fragment("ST_Area(?::geography) / 1000000.0", b.geom_medium)
+      geometry: fragment("ST_AsGeoJSON(?, 5)", b.geom_medium),
+      area_km2: b.area_km2
     })
     |> Repo.all()
   end
@@ -171,7 +221,7 @@ defmodule Amanogawa.Atlas.BorderQueries do
   The timestamp of the most recent `atlas.borders` write (`max(updated_at)`),
   or `nil` when the table is empty. Backs the borders endpoint's ETag
   (issue #025, `AmanogawaWeb.Controllers.Api.BorderController`): a fresh
-  import (`Amanogawa.Atlas.replace_borders/2`) always advances this value,
+  import (`Amanogawa.Atlas.replace_borders/3`) always advances this value,
   which is what invalidates every previously cached response, without a
   dedicated import-metadata table.
   """

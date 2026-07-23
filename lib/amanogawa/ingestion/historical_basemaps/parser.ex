@@ -22,6 +22,8 @@ defmodule Amanogawa.Ingestion.HistoricalBasemaps.Parser do
   so the two sources' year ranges never overlap.
   """
 
+  alias Amanogawa.Ingestion.Borders.FeatureValidation
+
   @junction_year -3_400
   @last_to_year -3_401
 
@@ -30,10 +32,19 @@ defmodule Amanogawa.Ingestion.HistoricalBasemaps.Parser do
 
   @doc """
   Parses one decoded GeoJSON feature: `NAME` becomes `:name`,
-  `BORDERPRECISION` becomes `:precision` (`nil` when absent). A feature
-  with no `NAME` (or an empty one) is `:skip`, not an error (issue #024:
-  "tolérer les features sans nom ... les écarter"): historical-basemaps
-  carries some unnamed geographic features that are not political entities.
+  `BORDERPRECISION` becomes `:precision` (`nil` when absent, or when not
+  an integer in `Amanogawa.Ingestion.Borders.FeatureValidation`'s small
+  accepted range: a malformed precision degrades to `nil` rather than
+  rejecting an otherwise valid feature). A feature with no `NAME` (or an
+  empty one) is `:skip`, not an error (issue #024: "tolérer les features
+  sans nom ... les écarter"): historical-basemaps carries some unnamed
+  geographic features that are not political entities. A `NAME` longer
+  than #{FeatureValidation.max_name_length()} characters is a tagged
+  error (rejected, not truncated: truncation could silently merge two
+  distinct polities on `atlas.polities`' `(name, source)` natural key),
+  and the geometry's `coordinates` are structurally validated
+  (`FeatureValidation.validate_geometry/1`) before the feature may reach
+  the SQL pipeline.
 
   ## Examples
 
@@ -47,9 +58,12 @@ defmodule Amanogawa.Ingestion.HistoricalBasemaps.Parser do
       when is_map(properties) do
     case Map.get(properties, "NAME") do
       name when is_binary(name) and name != "" ->
-        with :ok <- validate_geometry(geometry) do
-          {:ok,
-           %{name: name, geometry: geometry, precision: Map.get(properties, "BORDERPRECISION")}}
+        with {:ok, name} <- FeatureValidation.validate_name_length(name),
+             :ok <- FeatureValidation.validate_geometry(geometry) do
+          precision =
+            FeatureValidation.normalize_precision(Map.get(properties, "BORDERPRECISION"))
+
+          {:ok, %{name: name, geometry: geometry, precision: precision}}
         end
 
       _other ->
@@ -66,7 +80,11 @@ defmodule Amanogawa.Ingestion.HistoricalBasemaps.Parser do
   excluded downstream by `slice_intervals/1` since none is `< -3400`, kept
   recognized here rather than misfiled as an unrecognized name). Any other
   name is a tagged error (issue #024's error case), never a crash: one
-  oddly named file must not abort a whole directory import.
+  oddly named file must not abort a whole directory import. A recognized
+  pattern whose year falls outside
+  `Amanogawa.Ingestion.Borders.FeatureValidation.year_bounds/0` (which
+  also keeps it inside `atlas.borders`' int4 column domain) is a tagged
+  error too, reported alongside unrecognized filenames.
 
   ## Examples
 
@@ -81,16 +99,21 @@ defmodule Amanogawa.Ingestion.HistoricalBasemaps.Parser do
 
   """
   @spec parse_filename_year(String.t()) ::
-          {:ok, integer()} | {:error, {:unrecognized_filename, String.t()}}
+          {:ok, integer()}
+          | {:error, {:unrecognized_filename, String.t()}}
+          | {:error, {:year_out_of_bounds, String.t(), integer()}}
   def parse_filename_year(filename) do
     case Regex.run(~r/^world_bc(\d+)\.geojson$/, filename) do
       [_, digits] ->
-        {:ok, -String.to_integer(digits)}
+        FeatureValidation.validate_year_bounds(-String.to_integer(digits), filename)
 
       nil ->
         case Regex.run(~r/^world_(\d+)\.geojson$/, filename) do
-          [_, digits] -> {:ok, String.to_integer(digits)}
-          nil -> {:error, {:unrecognized_filename, filename}}
+          [_, digits] ->
+            FeatureValidation.validate_year_bounds(String.to_integer(digits), filename)
+
+          nil ->
+            {:error, {:unrecognized_filename, filename}}
         end
     end
   end
@@ -129,7 +152,4 @@ defmodule Amanogawa.Ingestion.HistoricalBasemaps.Parser do
 
   defp to_interval([year, :none]), do: %{year: year, from_year: year, to_year: @last_to_year}
   defp to_interval([year, next_year]), do: %{year: year, from_year: year, to_year: next_year - 1}
-
-  defp validate_geometry(%{"type" => type}) when type in ["Polygon", "MultiPolygon"], do: :ok
-  defp validate_geometry(_other), do: {:error, :invalid_geometry_type}
 end

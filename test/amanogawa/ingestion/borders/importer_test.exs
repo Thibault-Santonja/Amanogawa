@@ -43,10 +43,12 @@ defmodule Amanogawa.Ingestion.Borders.ImporterTest do
       assert summary.rejected_empty == 1
 
       assert Atlas.count_borders() == 3
-      # Roman Empire (x2 time slices, one polity row), Byzantine Empire,
-      # and Degenerate Sliver (parses fine, its polity is still created
-      # even though its own border row is later rejected as empty).
-      assert Atlas.count_polities() == 3
+      # Roman Empire (x2 time slices, one polity row) and Byzantine
+      # Empire. Degenerate Sliver parses fine but its only border row is
+      # rejected as empty, so its polity ends the transaction orphaned
+      # and is purged with it.
+      assert summary.purged_polities == 1
+      assert Atlas.count_polities() == 2
     end
   end
 
@@ -73,6 +75,7 @@ defmodule Amanogawa.Ingestion.Borders.ImporterTest do
 
       assert summary == %{
                purged: 0,
+               purged_polities: 0,
                total: 0,
                repaired: 0,
                inserted: 0,
@@ -95,6 +98,52 @@ defmodule Amanogawa.Ingestion.Borders.ImporterTest do
       assert {:ok, summary} = Importer.import(path, "test_source", &always_ok/1)
       assert summary.inserted == 1
       assert summary.invalid_features == 1
+    end
+
+    test "anti-wipe guard: a wrong file (100% invalid features) leaves previous data intact" do
+      good_path = write_tmp!(~s({"features":[
+        {"type":"Feature","properties":{"Name":"Rome","FromYear":-100,"ToYear":100},"geometry":{"type":"Polygon","coordinates":[[[0,0],[0,1],[1,1],[1,0],[0,0]]]}}
+      ]}))
+
+      # Every feature fails the parser: without the guard, the purge of
+      # the previous rows would commit alongside zero insertions.
+      bad_path = write_tmp!(~s({"features":[
+        {"type":"Feature","properties":{"Name":"Rome"},"geometry":null},
+        {"type":"Feature","properties":{},"geometry":null}
+      ]}))
+
+      on_exit_delete(good_path)
+      on_exit_delete(bad_path)
+
+      assert {:ok, %{inserted: 1}} =
+               Importer.import(good_path, "cliopatria", &Parser.parse_feature/1)
+
+      assert {:error, {:would_wipe_source, "cliopatria", 1}} =
+               Importer.import(bad_path, "cliopatria", &Parser.parse_feature/1)
+
+      # The rollback preserved the previous import in full.
+      assert Atlas.count_borders() == 1
+      assert Atlas.count_polities() == 1
+    end
+
+    test "anti-wipe guard: force: true deliberately empties the source on the same wrong file" do
+      good_path = write_tmp!(~s({"features":[
+        {"type":"Feature","properties":{"Name":"Rome","FromYear":-100,"ToYear":100},"geometry":{"type":"Polygon","coordinates":[[[0,0],[0,1],[1,1],[1,0],[0,0]]]}}
+      ]}))
+
+      bad_path = write_tmp!(~s({"features":[{"type":"Feature","properties":{},"geometry":null}]}))
+
+      on_exit_delete(good_path)
+      on_exit_delete(bad_path)
+
+      assert {:ok, _} = Importer.import(good_path, "cliopatria", &Parser.parse_feature/1)
+
+      assert {:ok, summary} =
+               Importer.import(bad_path, "cliopatria", &Parser.parse_feature/1, force: true)
+
+      assert summary.purged == 1
+      assert summary.inserted == 0
+      assert Atlas.count_borders() == 0
     end
   end
 

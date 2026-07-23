@@ -21,11 +21,12 @@ defmodule AmanogawaWeb.Controllers.Api.BorderController do
       narrower border domain at either edge (issue #025).
 
   Cacheable by design (ADR 0007): a given year's borders are immutable
-  between two imports (`Amanogawa.Atlas.replace_borders/2` is the only
+  between two imports (`Amanogawa.Atlas.replace_borders/3` is the only
   writer), so every response carries a strong `ETag` derived from
-  `(year, Amanogawa.Atlas.last_border_import_at/0)` and a `Cache-Control:
-  public, max-age` header; a matching `If-None-Match` short-circuits to
-  `304` with no body.
+  `(year, Amanogawa.Atlas.last_border_import_at/0,
+  Amanogawa.Atlas.count_borders/0)` and a `Cache-Control: public,
+  max-age` header; a matching `If-None-Match` short-circuits to `304`
+  with no body.
   """
 
   use AmanogawaWeb, :controller
@@ -33,11 +34,14 @@ defmodule AmanogawaWeb.Controllers.Api.BorderController do
   alias Amanogawa.Atlas
   alias AmanogawaWeb.Params.BorderQuery
 
-  # A given (year, import) pair never changes: a full day of client-side
-  # freshness is safe on top of the ETag, which already forces a
-  # conditional revalidation the moment a new import lands (its own
-  # `last_border_import_at/0` timestamp advances, changing the ETag).
-  @cache_max_age_seconds 86_400
+  # Client-side freshness window. Within `max-age` a client serves its
+  # cached copy WITHOUT revalidating: the ETag only takes effect on the
+  # conditional request sent after expiry, so a fresh import becomes
+  # visible to an already-primed client only once its copy ages out. One
+  # hour bounds that staleness to something an operator re-importing data
+  # can reason about, while still absorbing the overwhelming majority of
+  # repeat requests (the reference-year slider, page reloads).
+  @cache_max_age_seconds 3_600
 
   # Fallback ETag input when `atlas.borders` is empty (no import has ever
   # run): a fixed epoch rather than `nil`, so `etag_for/1` always has a
@@ -95,15 +99,18 @@ defmodule AmanogawaWeb.Controllers.Api.BorderController do
   # import)` pair are byte-identical, never a semantically-equivalent
   # variant) derived from real data, never hardcoded
   # (`docs/features/005-frontieres-historiques/003-endpoint-rendu-frontieres.md`'s
-  # own point d'attention): `Amanogawa.Atlas.last_border_import_at/0` is
-  # the single source of truth for "has anything changed since the client
-  # cached this", advanced only by a real import
-  # (`Amanogawa.Atlas.replace_borders/2`).
+  # own point d'attention). `Amanogawa.Atlas.last_border_import_at/0`
+  # (advanced only by a real import, `Amanogawa.Atlas.replace_borders/3`)
+  # is combined with the table's row count: `max(updated_at)` alone, at
+  # second precision, misses a re-import landing within the same second
+  # as the previous one, and can even move backward when the newest rows
+  # are purged; the count catches both (F05 security finding).
   defp etag_for(year) do
     imported_at = Atlas.last_border_import_at() || @epoch
+    count = Atlas.count_borders()
 
     hash =
-      :crypto.hash(:sha256, "#{year}:#{DateTime.to_iso8601(imported_at)}")
+      :crypto.hash(:sha256, "#{year}:#{DateTime.to_iso8601(imported_at)}:#{count}")
       |> Base.encode16(case: :lower)
 
     ~s("#{hash}")

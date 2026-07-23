@@ -77,6 +77,17 @@ defmodule Amanogawa.Atlas.BorderQueriesTest do
 
       assert [%Border{precision: 2}] = Repo.all(Border)
     end
+
+    test "area_km2 is precomputed at insert time from geom_medium" do
+      polity = polity_fixture()
+      BorderQueries.insert_batch([row(polity.id, @valid_square)])
+
+      [border] = Repo.all(Border)
+
+      assert is_float(border.area_km2)
+      # A 1x1 degree square at the equator is roughly 111km x 111km.
+      assert_in_delta border.area_km2, 12_300, 500
+    end
   end
 
   describe "insert_batch/3: edge case" do
@@ -186,6 +197,52 @@ defmodule Amanogawa.Atlas.BorderQueriesTest do
       assert row.area_km2 > 0
     end
 
+    test "area_km2 is served from the stored column, never recomputed per request" do
+      polity = polity_fixture()
+      # A deliberately wrong stored value: if the query recomputed the
+      # area from the geometry, it would return ~12300, not this marker.
+      border_fixture(polity_id: polity.id, area_km2: 42.0)
+
+      assert [%{area_km2: 42.0}] = BorderQueries.list_active_borders(0)
+    end
+
+    test "geometry text is serialized with at most 5 decimal digits per coordinate" do
+      polity = polity_fixture()
+
+      precise = %{
+        "type" => "Polygon",
+        "coordinates" => [
+          [
+            [0.123456789, 0.987654321],
+            [0.123456789, 1.0],
+            [1.0, 1.0],
+            [1.0, 0.987654321],
+            [0.123456789, 0.987654321]
+          ]
+        ]
+      }
+
+      BorderQueries.insert_batch([row(polity.id, precise)])
+
+      assert [%{geometry: geometry}] = BorderQueries.list_active_borders(0)
+
+      %{"coordinates" => coordinates} = Jason.decode!(geometry)
+
+      for polygon <- coordinates, ring <- polygon, position <- ring, value <- position do
+        # A whole coordinate decodes as an integer: zero decimals by
+        # construction, nothing to check.
+        if is_float(value) do
+          decimals =
+            value
+            |> Float.to_string()
+            |> String.split(".")
+            |> List.last()
+
+          assert String.length(decimals) <= 5
+        end
+      end
+    end
+
     test "results are ordered by polity name, deterministically" do
       polity_b = polity_fixture(name: "B Empire")
       polity_a = polity_fixture(name: "A Empire")
@@ -216,6 +273,82 @@ defmodule Amanogawa.Atlas.BorderQueriesTest do
       |> Repo.update!()
 
       assert BorderQueries.last_import_at() == ~U[2025-06-01 00:00:00Z]
+    end
+  end
+
+  describe "purge_orphan_polities/1" do
+    test "deletes only the source's polities without any remaining border" do
+      orphan = polity_fixture(name: "Orphan Empire", source: "cliopatria")
+      kept = polity_fixture(name: "Kept Empire", source: "cliopatria")
+      border_fixture(polity_id: kept.id, source: "cliopatria")
+      other_source_orphan = polity_fixture(name: "Other Orphan", source: "historical_basemaps")
+
+      assert BorderQueries.purge_orphan_polities("cliopatria") == 1
+
+      refute Repo.get(Amanogawa.Atlas.Polity, orphan.id)
+      assert Repo.get(Amanogawa.Atlas.Polity, kept.id)
+      assert Repo.get(Amanogawa.Atlas.Polity, other_source_orphan.id)
+    end
+
+    test "a polity whose only border belongs to another source is still kept" do
+      # Pathological but possible: the polity row is under one source, its
+      # border under another. Orphan purge is by reference, not by the
+      # border's own source tag, so it stays.
+      polity = polity_fixture(name: "Cross Empire", source: "cliopatria")
+      border_fixture(polity_id: polity.id, source: "historical_basemaps")
+
+      assert BorderQueries.purge_orphan_polities("cliopatria") == 0
+      assert Repo.get(Amanogawa.Atlas.Polity, polity.id)
+    end
+
+    test "an empty table purges nothing" do
+      assert BorderQueries.purge_orphan_polities("cliopatria") == 0
+    end
+  end
+
+  describe "count_boundary_year_overlaps/1" do
+    test "counts pairs of the same polity where one row's to_year equals another's from_year" do
+      polity = polity_fixture()
+      border_fixture(polity_id: polity.id, from_year: -100, to_year: 50)
+      border_fixture(polity_id: polity.id, from_year: 50, to_year: 200)
+
+      assert BorderQueries.count_boundary_year_overlaps("cliopatria") == 1
+    end
+
+    test "gap-free but non-touching intervals (to_year + 1 = from_year) count zero" do
+      polity = polity_fixture()
+      border_fixture(polity_id: polity.id, from_year: -100, to_year: 49)
+      border_fixture(polity_id: polity.id, from_year: 50, to_year: 200)
+
+      assert BorderQueries.count_boundary_year_overlaps("cliopatria") == 0
+    end
+
+    test "touching intervals of two different polities do not count" do
+      border_fixture(from_year: -100, to_year: 50)
+      border_fixture(from_year: 50, to_year: 200)
+
+      assert BorderQueries.count_boundary_year_overlaps("cliopatria") == 0
+    end
+
+    test "only the given source is counted" do
+      polity = polity_fixture(source: "historical_basemaps")
+
+      border_fixture(
+        polity_id: polity.id,
+        source: "historical_basemaps",
+        from_year: -100,
+        to_year: 50
+      )
+
+      border_fixture(
+        polity_id: polity.id,
+        source: "historical_basemaps",
+        from_year: 50,
+        to_year: 200
+      )
+
+      assert BorderQueries.count_boundary_year_overlaps("cliopatria") == 0
+      assert BorderQueries.count_boundary_year_overlaps("historical_basemaps") == 1
     end
   end
 

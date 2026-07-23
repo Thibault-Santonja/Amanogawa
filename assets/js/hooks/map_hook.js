@@ -22,6 +22,7 @@ import maplibregl from "maplibre-gl"
 
 import {boundsToBbox, normalizedMapMovedPayload} from "../map/bbox.js"
 import {
+  BORDER_SOURCE_ATTRIBUTIONS,
   BORDERS_FILL_LAYER_ID,
   BORDERS_LABEL_LAYER_ID,
   BORDERS_SOURCE_ID,
@@ -66,18 +67,6 @@ import lightStyle from "../../vendor/map-styles/light.json"
 
 const INITIAL_CENTER = [0, 20]
 const INITIAL_ZOOM = 1.5
-
-// Attribution for the two border sources (issue #025's own task list,
-// ADR 0004's licensing obligations: CC BY 4.0 for Cliopatria, GPL-3.0 for
-// historical-basemaps): appended to the map's own `AttributionControl`
-// (`customAttribution`, below) alongside the basemap's OpenFreeMap/
-// OpenStreetMap credit already declared in `assets/vendor/map-styles/
-// {light,dark}.json`. `docs/features/006-deploiement/002-page-sources-
-// legal.md` covers the full Sources page; this is the map-level minimum.
-const BORDER_SOURCE_ATTRIBUTIONS = [
-  '<a href="https://github.com/Seshat-Global-History-Databank/cliopatria" target="_blank">Cliopatria (CC BY 4.0)</a>',
-  '<a href="https://github.com/aourednik/historical-basemaps" target="_blank">historical-basemaps (GPL-3.0)</a>'
-]
 
 // Time between the last `moveend`/`zoomend` and the events refetch, and
 // between the last `moveend` and the `map_moved` intent pushed to the
@@ -703,6 +692,12 @@ const MapHook = {
       this.setBordersData(featureCollection)
     } catch (error) {
       if (error.name === "AbortError") return
+
+      // A real failure (network error, non-2xx): forget the year this
+      // fetch was keyed on, so the next `set_time_window` push for the
+      // same reference year retries instead of being deduped against a
+      // fetch that never landed (F05 quality finding).
+      this.bordersYear = null
 
       if (process.env.NODE_ENV !== "production") {
         console.error("MapHook: failed to fetch borders", error)

@@ -7,7 +7,7 @@ defmodule Amanogawa.Ingestion.Borders.Importer do
   resolves/creates the `Amanogawa.Atlas.Polity` for each feature's name
   (memoized for the run: a name seen twice never issues a second
   `Amanogawa.Atlas.upsert_polity/1` call), and replaces `source`'s borders
-  (`Amanogawa.Atlas.replace_borders/2`) with the result. Every step is
+  (`Amanogawa.Atlas.replace_borders/3`) with the result. Every step is
   lazy, so memory stays bounded to one `Amanogawa.Atlas.BorderQueries`
   batch regardless of file size (#023's 307MB Cliopatria export).
 
@@ -23,10 +23,10 @@ defmodule Amanogawa.Ingestion.Borders.Importer do
 
   ## Result shape
 
-  `import/4` returns `{:ok, summary}`, merging `Amanogawa.Atlas.
-  BorderQueries.batch_stats/0` (`:purged`, `:total`, `:repaired`,
-  `:inserted`, `:rejected_empty`) with two counters specific to this
-  layer:
+  `import/4` returns `{:ok, summary}`, merging the stats of
+  `Amanogawa.Atlas.replace_borders/3` (`:purged`, `:purged_polities`,
+  `:total`, `:repaired`, `:inserted`, `:rejected_empty`) with two
+  counters specific to this layer:
 
     * `:skipped` - `parse_feature.(feature)` returned `:skip` (a
       well-formed feature that does not belong in `atlas.borders`, e.g.
@@ -55,6 +55,7 @@ defmodule Amanogawa.Ingestion.Borders.Importer do
   @type parse_result :: {:ok, row_attrs()} | :skip | {:error, term()}
   @type summary :: %{
           purged: non_neg_integer(),
+          purged_polities: non_neg_integer(),
           total: non_neg_integer(),
           repaired: non_neg_integer(),
           inserted: non_neg_integer(),
@@ -67,7 +68,7 @@ defmodule Amanogawa.Ingestion.Borders.Importer do
   Imports every feature of `path` into `atlas.borders` under `source`,
   replacing whatever was previously there for that source. Single-file
   convenience wrapper around `stream_rows/3` + `Amanogawa.Atlas.
-  replace_borders/2`, used directly by `Amanogawa.Ingestion.Cliopatria.
+  replace_borders/3`, used directly by `Amanogawa.Ingestion.Cliopatria.
   Importer` (one file). `Amanogawa.Ingestion.HistoricalBasemaps.Importer`
   (many tranche files sharing one source) composes `stream_rows/3` and
   `counters_summary/1` itself instead, so every tranche lands in the
@@ -80,13 +81,24 @@ defmodule Amanogawa.Ingestion.Borders.Importer do
   `t:parse_result/0`. When the source needs per-tranche `from_year`/
   `to_year` not carried on the feature itself (historical-basemaps), the
   caller wraps its parser to inject them before handing it here.
+
+  `opts`: `:force` (default `false`) is passed through to
+  `Amanogawa.Atlas.replace_borders/3`'s anti-wipe guard; without it, an
+  import that would purge existing rows and insert none (a wrong or
+  wholly corrupted file) returns
+  `{:error, {:would_wipe_source, source, purged}}` and leaves the
+  previous data untouched.
   """
-  @spec import(Path.t(), String.t(), (map() -> parse_result())) :: {:ok, summary()}
-  def import(path, source, parse_feature)
+  @spec import(Path.t(), String.t(), (map() -> parse_result()), keyword()) ::
+          {:ok, summary()} | {:error, term()}
+  def import(path, source, parse_feature, opts \\ [])
       when is_binary(source) and is_function(parse_feature, 1) do
     {rows, counters} = stream_rows(path, source, parse_feature)
-    {:ok, border_stats} = Atlas.replace_borders(source, rows)
-    {:ok, Map.merge(border_stats, counters_summary(counters))}
+
+    case Atlas.replace_borders(source, rows, opts) do
+      {:ok, border_stats} -> {:ok, Map.merge(border_stats, counters_summary(counters))}
+      {:error, _reason} = error -> error
+    end
   end
 
   @doc """
@@ -98,7 +110,7 @@ defmodule Amanogawa.Ingestion.Borders.Importer do
   reads it afterwards). Exposed so a caller needing several files under
   one `source` (`Amanogawa.Ingestion.HistoricalBasemaps.Importer`) can
   `Stream.concat/1` several of these before the single `Amanogawa.Atlas.
-  replace_borders/2` call that actually drives them.
+  replace_borders/3` call that actually drives them.
   """
   @spec stream_rows(Path.t(), String.t(), (map() -> parse_result())) ::
           {Enumerable.t(), :counters.counters_ref()}

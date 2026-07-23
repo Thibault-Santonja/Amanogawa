@@ -101,7 +101,11 @@ defmodule Amanogawa.AtlasFixtures do
       from_year: -100,
       to_year: 100,
       source: "cliopatria",
-      precision: nil
+      precision: nil,
+      # Real rows get this precomputed by the SQL pipeline
+      # (`Amanogawa.Atlas.BorderQueries.insert_batch/3`); a plausible
+      # constant for the unit square keeps schema-level fixtures cheap.
+      area_km2: 12_000.0
     }
 
     %Border{}

@@ -44,6 +44,17 @@ defmodule Amanogawa.Ingestion.HistoricalBasemaps.ParserTest do
       assert Parser.parse_feature(feature) ==
                {:ok, %{name: "Natufian culture", geometry: @polygon, precision: nil}}
     end
+
+    test "a malformed BORDERPRECISION (string, float, out-of-range integer) degrades to nil" do
+      for hostile <- ["2", 2.5, -1, 999] do
+        feature = %{
+          "properties" => %{"NAME" => "Natufian culture", "BORDERPRECISION" => hostile},
+          "geometry" => @polygon
+        }
+
+        assert {:ok, %{precision: nil}} = Parser.parse_feature(feature)
+      end
+    end
   end
 
   describe "parse_feature/1: error case" do
@@ -54,6 +65,35 @@ defmodule Amanogawa.Ingestion.HistoricalBasemaps.ParserTest do
       }
 
       assert Parser.parse_feature(feature) == {:error, :invalid_geometry_type}
+    end
+
+    test "hostile coordinates (null, string, wrong nesting, out-of-range) are tagged errors" do
+      hostile_coordinates = [
+        nil,
+        "not a list",
+        [],
+        # Positions directly under coordinates: the ring level is missing.
+        [[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [0.0, 0.0]],
+        [[[200.0, 0.0], [0.0, 1.0], [1.0, 1.0], [200.0, 0.0]]]
+      ]
+
+      for coordinates <- hostile_coordinates do
+        feature = %{
+          "properties" => %{"NAME" => "Natufian culture"},
+          "geometry" => %{"type" => "Polygon", "coordinates" => coordinates}
+        }
+
+        assert {:error, :invalid_geometry_coordinates} = Parser.parse_feature(feature)
+      end
+    end
+
+    test "a NAME of 1 MB is rejected with a tagged error, never truncated" do
+      feature = %{
+        "properties" => %{"NAME" => String.duplicate("x", 1_048_576)},
+        "geometry" => @polygon
+      }
+
+      assert Parser.parse_feature(feature) == {:error, {:name_too_long, 1_048_576}}
     end
 
     test "a feature without properties or geometry keys is a tagged error" do
@@ -81,6 +121,15 @@ defmodule Amanogawa.Ingestion.HistoricalBasemaps.ParserTest do
     test "a non-.geojson extension is unrecognized" do
       assert Parser.parse_filename_year("world_bc4000.json") ==
                {:error, {:unrecognized_filename, "world_bc4000.json"}}
+    end
+
+    test "a recognized pattern with an implausible year (int4 overflow shape) is a tagged error" do
+      assert Parser.parse_filename_year("world_bc13800000000.geojson") ==
+               {:error, {:year_out_of_bounds, "world_bc13800000000.geojson", -13_800_000_000}}
+    end
+
+    test "the oldest real tranche (world_bc123000) stays accepted" do
+      assert Parser.parse_filename_year("world_bc123000.geojson") == {:ok, -123_000}
     end
   end
 

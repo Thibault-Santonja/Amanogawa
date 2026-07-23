@@ -14,6 +14,23 @@ export const BORDERS_SOURCE_ID = "borders"
 export const BORDERS_FILL_LAYER_ID = "borders-fill"
 export const BORDERS_LABEL_LAYER_ID = "borders-labels"
 
+// Attribution for the two border sources (issue #025's own task list,
+// ADR 0004's licensing obligations: CC BY 4.0 for Cliopatria, GPL-3.0 for
+// historical-basemaps): appended to the map's own `AttributionControl`
+// (`customAttribution` in `assets/js/hooks/map_hook.js`) alongside the
+// basemap's OpenFreeMap/OpenStreetMap credit already declared in
+// `assets/vendor/map-styles/{light,dark}.json`.
+// `rel="noopener noreferrer"` on every `target="_blank"` link: without
+// `noopener`, the opened page gets a `window.opener` handle back into
+// this app (reverse tabnabbing). Defined in this pure module (not inline
+// in the hook) so the links stay unit-testable without a MapLibre
+// instance. `docs/features/006-deploiement/002-page-sources-legal.md`
+// covers the full Sources page; this is the map-level minimum.
+export const BORDER_SOURCE_ATTRIBUTIONS = [
+  '<a href="https://github.com/Seshat-Global-History-Databank/cliopatria" target="_blank" rel="noopener noreferrer">Cliopatria (CC BY 4.0)</a>',
+  '<a href="https://github.com/aourednik/historical-basemaps" target="_blank" rel="noopener noreferrer">historical-basemaps (GPL-3.0)</a>'
+]
+
 // Fills start invisible: the hook raises this to `VISIBLE_OPACITY` on the
 // next animation frame after every `setData` (first load and every
 // subsequent year change alike), letting `fill-opacity-transition` (below)

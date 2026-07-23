@@ -498,9 +498,43 @@ defmodule Amanogawa.AtlasTest do
       assert Atlas.count_polities() == 2
     end
 
+    test "edge case: an upsert without years never erases an existing span (targeted on_conflict)" do
+      {:ok, first} =
+        Atlas.upsert_polity(%{
+          name: "Roman Empire",
+          source: "cliopatria",
+          from_year: -27,
+          to_year: 476
+        })
+
+      {:ok, second} = Atlas.upsert_polity(%{name: "Roman Empire", source: "cliopatria"})
+
+      assert second.id == first.id
+      assert second.from_year == -27
+      assert second.to_year == 476
+    end
+
+    test "edge case: a partial upsert (one year) only fills the missing side" do
+      {:ok, _} =
+        Atlas.upsert_polity(%{name: "Roman Empire", source: "cliopatria", from_year: -27})
+
+      {:ok, updated} =
+        Atlas.upsert_polity(%{name: "Roman Empire", source: "cliopatria", to_year: 476})
+
+      assert updated.from_year == -27
+      assert updated.to_year == 476
+    end
+
     test "error case: a missing name returns a changeset error" do
       assert {:error, changeset} = Atlas.upsert_polity(%{source: "cliopatria"})
       assert "can't be blank" in errors_on(changeset).name
+    end
+
+    test "error case: a name over 500 characters returns a changeset error (defense in depth)" do
+      long_name = String.duplicate("x", 501)
+
+      assert {:error, changeset} = Atlas.upsert_polity(%{name: long_name, source: "cliopatria"})
+      assert "should be at most 500 character(s)" in errors_on(changeset).name
     end
   end
 
@@ -559,13 +593,100 @@ defmodule Amanogawa.AtlasTest do
       {:ok, _} = Atlas.replace_borders("cliopatria", [border_row(cliopatria_polity.id)])
 
       assert Atlas.count_borders() == 2
-      assert {:ok, _} = Atlas.replace_borders("cliopatria", [])
+      assert {:ok, _} = Atlas.replace_borders("cliopatria", [], force: true)
       assert Atlas.count_borders() == 1
     end
 
-    test "edge case: an empty Enumerable purges and inserts nothing" do
+    test "edge case: an empty Enumerable against an empty source purges and inserts nothing" do
       assert {:ok, stats} = Atlas.replace_borders("cliopatria", [])
-      assert stats == %{purged: 0, total: 0, repaired: 0, inserted: 0, rejected_empty: 0}
+
+      assert stats == %{
+               purged: 0,
+               purged_polities: 0,
+               total: 0,
+               repaired: 0,
+               inserted: 0,
+               rejected_empty: 0
+             }
+    end
+
+    test "edge case: polities of the source left without any border are purged (no orphans)" do
+      {:ok, kept} = Atlas.upsert_polity(%{name: "Kept Empire", source: "cliopatria"})
+      {:ok, dropped} = Atlas.upsert_polity(%{name: "Dropped Empire", source: "cliopatria"})
+
+      {:ok, _} =
+        Atlas.replace_borders("cliopatria", [border_row(kept.id), border_row(dropped.id)])
+
+      assert Atlas.count_polities() == 2
+
+      # The re-import no longer carries "Dropped Empire": its polity row
+      # must go, the still-referenced one must stay.
+      assert {:ok, stats} = Atlas.replace_borders("cliopatria", [border_row(kept.id)])
+      assert stats.purged_polities == 1
+      assert Atlas.count_polities() == 1
+      assert Repo.get(Amanogawa.Atlas.Polity, kept.id)
+      refute Repo.get(Amanogawa.Atlas.Polity, dropped.id)
+    end
+
+    test "edge case: orphan purge is scoped to the source, other sources keep their polities" do
+      {:ok, hbm_polity} = Atlas.upsert_polity(%{name: "Rome", source: "historical_basemaps"})
+      {:ok, cliopatria_polity} = Atlas.upsert_polity(%{name: "Rome", source: "cliopatria"})
+
+      {:ok, _} = Atlas.replace_borders("cliopatria", [border_row(cliopatria_polity.id)])
+
+      # hbm_polity has no border at all, but belongs to another source:
+      # replacing "cliopatria" must not purge it.
+      assert Repo.get(Amanogawa.Atlas.Polity, hbm_polity.id)
+    end
+
+    test "error case (anti-wipe guard): purging rows while inserting none rolls back" do
+      {:ok, polity} = Atlas.upsert_polity(%{name: "Roman Empire", source: "cliopatria"})
+      rows = [border_row(polity.id), border_row(polity.id, %{from_year: 200, to_year: 300})]
+      {:ok, _} = Atlas.replace_borders("cliopatria", rows)
+      assert Atlas.count_borders() == 2
+
+      assert {:error, {:would_wipe_source, "cliopatria", 2}} =
+               Atlas.replace_borders("cliopatria", [])
+
+      # The rollback restored the previous rows AND the polity.
+      assert Atlas.count_borders() == 2
+      assert Atlas.count_polities() == 1
+    end
+
+    test "error case (anti-wipe guard): force: true deliberately empties the source" do
+      {:ok, polity} = Atlas.upsert_polity(%{name: "Roman Empire", source: "cliopatria"})
+      {:ok, _} = Atlas.replace_borders("cliopatria", [border_row(polity.id)])
+
+      assert {:ok, stats} = Atlas.replace_borders("cliopatria", [], force: true)
+      assert stats.purged == 1
+      assert stats.inserted == 0
+      assert Atlas.count_borders() == 0
+      # The wiped source's polity becomes an orphan and is purged too.
+      assert stats.purged_polities == 1
+      assert Atlas.count_polities() == 0
+    end
+
+    test "error case: a crash mid-stream rolls the whole replacement back" do
+      {:ok, polity} = Atlas.upsert_polity(%{name: "Roman Empire", source: "cliopatria"})
+      {:ok, _} = Atlas.replace_borders("cliopatria", [border_row(polity.id)])
+      assert Atlas.count_borders() == 1
+
+      # One good row, then the scanner (or any upstream stage) crashes:
+      # the purge and the first batch's insert must both roll back.
+      crashing_rows =
+        Stream.map([border_row(polity.id, %{from_year: 500, to_year: 600}), :boom], fn
+          :boom -> raise "scanner crashed mid-stream"
+          row -> row
+        end)
+
+      assert_raise RuntimeError, ~r/scanner crashed mid-stream/, fn ->
+        Atlas.replace_borders("cliopatria", crashing_rows)
+      end
+
+      # Previous state fully intact: same single border, same span.
+      assert Atlas.count_borders() == 1
+      [border] = Repo.all(Amanogawa.Atlas.Border)
+      assert {border.from_year, border.to_year} == {-100, 100}
     end
 
     test "edge case: accepts a lazy Stream, not just a list" do

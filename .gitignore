@@ -42,6 +42,11 @@ npm-debug.log
 # Environment files (secrets stay out of the repo).
 .env
 
+# Manually downloaded border datasets (Cliopatria, historical-basemaps):
+# the import mix tasks recommend keeping them here between runs, never
+# committed (see lib/mix/tasks/amanogawa.import.*.ex).
+/priv/data/
+
 # Database dumps.
 *.dump
 *.sql.gz

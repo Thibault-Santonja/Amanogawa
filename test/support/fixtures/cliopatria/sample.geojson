@@ -24,7 +24,7 @@
       "type": "Feature",
       "properties": {
         "Name": "Roman Empire",
-        "FromYear": 396,
+        "FromYear": 395,
         "ToYear": 476,
         "Type": "POLITY",
         "Area": 2200000

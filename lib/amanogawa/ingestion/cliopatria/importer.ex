@@ -17,10 +17,11 @@ defmodule Amanogawa.Ingestion.Cliopatria.Importer do
 
   @doc """
   Imports the Cliopatria GeoJSON file at `path`. See `Amanogawa.Ingestion.
-  Borders.Importer.import/3` for the returned summary shape.
+  Borders.Importer.import/4` for the returned summary shape and the
+  `:force` option (anti-wipe guard).
   """
-  @spec import(Path.t()) :: {:ok, Importer.summary()}
-  def import(path) do
-    Importer.import(path, @source, &Parser.parse_feature/1)
+  @spec import(Path.t(), keyword()) :: {:ok, Importer.summary()} | {:error, term()}
+  def import(path, opts \\ []) do
+    Importer.import(path, @source, &Parser.parse_feature/1, opts)
   end
 end

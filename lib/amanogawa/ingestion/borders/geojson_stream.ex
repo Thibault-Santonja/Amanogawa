@@ -1,9 +1,10 @@
 defmodule Amanogawa.Ingestion.Borders.GeojsonStream do
   @moduledoc """
   Reads a GeoJSON `FeatureCollection` file's top-level `"features"` array
-  one feature at a time, in constant memory, regardless of file size
-  (issue #023: Cliopatria's export is ~307MB; loading it whole is
-  forbidden).
+  one feature at a time, with memory bounded per feature (one chunk plus
+  the in-progress feature's text, itself capped at
+  `#{32 * 1024 * 1024}` bytes), regardless of file size (issue #023:
+  Cliopatria's export is ~307MB; loading it whole is forbidden).
 
   ## Why a hand-rolled scanner rather than a streaming JSON library
 
@@ -23,23 +24,40 @@ defmodule Amanogawa.Ingestion.Borders.GeojsonStream do
   ## How it works
 
   Three phases, driven by `Stream.transform/3` over `File.stream!/3`
-  fixed-size byte chunks, so memory never holds more than one chunk plus
-  one in-progress feature's text:
+  fixed-size byte chunks:
 
     1. **Seek**: accumulate bytes (capped at `@seek_limit_bytes`, a
-       generous bound for a header far smaller than that) until the literal
-       key `"features"` is found, then the next `[`. Raises if the array
+       generous bound for a header far smaller than that) until the
+       `"features"` key is found at the top level of the root object,
+       then the `[` that opens its array. The seek scanner is JSON-aware:
+       it tracks string and escape context plus brace/bracket depth, so a
+       header string *value* containing `"features"` (a title, a
+       description) never triggers a false match; only a depth-1 key
+       named `features` followed by `:` and `[` does. Raises if the array
        start is not found within the cap: a file without a `"features"`
        array is not a `FeatureCollection` this module can read, and it is
        better to fail loudly and immediately than to silently scan the
        whole file for nothing.
     2. **Between**: skip whitespace/commas between features; `{` starts
        one, `]` ends the array (everything after is ignored: this module
-       only ever needs the features array itself).
+       only ever needs the features array itself). Any other byte starts
+       a non-object array element (`null`, a number, a string): it is
+       consumed up to the next top-level `,` or `]` and emitted as
+       `{:error, {:invalid_json, :non_object_feature}}`, counted by the
+       caller, never fatal.
     3. **In feature**: a brace-depth counter, aware of JSON string/escape
        context (so a `{` or `}` inside a string value, or an escaped quote,
        never miscounts), accumulates the feature's exact text until its
        matching closing brace, then hands the substring to `Jason.decode/1`.
+       Accumulation is by contiguous chunk slices (`binary_part/3` at
+       chunk transitions and at the feature's end), never one binary per
+       byte: a per-byte accumulator was measured at roughly 50x memory
+       amplification over the feature's own size. A feature whose text
+       exceeds `:max_feature_bytes` (default #{32 * 1024 * 1024} bytes)
+       is discarded while the scanner keeps tracking its braces to
+       resynchronize on the matching closing brace, then emitted as
+       `{:error, {:invalid_json, :feature_too_large}}`: rejected and
+       counted, never a raise.
 
   Yields `{:ok, feature_map}` for each syntactically valid feature, or
   `{:error, {:invalid_json, reason}}` for one that is not (a single
@@ -57,6 +75,7 @@ defmodule Amanogawa.Ingestion.Borders.GeojsonStream do
 
   @seek_limit_bytes 1_048_576
   @default_chunk_bytes 65_536
+  @default_max_feature_bytes 32 * 1024 * 1024
 
   @type feature :: {:ok, map()} | {:error, {:invalid_json, term()}}
 
@@ -71,6 +90,11 @@ defmodule Amanogawa.Ingestion.Borders.GeojsonStream do
       many small chunks against a tiny fixture and exercise every state
       transition across a chunk boundary; production callers never need to
       override it.
+    * `:max_feature_bytes` - per-feature text size cap, default
+      #{@default_max_feature_bytes}. A feature larger than this is
+      rejected (`{:error, {:invalid_json, :feature_too_large}}`) and the
+      scanner resynchronizes on its closing brace. Exposed so tests can
+      exercise the cap without a multi-gigabyte fixture.
   """
   # `path` is a local filesystem path an operator passes to a mix task
   # (`mix amanogawa.import.cliopatria`/`mix amanogawa.import.
@@ -82,6 +106,7 @@ defmodule Amanogawa.Ingestion.Borders.GeojsonStream do
   @spec features(Path.t(), keyword()) :: Enumerable.t(feature())
   def features(path, opts \\ []) do
     chunk_bytes = Keyword.get(opts, :chunk_bytes, @default_chunk_bytes)
+    max_feature_bytes = Keyword.get(opts, :max_feature_bytes, @default_max_feature_bytes)
 
     # `last_fun` (arity 5), not `after_fun` (arity 4): `last_fun` only runs
     # when the underlying `File.Stream` itself finishes successfully, so a
@@ -93,11 +118,28 @@ defmodule Amanogawa.Ingestion.Borders.GeojsonStream do
     # message instead.
     path
     |> File.stream!([], chunk_bytes)
-    |> Stream.transform(&initial_state/0, &scan/2, &finalize(&1, path), fn _state -> :ok end)
+    |> Stream.transform(
+      fn -> initial_state(max_feature_bytes) end,
+      &scan/2,
+      &finalize(&1, path),
+      fn _state -> :ok end
+    )
   end
 
-  defp initial_state do
-    %{mode: :seek, seek_buffer: <<>>, depth: 0, in_string: false, escaped: false, buffer: []}
+  defp initial_state(max_feature_bytes) do
+    %{
+      mode: :seek,
+      seek_buffer: <<>>,
+      depth: 0,
+      in_string: false,
+      escaped: false,
+      # Reversed list of contiguous binary slices of the in-progress
+      # feature's text, closed at chunk transitions and at the feature's
+      # end: never one binary per byte (see the moduledoc).
+      buffer: [],
+      feature_bytes: 0,
+      max_feature_bytes: max_feature_bytes
+    }
   end
 
   defp scan(chunk, state) do
@@ -129,58 +171,167 @@ defmodule Amanogawa.Ingestion.Borders.GeojsonStream do
     consume(rest, state, emitted)
   end
 
-  defp consume(<<?{, rest::binary>>, %{mode: :between} = state, emitted) do
-    feature_state = %{state | mode: :in_feature, depth: 1, in_string: false, buffer: [<<?{>>]}
-    consume(rest, feature_state, emitted)
+  defp consume(<<?{, _rest::binary>> = bin, %{mode: :between} = state, emitted) do
+    feature_state = %{
+      state
+      | mode: :in_feature,
+        depth: 1,
+        in_string: false,
+        escaped: false,
+        buffer: [],
+        feature_bytes: 0
+    }
+
+    # The opening brace is part of the feature's text: scanning restarts
+    # at offset 1 with the slice opened at offset 0, so the brace lands in
+    # the same contiguous slice as the bytes that follow it.
+    scan_feature(bin, 1, 0, feature_state, emitted)
   end
 
   defp consume(<<?], _rest::binary>>, %{mode: :between} = state, emitted) do
     {emitted, %{state | mode: :done}}
   end
 
-  defp consume(<<byte, rest::binary>>, %{mode: :in_feature, in_string: true} = state, emitted) do
-    cond do
-      state.escaped ->
-        consume(rest, %{state | escaped: false, buffer: [<<byte>> | state.buffer]}, emitted)
-
-      byte == ?\\ ->
-        consume(rest, %{state | escaped: true, buffer: [<<byte>> | state.buffer]}, emitted)
-
-      byte == ?" ->
-        consume(rest, %{state | in_string: false, buffer: [<<byte>> | state.buffer]}, emitted)
-
-      true ->
-        consume(rest, %{state | buffer: [<<byte>> | state.buffer]}, emitted)
-    end
+  # Non-object array element (`null`, a number, a bare string, `[...]`):
+  # tolerated as one rejected element rather than a fatal error. Consumed
+  # up to the next top-level `,` or `]`, then emitted as a tagged error.
+  defp consume(bin, %{mode: :between} = state, emitted) do
+    consume_junk(bin, %{state | mode: :junk, in_string: false, escaped: false}, emitted)
   end
 
-  defp consume(<<?", rest::binary>>, %{mode: :in_feature} = state, emitted) do
-    consume(rest, %{state | in_string: true, buffer: [<<?">> | state.buffer]}, emitted)
-  end
+  defp consume(bin, %{mode: :junk} = state, emitted), do: consume_junk(bin, state, emitted)
 
-  defp consume(<<?{, rest::binary>>, %{mode: :in_feature} = state, emitted) do
-    consume(rest, %{state | depth: state.depth + 1, buffer: [<<?{>> | state.buffer]}, emitted)
-  end
-
-  defp consume(<<?}, rest::binary>>, %{mode: :in_feature, depth: 1} = state, emitted) do
-    feature_json = [<<?}>> | state.buffer] |> Enum.reverse() |> IO.iodata_to_binary()
-    decoded = decode_feature(feature_json)
-    new_state = %{state | mode: :between, depth: 0, buffer: []}
-    consume(rest, new_state, [decoded | emitted])
-  end
-
-  defp consume(<<?}, rest::binary>>, %{mode: :in_feature} = state, emitted) do
-    consume(rest, %{state | depth: state.depth - 1, buffer: [<<?}>> | state.buffer]}, emitted)
-  end
-
-  defp consume(<<byte, rest::binary>>, %{mode: :in_feature} = state, emitted) do
-    consume(rest, %{state | buffer: [<<byte>> | state.buffer]}, emitted)
+  defp consume(bin, %{mode: mode} = state, emitted) when mode in [:in_feature, :skip_feature] do
+    scan_feature(bin, 0, 0, state, emitted)
   end
 
   # The array closed (`]` consumed above): everything after it (other
   # top-level FeatureCollection keys, the closing `}`) is deliberately
   # ignored, chunk after chunk, until the file ends.
   defp consume(_bin, %{mode: :done} = state, emitted), do: {emitted, state}
+
+  # Byte-scanner for one feature object: `offset` walks the chunk,
+  # `slice_start` marks where the current contiguous slice began. The
+  # slice is closed (one `binary_part/3`) when the feature ends or the
+  # chunk runs out, never per byte.
+  defp scan_feature(bin, offset, slice_start, state, emitted) when offset < byte_size(bin) do
+    byte = :binary.at(bin, offset)
+
+    if state.in_string do
+      scan_feature(bin, offset + 1, slice_start, string_step(state, byte), emitted)
+    else
+      scan_feature_step(byte, bin, offset, slice_start, state, emitted)
+    end
+  end
+
+  # Chunk exhausted mid-feature: close the current slice and wait for the
+  # next chunk. An oversized feature flips to `:skip_feature` here (and in
+  # `finish_feature/5` below): its text is discarded but the brace/string
+  # tracking continues, so the scanner resynchronizes on the feature's own
+  # closing brace instead of raising.
+  defp scan_feature(bin, offset, slice_start, state, emitted) do
+    slice_len = offset - slice_start
+    state = accumulate_slice(bin, slice_start, slice_len, state)
+    {emitted, state}
+  end
+
+  # One out-of-string byte of the in-progress feature.
+  defp scan_feature_step(?", bin, offset, slice_start, state, emitted) do
+    scan_feature(bin, offset + 1, slice_start, %{state | in_string: true}, emitted)
+  end
+
+  defp scan_feature_step(?{, bin, offset, slice_start, state, emitted) do
+    scan_feature(bin, offset + 1, slice_start, %{state | depth: state.depth + 1}, emitted)
+  end
+
+  defp scan_feature_step(?}, bin, offset, slice_start, %{depth: 1} = state, emitted) do
+    finish_feature(bin, offset, slice_start, state, emitted)
+  end
+
+  defp scan_feature_step(?}, bin, offset, slice_start, state, emitted) do
+    scan_feature(bin, offset + 1, slice_start, %{state | depth: state.depth - 1}, emitted)
+  end
+
+  defp scan_feature_step(_byte, bin, offset, slice_start, state, emitted) do
+    scan_feature(bin, offset + 1, slice_start, state, emitted)
+  end
+
+  # One byte inside a JSON string, shared by every scanner of this module:
+  # tracks escape sequences and the closing quote, leaving all other state
+  # untouched.
+  defp string_step(%{escaped: true} = state, _byte), do: %{state | escaped: false}
+  defp string_step(state, ?\\), do: %{state | escaped: true}
+  defp string_step(state, ?"), do: %{state | in_string: false}
+  defp string_step(state, _byte), do: state
+
+  defp finish_feature(bin, offset, slice_start, %{mode: :in_feature} = state, emitted) do
+    state = accumulate_slice(bin, slice_start, offset - slice_start + 1, state)
+    rest = binary_part(bin, offset + 1, byte_size(bin) - offset - 1)
+
+    decoded =
+      case state.mode do
+        # `accumulate_slice/4` tripped the size cap on this final slice.
+        :skip_feature ->
+          {:error, {:invalid_json, :feature_too_large}}
+
+        :in_feature ->
+          state.buffer |> Enum.reverse() |> IO.iodata_to_binary() |> decode_feature()
+      end
+
+    new_state = %{state | mode: :between, depth: 0, buffer: [], feature_bytes: 0}
+    consume(rest, new_state, [decoded | emitted])
+  end
+
+  defp finish_feature(bin, offset, _slice_start, %{mode: :skip_feature} = state, emitted) do
+    rest = binary_part(bin, offset + 1, byte_size(bin) - offset - 1)
+    decoded = {:error, {:invalid_json, :feature_too_large}}
+    new_state = %{state | mode: :between, depth: 0, buffer: [], feature_bytes: 0}
+    consume(rest, new_state, [decoded | emitted])
+  end
+
+  defp accumulate_slice(_bin, _slice_start, 0, state), do: state
+
+  defp accumulate_slice(_bin, _slice_start, slice_len, %{mode: :skip_feature} = state) do
+    %{state | feature_bytes: state.feature_bytes + slice_len}
+  end
+
+  defp accumulate_slice(bin, slice_start, slice_len, state) do
+    feature_bytes = state.feature_bytes + slice_len
+
+    if feature_bytes > state.max_feature_bytes do
+      %{state | mode: :skip_feature, buffer: [], feature_bytes: feature_bytes}
+    else
+      slice = binary_part(bin, slice_start, slice_len)
+      %{state | buffer: [slice | state.buffer], feature_bytes: feature_bytes}
+    end
+  end
+
+  # Consumes a non-object array element up to the next top-level `,` or
+  # `]`, honoring string/escape context so a comma inside a bare string
+  # element never splits it in two.
+  defp consume_junk(<<>>, state, emitted), do: {emitted, state}
+
+  defp consume_junk(<<byte, rest::binary>>, %{in_string: true} = state, emitted) do
+    consume_junk(rest, string_step(state, byte), emitted)
+  end
+
+  defp consume_junk(<<?", rest::binary>>, state, emitted) do
+    consume_junk(rest, %{state | in_string: true}, emitted)
+  end
+
+  defp consume_junk(<<?,, rest::binary>>, state, emitted) do
+    error = {:error, {:invalid_json, :non_object_feature}}
+    consume(rest, %{state | mode: :between}, [error | emitted])
+  end
+
+  defp consume_junk(<<?], _rest::binary>>, state, emitted) do
+    error = {:error, {:invalid_json, :non_object_feature}}
+    {[error | emitted], %{state | mode: :done}}
+  end
+
+  defp consume_junk(<<_byte, rest::binary>>, state, emitted) do
+    consume_junk(rest, state, emitted)
+  end
 
   defp decode_feature(json) do
     case Jason.decode(json) do
@@ -189,31 +340,86 @@ defmodule Amanogawa.Ingestion.Borders.GeojsonStream do
     end
   end
 
-  # Finds the first `[` following the literal key `"features"` (whitespace
-  # and a `:` tolerated in between, matching every real-world GeoJSON
-  # formatting seen from both Cliopatria and historical-basemaps: minified
-  # or pretty-printed). Returns the bytes strictly after that `[` so the
+  # JSON-aware seek: finds the `[` opening the array of a depth-1 key
+  # named exactly `features`, never a string *value* that merely contains
+  # or equals `"features"` (string and escape context is tracked; a
+  # matched candidate is only accepted when a `:` follows, which only ever
+  # follows a key). Returns the bytes strictly after that `[` so the
   # caller resumes scanning from the first feature (or `]` for an empty
-  # collection).
-  defp find_array_start(buffer) do
-    case :binary.match(buffer, "\"features\"") do
-      {pos, len} ->
-        after_key = binary_part(buffer, pos + len, byte_size(buffer) - pos - len)
-        skip_to_bracket(after_key)
+  # collection). The whole (bounded, at most `@seek_limit_bytes`) buffer
+  # is rescanned on each new chunk: simpler than carrying incremental
+  # scanner state across chunks, and the cap keeps the rescans cheap.
+  defp find_array_start(buffer),
+    do: seek_scan(buffer, 0, %{depth: 0, in_string: false, escaped: false})
 
-      :nomatch ->
-        :not_found
+  defp seek_scan(buffer, offset, state) when offset < byte_size(buffer) do
+    byte = :binary.at(buffer, offset)
+
+    cond do
+      state.in_string ->
+        seek_scan(buffer, offset + 1, string_step(state, byte))
+
+      byte == ?" and state.depth == 1 ->
+        try_features_key(buffer, offset, state)
+
+      true ->
+        seek_scan(buffer, offset + 1, seek_step(state, byte))
     end
   end
 
-  defp skip_to_bracket(<<c, rest::binary>>) when c in [?\s, ?\n, ?\r, ?\t, ?:] do
-    skip_to_bracket(rest)
+  defp seek_scan(_buffer, _offset, _state), do: :not_found
+
+  # One out-of-string byte of the header scan: string starts and
+  # brace/bracket depth, everything else passes through.
+  defp seek_step(state, ?"), do: %{state | in_string: true}
+  defp seek_step(state, byte) when byte in [?{, ?[], do: %{state | depth: state.depth + 1}
+  defp seek_step(state, byte) when byte in [?}, ?]], do: %{state | depth: state.depth - 1}
+  defp seek_step(state, _byte), do: state
+
+  # A `"` at depth 1: either the `features` key this scan is looking for,
+  # or some other key/value string to skip over as a normal string.
+  defp try_features_key(buffer, offset, state) do
+    rest = binary_part(buffer, offset, byte_size(buffer) - offset)
+
+    case rest do
+      <<"\"features\"", after_key::binary>> ->
+        case skip_to_bracket(after_key) do
+          {:ok, array_rest} ->
+            {:ok, array_rest}
+
+          # `"features"` immediately followed by `,`/`}`/...: it was a
+          # string *value*, not a key (a key is always followed by `:`).
+          # Resume scanning right after the closing quote.
+          :not_a_key ->
+            seek_scan(buffer, offset + byte_size("\"features\""), state)
+
+          :not_found ->
+            :not_found
+        end
+
+      _other ->
+        seek_scan(buffer, offset + 1, %{state | in_string: true})
+    end
   end
 
-  defp skip_to_bracket(<<?[, rest::binary>>), do: {:ok, rest}
-  defp skip_to_bracket(<<>>), do: :not_found
+  # After a confirmed `"features"` token: whitespace then `:` then
+  # whitespace then `[` makes it the key this module wants. A missing `:`
+  # means the token was a value (`:not_a_key`); a `:` followed by
+  # something other than `[` is a genuinely unreadable file (the
+  # `features` key does not hold an array); an exhausted buffer is simply
+  # "wait for the next chunk" (`:not_found`).
+  defp skip_to_bracket(bin), do: skip_ws_then(bin, :colon)
 
-  defp skip_to_bracket(_other) do
+  defp skip_ws_then(<<c, rest::binary>>, expected) when c in [?\s, ?\n, ?\r, ?\t] do
+    skip_ws_then(rest, expected)
+  end
+
+  defp skip_ws_then(<<?:, rest::binary>>, :colon), do: skip_ws_then(rest, :bracket)
+  defp skip_ws_then(<<_c, _rest::binary>>, :colon), do: :not_a_key
+  defp skip_ws_then(<<?[, rest::binary>>, :bracket), do: {:ok, rest}
+  defp skip_ws_then(<<>>, _expected), do: :not_found
+
+  defp skip_ws_then(_other, :bracket) do
     raise ~s|GeojsonStream: expected "features" to be followed by an array ("[")|
   end
 

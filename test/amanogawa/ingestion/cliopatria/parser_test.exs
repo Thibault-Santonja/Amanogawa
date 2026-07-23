@@ -194,6 +194,144 @@ defmodule Amanogawa.Ingestion.Cliopatria.ParserTest do
     end
   end
 
+  describe "error case: hostile geometry coordinates" do
+    test "null coordinates produce a tagged error" do
+      assert {:error, :invalid_geometry_coordinates} =
+               parse_with_geometry(%{"type" => "Polygon", "coordinates" => nil})
+    end
+
+    test "string coordinates produce a tagged error" do
+      assert {:error, :invalid_geometry_coordinates} =
+               parse_with_geometry(%{"type" => "Polygon", "coordinates" => "not a list"})
+    end
+
+    test "a Polygon nested like a MultiPolygon (one level too deep) produces a tagged error" do
+      too_deep = [[[[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [0.0, 0.0]]]]
+
+      assert {:error, :invalid_geometry_coordinates} =
+               parse_with_geometry(%{"type" => "Polygon", "coordinates" => too_deep})
+    end
+
+    test "a MultiPolygon nested like a Polygon (one level too shallow) produces a tagged error" do
+      too_shallow = [[[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [0.0, 0.0]]]
+
+      assert {:error, :invalid_geometry_coordinates} =
+               parse_with_geometry(%{"type" => "MultiPolygon", "coordinates" => too_shallow})
+    end
+
+    test "empty coordinates (or an empty ring) produce a tagged error" do
+      assert {:error, :invalid_geometry_coordinates} =
+               parse_with_geometry(%{"type" => "Polygon", "coordinates" => []})
+
+      assert {:error, :invalid_geometry_coordinates} =
+               parse_with_geometry(%{"type" => "Polygon", "coordinates" => [[]]})
+    end
+
+    test "a position that is not 2-3 numbers produces a tagged error" do
+      one_number = [[[0.0], [0.0, 1.0], [1.0, 1.0], [0.0]]]
+      four_numbers = [[[0.0, 0.0, 0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [0.0, 0.0, 0.0, 0.0]]]
+      strings = [[["a", "b"], [0.0, 1.0], [1.0, 1.0], ["a", "b"]]]
+
+      for coordinates <- [one_number, four_numbers, strings] do
+        assert {:error, :invalid_geometry_coordinates} =
+                 parse_with_geometry(%{"type" => "Polygon", "coordinates" => coordinates})
+      end
+    end
+
+    test "longitude or latitude out of the WGS84 domain produces a tagged error" do
+      bad_lon = [[[181.0, 0.0], [0.0, 1.0], [1.0, 1.0], [181.0, 0.0]]]
+      bad_lat = [[[0.0, -91.0], [0.0, 1.0], [1.0, 1.0], [0.0, -91.0]]]
+
+      for coordinates <- [bad_lon, bad_lat] do
+        assert {:error, :invalid_geometry_coordinates} =
+                 parse_with_geometry(%{"type" => "Polygon", "coordinates" => coordinates})
+      end
+    end
+
+    test "a 3-element position (with elevation) is accepted" do
+      with_elevation = [
+        [[0.0, 0.0, 12.5], [0.0, 1.0, 12.5], [1.0, 1.0, 12.5], [0.0, 0.0, 12.5]]
+      ]
+
+      assert {:ok, _row} =
+               parse_with_geometry(%{"type" => "Polygon", "coordinates" => with_elevation})
+    end
+  end
+
+  describe "error case: implausible or overflowing years" do
+    test "a year far beyond the int4 domain is rejected, never crashes the SQL batch" do
+      feature = %{
+        "properties" => %{
+          "Name" => "Empire",
+          "FromYear" => -13_800_000_000,
+          "ToYear" => 2024,
+          "Type" => "POLITY"
+        },
+        "geometry" => @polygon
+      }
+
+      assert Parser.parse_feature(feature) ==
+               {:error, {:year_out_of_bounds, "FromYear", -13_800_000_000}}
+    end
+
+    test "a year outside the plausibility window [-200_000, 3000] is rejected" do
+      feature = %{
+        "properties" => %{
+          "Name" => "Empire",
+          "FromYear" => -27,
+          "ToYear" => 3001,
+          "Type" => "POLITY"
+        },
+        "geometry" => @polygon
+      }
+
+      assert Parser.parse_feature(feature) == {:error, {:year_out_of_bounds, "ToYear", 3001}}
+    end
+
+    test "the plausibility window's own bounds are accepted" do
+      feature = %{
+        "properties" => %{
+          "Name" => "Empire",
+          "FromYear" => -200_000,
+          "ToYear" => 3000,
+          "Type" => "POLITY"
+        },
+        "geometry" => @polygon
+      }
+
+      assert {:ok, %{from_year: -200_000, to_year: 3000}} = Parser.parse_feature(feature)
+    end
+  end
+
+  describe "error case: oversized name" do
+    test "a name over 500 characters is rejected with a tagged error, never truncated" do
+      megabyte_name = String.duplicate("x", 1_048_576)
+
+      feature = %{
+        "properties" => %{
+          "Name" => megabyte_name,
+          "FromYear" => -27,
+          "ToYear" => 395,
+          "Type" => "POLITY"
+        },
+        "geometry" => @polygon
+      }
+
+      assert Parser.parse_feature(feature) == {:error, {:name_too_long, 1_048_576}}
+    end
+
+    test "a name of exactly 500 characters is accepted" do
+      name = String.duplicate("x", 500)
+
+      feature = %{
+        "properties" => %{"Name" => name, "FromYear" => -27, "ToYear" => 395, "Type" => "POLITY"},
+        "geometry" => @polygon
+      }
+
+      assert {:ok, %{name: ^name}} = Parser.parse_feature(feature)
+    end
+  end
+
   describe "limit case" do
     test "from_year == to_year is accepted" do
       feature = %{
@@ -239,9 +377,18 @@ defmodule Amanogawa.Ingestion.Cliopatria.ParserTest do
           "geometry" => @polygon
         }
 
+        in_bounds = fn year -> year >= -200_000 and year <= 3000 end
+
         case Parser.parse_feature(feature) do
-          {:ok, %{from_year: ^from_year, to_year: ^to_year}} -> assert from_year <= to_year
-          {:error, {:invalid_year_range, ^from_year, ^to_year}} -> assert from_year > to_year
+          {:ok, %{from_year: ^from_year, to_year: ^to_year}} ->
+            assert from_year <= to_year
+            assert in_bounds.(from_year) and in_bounds.(to_year)
+
+          {:error, {:invalid_year_range, ^from_year, ^to_year}} ->
+            assert from_year > to_year
+
+          {:error, {:year_out_of_bounds, _key, year}} ->
+            refute in_bounds.(year)
         end
       end
     end
@@ -255,6 +402,18 @@ defmodule Amanogawa.Ingestion.Cliopatria.ParserTest do
                  Parser.parse_feature(feature) == :skip
       end
     end
+  end
+
+  defp parse_with_geometry(geometry) do
+    Parser.parse_feature(%{
+      "properties" => %{
+        "Name" => "Empire",
+        "FromYear" => -27,
+        "ToYear" => 395,
+        "Type" => "POLITY"
+      },
+      "geometry" => geometry
+    })
   end
 
   defp random_properties do

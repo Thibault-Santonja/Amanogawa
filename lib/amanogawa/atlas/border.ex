@@ -41,6 +41,11 @@ defmodule Amanogawa.Atlas.Border do
     field :source, :string
     field :precision, :integer
 
+    # Area of geom_medium in square kilometers, precomputed at import time
+    # (`Amanogawa.Atlas.BorderQueries.insert_batch/3`) so the read side
+    # (`list_active_borders/1`) never recomputes ST_Area per request.
+    field :area_km2, :float
+
     belongs_to :polity, Amanogawa.Atlas.Polity, type: Ecto.UUID
 
     timestamps(type: :utc_datetime)
@@ -54,7 +59,8 @@ defmodule Amanogawa.Atlas.Border do
     :from_year,
     :to_year,
     :source,
-    :precision
+    :precision,
+    :area_km2
   ]
 
   @doc """

@@ -124,6 +124,166 @@ defmodule Amanogawa.Ingestion.Borders.GeojsonStreamTest do
     end
   end
 
+  describe "error case: non-object elements in the features array" do
+    test "null, numbers and bare strings are each tagged, surrounding features still stream" do
+      path =
+        write_tmp!(
+          ~s({"features":[{"type":"Feature","properties":{"a":1},"geometry":null},null,42,"junk",{"type":"Feature","properties":{"a":2},"geometry":null}]})
+        )
+
+      on_exit_delete(path)
+
+      results = GeojsonStream.features(path) |> Enum.to_list()
+
+      assert [
+               {:ok, %{"properties" => %{"a" => 1}}},
+               {:error, {:invalid_json, :non_object_feature}},
+               {:error, {:invalid_json, :non_object_feature}},
+               {:error, {:invalid_json, :non_object_feature}},
+               {:ok, %{"properties" => %{"a" => 2}}}
+             ] = results
+    end
+
+    test "a bare string element containing a comma is one rejected element, not two" do
+      path = write_tmp!(~s({"features":["a, b",{"type":"Feature","properties":{"a":1}}]}))
+      on_exit_delete(path)
+
+      assert [
+               {:error, {:invalid_json, :non_object_feature}},
+               {:ok, %{"properties" => %{"a" => 1}}}
+             ] = GeojsonStream.features(path) |> Enum.to_list()
+    end
+
+    test "a trailing non-object element right before the closing bracket is still tagged" do
+      path = write_tmp!(~s({"features":[{"type":"Feature","properties":{"a":1}},null]}))
+      on_exit_delete(path)
+
+      assert [
+               {:ok, %{"properties" => %{"a" => 1}}},
+               {:error, {:invalid_json, :non_object_feature}}
+             ] = GeojsonStream.features(path) |> Enum.to_list()
+    end
+
+    test "byte-by-byte chunking yields the exact same tagged errors" do
+      content =
+        ~s({"features":[null,{"type":"Feature","properties":{"a":1},"geometry":null},7]})
+
+      path = write_tmp!(content)
+      on_exit_delete(path)
+
+      default = GeojsonStream.features(path) |> Enum.to_list()
+      tiny = GeojsonStream.features(path, chunk_bytes: 1) |> Enum.to_list()
+
+      assert tiny == default
+
+      assert [
+               {:error, {:invalid_json, :non_object_feature}},
+               {:ok, _},
+               {:error, {:invalid_json, :non_object_feature}}
+             ] = default
+    end
+  end
+
+  describe "error case: oversized feature (max_feature_bytes cap)" do
+    test "a feature over the cap is rejected and counted, later features still stream" do
+      big_name = String.duplicate("x", 300)
+
+      path =
+        write_tmp!(~s({"features":[
+          {"type":"Feature","properties":{"Name":"#{big_name}"},"geometry":null},
+          {"type":"Feature","properties":{"a":2},"geometry":null}
+        ]}))
+
+      on_exit_delete(path)
+
+      results = GeojsonStream.features(path, max_feature_bytes: 128) |> Enum.to_list()
+
+      assert [
+               {:error, {:invalid_json, :feature_too_large}},
+               {:ok, %{"properties" => %{"a" => 2}}}
+             ] = results
+    end
+
+    test "the cap holds across chunk boundaries (chunk_bytes: 1)" do
+      big_name = String.duplicate("x", 300)
+
+      path =
+        write_tmp!(
+          ~s({"features":[{"type":"Feature","properties":{"Name":"#{big_name}"}},{"type":"Feature","properties":{"a":2}}]})
+        )
+
+      on_exit_delete(path)
+
+      results =
+        GeojsonStream.features(path, max_feature_bytes: 128, chunk_bytes: 1) |> Enum.to_list()
+
+      assert [
+               {:error, {:invalid_json, :feature_too_large}},
+               {:ok, %{"properties" => %{"a" => 2}}}
+             ] = results
+    end
+
+    test "a feature exactly at the cap is accepted" do
+      feature_json = ~s({"type":"Feature","properties":{"a":1}})
+      path = write_tmp!(~s({"features":[#{feature_json}]}))
+      on_exit_delete(path)
+
+      assert [{:ok, %{"properties" => %{"a" => 1}}}] =
+               GeojsonStream.features(path, max_feature_bytes: byte_size(feature_json))
+               |> Enum.to_list()
+    end
+  end
+
+  describe "edge case: \"features\" appearing inside header string values" do
+    test "a header value equal to \"features\" never triggers a false array start" do
+      path =
+        write_tmp!(
+          ~s({"title":"features","features":[{"type":"Feature","properties":{"a":1},"geometry":null}]})
+        )
+
+      on_exit_delete(path)
+
+      assert [{:ok, %{"properties" => %{"a" => 1}}}] =
+               GeojsonStream.features(path) |> Enum.to_list()
+    end
+
+    test "a header value containing '\"features\": [' inside a string is not the array" do
+      path =
+        write_tmp!(
+          ~s({"description":"has \\"features\\": [1,2] inside","features":[{"type":"Feature","properties":{"a":1},"geometry":null}]})
+        )
+
+      on_exit_delete(path)
+
+      assert [{:ok, %{"properties" => %{"a" => 1}}}] =
+               GeojsonStream.features(path) |> Enum.to_list()
+    end
+
+    test "a nested object's own features key is not mistaken for the top-level one" do
+      path =
+        write_tmp!(
+          ~s({"meta":{"features":"none"},"features":[{"type":"Feature","properties":{"a":1},"geometry":null}]})
+        )
+
+      on_exit_delete(path)
+
+      assert [{:ok, %{"properties" => %{"a" => 1}}}] =
+               GeojsonStream.features(path) |> Enum.to_list()
+    end
+
+    test "the seek stays correct byte by byte (chunk_bytes: 1)" do
+      path =
+        write_tmp!(
+          ~s({"title":"features","features":[{"type":"Feature","properties":{"a":1},"geometry":null}]})
+        )
+
+      on_exit_delete(path)
+
+      assert [{:ok, %{"properties" => %{"a" => 1}}}] =
+               GeojsonStream.features(path, chunk_bytes: 1) |> Enum.to_list()
+    end
+  end
+
   describe "error case: no top-level \"features\" array" do
     test "raises a clear error rather than scanning the whole file" do
       path = write_tmp!(~s({"type":"NotAFeatureCollection"}))

@@ -266,14 +266,28 @@ defmodule Amanogawa.Atlas do
   its id (borders elsewhere reference that id by foreign key).
 
   `attrs`: `:name`, `:source` (required), `:from_year`, `:to_year`
-  (optional, the entity's own attested existence span).
+  (optional, the entity's own attested existence span). The conflict
+  update is targeted: an upsert carrying `nil` for `from_year`/`to_year`
+  (the common case, `Amanogawa.Ingestion.Borders.Importer` never knows an
+  entity's overall span) preserves whatever non-nil span the existing row
+  already carries (`COALESCE(EXCLUDED..., current)`), instead of erasing
+  it (F05 quality finding).
   """
   @spec upsert_polity(map()) :: {:ok, Polity.t()} | {:error, Ecto.Changeset.t()}
   def upsert_polity(attrs) do
     %Polity{}
     |> Polity.changeset(attrs)
     |> Repo.insert(
-      on_conflict: {:replace, [:from_year, :to_year, :updated_at]},
+      on_conflict:
+        from(p in Polity,
+          update: [
+            set: [
+              from_year: fragment("COALESCE(EXCLUDED.from_year, ?)", p.from_year),
+              to_year: fragment("COALESCE(EXCLUDED.to_year, ?)", p.to_year),
+              updated_at: fragment("EXCLUDED.updated_at")
+            ]
+          ]
+        ),
       conflict_target: [:name, :source],
       returning: true
     )
@@ -297,19 +311,36 @@ defmodule Amanogawa.Atlas do
   Idempotent: replaying the same `rows` for the same `source` produces the
   same final row count, regardless of what was there before under that
   source. Borders of other sources are never touched (the purge is scoped
-  to `source`).
+  to `source`), and polities of `source` left without a single border row
+  by the replacement (an entity the new file no longer carries) are purged
+  in the same transaction, so `atlas.polities` never accumulates orphans
+  across re-imports.
+
+  ## Anti-wipe guard
+
+  A purge that removed rows followed by zero insertions is, in every
+  legitimate scenario, a wrong file or a wholly corrupted one (100% of
+  features rejected upstream), not a real "this source is now empty"
+  import: the transaction is rolled back
+  (`{:error, {:would_wipe_source, source, purged}}`) and the previous
+  data survives. Pass `force: true` (exposed as `--force` by both import
+  mix tasks) to deliberately empty a source instead.
 
   Returns `{:ok, stats}` with `:purged` (rows deleted before reinsertion),
-  `:total` (rows read from `rows`), `:repaired` (rows whose raw geometry
-  was invalid before `ST_MakeValid`), `:inserted` and `:rejected_empty`
+  `:purged_polities` (orphaned polities removed at the end), `:total`
+  (rows read from `rows`), `:repaired` (rows whose raw geometry was
+  invalid before `ST_MakeValid`), `:inserted` and `:rejected_empty`
   (still empty after repair, logged by the caller, never raised).
 
   `rows`: see `Amanogawa.Atlas.BorderQueries.raw_row/0` for the expected
   shape (`:polity_id`, `:geometry` as a raw GeoJSON geometry map,
   `:from_year`, `:to_year`, `:source`, `:precision`).
   """
-  @spec replace_borders(String.t(), Enumerable.t()) :: {:ok, map()}
-  def replace_borders(source, rows) do
+  @spec replace_borders(String.t(), Enumerable.t(), keyword()) ::
+          {:ok, map()} | {:error, {:would_wipe_source, String.t(), pos_integer()}}
+  def replace_borders(source, rows, opts \\ []) do
+    force = Keyword.get(opts, :force, false)
+
     Repo.transaction(
       fn ->
         purged = BorderQueries.purge_source(source)
@@ -321,7 +352,15 @@ defmodule Amanogawa.Atlas do
             batch |> BorderQueries.insert_batch() |> merge_border_stats(acc)
           end)
 
-        Map.put(stats, :purged, purged)
+        if purged > 0 and stats.inserted == 0 and not force do
+          Repo.rollback({:would_wipe_source, source, purged})
+        end
+
+        purged_polities = BorderQueries.purge_orphan_polities(source)
+
+        stats
+        |> Map.put(:purged, purged)
+        |> Map.put(:purged_polities, purged_polities)
       end,
       timeout: :infinity
     )
@@ -369,6 +408,19 @@ defmodule Amanogawa.Atlas do
   """
   @spec last_border_import_at() :: DateTime.t() | nil
   def last_border_import_at, do: BorderQueries.last_import_at()
+
+  @doc """
+  Counts pairs of borders of `source` sharing the same polity where one
+  row's `to_year` equals another's `from_year` (issue #023's "années
+  charnières" check): under this project's inclusive `[from_year,
+  to_year]` convention, such a pair double-covers the boundary year.
+  Delegates to `Amanogawa.Atlas.BorderQueries.
+  count_boundary_year_overlaps/1`; used by the Cliopatria import task to
+  warn (never fail) when the source's interval convention needs
+  normalizing.
+  """
+  @spec count_boundary_year_overlaps(String.t()) :: non_neg_integer()
+  defdelegate count_boundary_year_overlaps(source), to: BorderQueries
 
   @doc "Counts polities. Used by tests and import summaries."
   @spec count_polities() :: non_neg_integer()

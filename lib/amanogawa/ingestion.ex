@@ -182,22 +182,28 @@ defmodule Amanogawa.Ingestion do
   `mix amanogawa.import.cliopatria` (`Mix.Tasks.Amanogawa.Import.
   Cliopatria`'s own `@moduledoc` documents the manual download step).
 
-  Delegates to `Amanogawa.Ingestion.Cliopatria.Importer.import/1`; see
-  `Amanogawa.Ingestion.Borders.Importer.summary/0` for the returned shape.
+  Delegates to `Amanogawa.Ingestion.Cliopatria.Importer.import/2`; see
+  `Amanogawa.Ingestion.Borders.Importer.summary/0` for the returned shape
+  and `Amanogawa.Ingestion.Borders.Importer.import/4` for the `:force`
+  option (anti-wipe guard).
   """
-  @spec import_cliopatria(Path.t()) :: {:ok, Amanogawa.Ingestion.Borders.Importer.summary()}
-  defdelegate import_cliopatria(path), to: Cliopatria.Importer, as: :import
+  @spec import_cliopatria(Path.t(), keyword()) ::
+          {:ok, Amanogawa.Ingestion.Borders.Importer.summary()} | {:error, term()}
+  defdelegate import_cliopatria(path, opts \\ []), to: Cliopatria.Importer, as: :import
 
   @doc """
   Imports the historical-basemaps tranche files under the directory `path`
-  (issue #024): same one-shot, synchronous shape as `import_cliopatria/1`,
+  (issue #024): same one-shot, synchronous shape as `import_cliopatria/2`,
   run through `mix amanogawa.import.historical_basemaps`.
 
-  Delegates to `Amanogawa.Ingestion.HistoricalBasemaps.Importer.import/1`.
+  Delegates to `Amanogawa.Ingestion.HistoricalBasemaps.Importer.import/2`
+  (same `:force` option as `import_cliopatria/2`).
   """
-  @spec import_historical_basemaps(Path.t()) ::
-          {:ok, Amanogawa.Ingestion.HistoricalBasemaps.Importer.summary()}
-  defdelegate import_historical_basemaps(path), to: HistoricalBasemaps.Importer, as: :import
+  @spec import_historical_basemaps(Path.t(), keyword()) ::
+          {:ok, Amanogawa.Ingestion.HistoricalBasemaps.Importer.summary()} | {:error, term()}
+  defdelegate import_historical_basemaps(path, opts \\ []),
+    to: HistoricalBasemaps.Importer,
+    as: :import
 
   @doc "Fetches a sync run by id, or `nil` if unknown."
   @spec get_sync_run(Ecto.UUID.t()) :: SyncRun.t() | nil

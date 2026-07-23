@@ -37,16 +37,25 @@ defmodule Amanogawa.Atlas.Polity do
 
   @castable_fields [:name, :from_year, :to_year, :source]
 
+  # Mirrors `Amanogawa.Ingestion.Borders.FeatureValidation.max_name_length/0`
+  # (the ingestion-side guard): the changeset is the write boundary's own
+  # defense in depth, so a hostile name can never reach storage even
+  # through a future caller that skips the parser.
+  @max_name_length 500
+
   @doc """
   Builds and validates a changeset. `name` and `source` are required (the
-  natural key); `from_year <= to_year` is enforced only when both are
-  present, since either may be unknown independently.
+  natural key); `name` is capped at #{@max_name_length} characters
+  (matching the ingestion parsers' own rejection threshold);
+  `from_year <= to_year` is enforced only when both are present, since
+  either may be unknown independently.
   """
   @spec changeset(t(), map()) :: Ecto.Changeset.t()
   def changeset(polity, attrs) do
     polity
     |> cast(attrs, @castable_fields)
     |> validate_required([:name, :source])
+    |> validate_length(:name, max: @max_name_length)
     |> unique_constraint([:name, :source])
     |> validate_year_order()
   end

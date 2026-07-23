@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import {test} from "node:test"
 
 import {
+  BORDER_SOURCE_ATTRIBUTIONS,
   BORDERS_FILL_LAYER_ID,
   BORDERS_LABEL_LAYER_ID,
   BORDERS_SOURCE_ID,
@@ -91,4 +92,20 @@ test("happy path: label layer reads the polity name and design tokens", () => {
 test("happy path: VISIBLE_OPACITY is a low, semi-transparent value (ADR 0004: no hard border)", () => {
   assert.ok(VISIBLE_OPACITY > 0)
   assert.ok(VISIBLE_OPACITY < 0.5)
+})
+
+test("security: every attribution link opening a new tab carries rel=noopener noreferrer", () => {
+  assert.ok(BORDER_SOURCE_ATTRIBUTIONS.length > 0)
+
+  for (const attribution of BORDER_SOURCE_ATTRIBUTIONS) {
+    assert.match(attribution, /target="_blank"/)
+    assert.match(attribution, /rel="noopener noreferrer"/)
+  }
+})
+
+test("happy path: attributions credit both border sources with their licenses", () => {
+  const joined = BORDER_SOURCE_ATTRIBUTIONS.join(" ")
+
+  assert.match(joined, /Cliopatria \(CC BY 4\.0\)/)
+  assert.match(joined, /historical-basemaps \(GPL-3\.0\)/)
 })
