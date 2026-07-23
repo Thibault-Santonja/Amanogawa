@@ -1,0 +1,66 @@
+# Replays the local quality gate on every push and pull request.
+# Zero divergence with the local workflow: the `mix precommit` alias defined in
+# mix.exs is the contract, followed by coverage (>= 90%, see coveralls.json)
+# and the dependency vulnerability audit.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      MIX_ENV: test
+    services:
+      db:
+        # Keep this tag in sync with docker-compose.yml: any version bump
+        # happens in both files in the same commit.
+        image: postgis/postgis:18-3.6
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Erlang and Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          # .tool-versions is the single source of truth for versions (#001).
+          version-file: .tool-versions
+          version-type: strict
+
+      - name: Cache Mix dependencies and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: mix-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            mix-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Run the precommit quality gate
+        run: mix precommit
+
+      - name: Enforce test coverage threshold
+        run: mix coveralls
+
+      - name: Audit dependencies for vulnerabilities
+        run: mix deps.audit

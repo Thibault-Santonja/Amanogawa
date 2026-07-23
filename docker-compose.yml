@@ -1,0 +1,27 @@
+# Development database: PostgreSQL with the PostGIS extension.
+# The image tag is pinned for reproducibility and must stay in sync with the
+# service image used by the CI workflow (.github/workflows/ci.yml).
+services:
+  db:
+    image: postgis/postgis:18-3.6
+    # The postgis/postgis images are published for amd64 only; this makes the
+    # service work on Apple Silicon through emulation and is a no-op on amd64.
+    platform: linux/amd64
+    environment:
+      POSTGRES_PASSWORD: postgres
+    ports:
+      # Host port defaults to 5432; override with POSTGRES_PORT when another
+      # PostgreSQL instance already listens on 5432 (see README).
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      # PostgreSQL 18 images keep their data under /var/lib/postgresql
+      # (the versioned PGDATA lives below it), so the volume mounts there.
+      - db_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  db_data:
