@@ -11,9 +11,15 @@ defmodule AmanogawaWeb.Endpoint do
     same_site: "Lax"
   ]
 
+  # `:peer_data` is exposed to LiveView (`get_connect_info/2`) so
+  # `AmanogawaWeb.ExploreLive` can key its own selection rate limiter
+  # (issue security-review #6) on the socket's peer address, entirely
+  # separate from the HTTP `RemoteIp` plug below: LiveView sockets never go
+  # through the endpoint's HTTP plug pipeline, so `RemoteIp` never runs on
+  # them, and `:peer_data` here is always the raw connecting peer.
   socket "/live", Phoenix.LiveView.Socket,
-    websocket: [connect_info: [session: @session_options]],
-    longpoll: [connect_info: [session: @session_options]]
+    websocket: [connect_info: [:peer_data, session: @session_options]],
+    longpoll: [connect_info: [:peer_data, session: @session_options]]
 
   # Serve at "/" the static files from "priv/static" directory.
   #
@@ -37,6 +43,23 @@ defmodule AmanogawaWeb.Endpoint do
   end
 
   plug Plug.RequestId
+
+  # Rewrites `conn.remote_ip` from forwarding headers (`X-Forwarded-For`,
+  # `Forwarded`, ...) when, and only when, they come through a proxy
+  # listed in `trusted_proxies/0` (issue security-review #4:
+  # `AmanogawaWeb.Plugs.RateLimit` keys its quota on `conn.remote_ip`,
+  # which behind a reverse proxy is otherwise always the proxy's own
+  # address, i.e. one shared bucket for every real client). Placed before
+  # `Plug.Telemetry`/the router so every downstream plug, including
+  # `RateLimit`, sees the corrected IP. `trusted_proxies/0` is re-evaluated
+  # on every request (an MFA option, see `RemoteIp.Options`), reading
+  # `config :amanogawa, :trusted_proxies` set by `config/runtime.exs` from
+  # `TRUSTED_PROXIES`: empty by default, which is a no-op (no configured
+  # proxy is ever trusted, so a header is only honored when a request
+  # chain names one), matching today's behavior in dev/test where the var
+  # is never set.
+  plug RemoteIp, proxies: {__MODULE__, :trusted_proxies, []}
+
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
   plug Plug.Parsers,
@@ -48,4 +71,16 @@ defmodule AmanogawaWeb.Endpoint do
   plug Plug.Head
   plug Plug.Session, @session_options
   plug AmanogawaWeb.Router
+
+  @doc """
+  The list of proxy IPs/CIDRs the `RemoteIp` plug above trusts to set
+  forwarding headers, read from `config :amanogawa, :trusted_proxies`
+  (itself sourced from the `TRUSTED_PROXIES` env var by
+  `config/runtime.exs`). Exposed as a public MFA target, not inlined,
+  since `RemoteIp` re-evaluates it on every request rather than once at
+  compile time (`config/runtime.exs`'s whole point: change the trusted
+  proxy list per deployment without a rebuild).
+  """
+  @spec trusted_proxies() :: [String.t()]
+  def trusted_proxies, do: Application.get_env(:amanogawa, :trusted_proxies, [])
 end

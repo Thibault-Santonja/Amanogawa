@@ -1,8 +1,17 @@
 defmodule AmanogawaWeb.Params.ExploreParams do
   @moduledoc """
   Parses and encodes the query parameters of the Explore page (`from`,
-  `to`, `sel`, `kinds`, `z`, `lat`, `lng`) into the normalized state
+  `to`, `sel`, `z`, `lat`, `lng`) into the normalized state
   `AmanogawaWeb.ExploreLive` applies to its assigns (issue #018).
+
+  `kinds` (a kind-of-event filter) was removed from this state (security
+  review, dead-state finding): it was parsed, round-tripped and rendered
+  into shareable URLs, but never actually applied to the events query
+  (`AmanogawaWeb.Params.EventsQuery`/`Amanogawa.Atlas.EventQueries` never
+  read it). A shared link carrying `kinds=...` would silently lie about
+  filtering that never happened. Event-kind filtering is deferred to a
+  future issue; when it lands, it must thread all the way to the SQL
+  `where` clause before being reintroduced here.
 
   The URL is the single source of truth for shareable state
   (ADR 0005): `handle_params/3` is the only place that turns it into
@@ -30,7 +39,6 @@ defmodule AmanogawaWeb.Params.ExploreParams do
           from: integer(),
           to: integer(),
           selected_qid: String.t() | nil,
-          kinds: [String.t()],
           z: float(),
           lat: float(),
           lng: float()
@@ -52,11 +60,6 @@ defmodule AmanogawaWeb.Params.ExploreParams do
   @min_lng -180.0
   @max_lng 180.0
 
-  # Hard cap on the number of `kinds` filters accepted from a single URL:
-  # every user-controlled input is bounded server-side
-  # (`.claude/rules/security.md`), and no legitimate filter UI needs more.
-  @max_kinds 20
-
   @doc """
   Parses raw query params (string-keyed, as received in `handle_params/3`)
   into normalized Explore state. Always succeeds: an absent or invalid
@@ -70,7 +73,6 @@ defmodule AmanogawaWeb.Params.ExploreParams do
       from: from,
       to: to,
       selected_qid: parse_selected(params["sel"]),
-      kinds: parse_kinds(params["kinds"]),
       z: parse_zoom(params["z"]),
       lat: parse_coordinate(params["lat"], @min_lat, @max_lat, @default_lat),
       lng: parse_coordinate(params["lng"], @min_lng, @max_lng, @default_lng)
@@ -127,7 +129,6 @@ defmodule AmanogawaWeb.Params.ExploreParams do
       ...>   from: -500,
       ...>   to: 500,
       ...>   selected_qid: nil,
-      ...>   kinds: [],
       ...>   z: 1.5,
       ...>   lat: 20.0,
       ...>   lng: 0.0
@@ -140,7 +141,6 @@ defmodule AmanogawaWeb.Params.ExploreParams do
     %{}
     |> put_window(state)
     |> put_selected(state)
-    |> put_kinds(state)
     |> put_view(state)
   end
 
@@ -164,29 +164,6 @@ defmodule AmanogawaWeb.Params.ExploreParams do
 
   defp parse_selected(nil), do: nil
   defp parse_selected(value), do: if(valid_qid?(value), do: value, else: nil)
-
-  defp parse_kinds(nil), do: []
-
-  defp parse_kinds(value) when is_binary(value) do
-    value
-    |> String.split(",", trim: true)
-    |> Enum.map(&String.trim/1)
-    |> Enum.filter(&valid_qid?/1)
-    |> Enum.uniq()
-    |> Enum.take(@max_kinds)
-  end
-
-  # A hostile `kinds[]=`-style query encodes as a list rather than a
-  # binary: normalized through the binary clause above instead of
-  # duplicating the filtering logic.
-  defp parse_kinds(value) when is_list(value) do
-    value
-    |> Enum.filter(&is_binary/1)
-    |> Enum.join(",")
-    |> parse_kinds()
-  end
-
-  defp parse_kinds(_other), do: []
 
   defp parse_zoom(nil), do: @default_z
 
@@ -240,9 +217,6 @@ defmodule AmanogawaWeb.Params.ExploreParams do
 
   defp put_selected(query, %{selected_qid: nil}), do: query
   defp put_selected(query, %{selected_qid: qid}), do: Map.put(query, "sel", qid)
-
-  defp put_kinds(query, %{kinds: []}), do: query
-  defp put_kinds(query, %{kinds: kinds}), do: Map.put(query, "kinds", Enum.join(kinds, ","))
 
   defp put_view(query, %{z: z, lat: lat, lng: lng}) do
     if {z, lat, lng} == {@default_z, @default_lat, @default_lng} do

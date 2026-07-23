@@ -1,9 +1,9 @@
-defmodule Amanogawa.Ingestion.WikimediaUrlTest do
+defmodule Amanogawa.WikimediaUrlTest do
   use ExUnit.Case, async: true
 
-  doctest Amanogawa.Ingestion.WikimediaUrl
+  doctest Amanogawa.WikimediaUrl
 
-  alias Amanogawa.Ingestion.WikimediaUrl
+  alias Amanogawa.WikimediaUrl
 
   describe "valid?/1 happy path" do
     test "accepts language subdomains of wikipedia.org and wikimedia.org hosts" do
@@ -37,6 +37,40 @@ defmodule Amanogawa.Ingestion.WikimediaUrlTest do
     test "rejects a URL without a host" do
       refute WikimediaUrl.valid?("https:///wiki/X")
       refute WikimediaUrl.valid?("not a url")
+    end
+  end
+
+  describe "valid_thumbnail?/1 happy path" do
+    test "accepts an https upload.wikimedia.org URL" do
+      assert WikimediaUrl.valid_thumbnail?(
+               "https://upload.wikimedia.org/wikipedia/commons/a/ab/M.jpg"
+             )
+    end
+  end
+
+  describe "valid_thumbnail?/1 rejections" do
+    test "rejects any other Wikimedia host, including a wikipedia.org article host" do
+      refute WikimediaUrl.valid_thumbnail?("https://fr.wikipedia.org/wiki/Bataille_de_Marathon")
+      refute WikimediaUrl.valid_thumbnail?("https://commons.wikimedia.org/wiki/File:M.jpg")
+    end
+
+    test "rejects non-https schemes on the upload host" do
+      refute WikimediaUrl.valid_thumbnail?(
+               "http://upload.wikimedia.org/wikipedia/commons/a/ab/M.jpg"
+             )
+    end
+
+    test "rejects non-Wikimedia hosts" do
+      refute WikimediaUrl.valid_thumbnail?("https://evil.example.com/thumb.jpg")
+    end
+
+    test "rejects URLs longer than the documented bound and non-binary input" do
+      refute WikimediaUrl.valid_thumbnail?(
+               "https://upload.wikimedia.org/" <> String.duplicate("a", 3000)
+             )
+
+      refute WikimediaUrl.valid_thumbnail?(nil)
+      refute WikimediaUrl.valid_thumbnail?(123)
     end
   end
 

@@ -33,6 +33,14 @@ defmodule AmanogawaWeb.ExploreLiveTest do
       assert has_element?(lv, ~s(#map[phx-hook="MapHook"][phx-update="ignore"]))
     end
 
+    test "renders the hover card's translated labels as data-i18n-* attributes on #map", %{
+      conn: conn
+    } do
+      {:ok, lv, _html} = live(conn, ~p"/")
+
+      assert has_element?(lv, ~s(#map[data-i18n-text-label="Texte"]))
+    end
+
     test "mount/3 issues no database query (LiveView iron law: no DB in mount)" do
       # Calls `mount/3` directly, as a plain function, rather than through
       # `live/2`: Ecto's query telemetry fires in the process that issued
@@ -103,6 +111,28 @@ defmodule AmanogawaWeb.ExploreLiveTest do
       assert has_element?(lv, "#event-panel", "Chute de Constantinople")
     end
 
+    test "select_event does not repush an unchanged time window or camera view", %{conn: conn} do
+      event = event_fixture(label_fr: "Chute de Constantinople")
+      {:ok, lv, _html} = live(conn, ~p"/")
+
+      # Drains the connected mount's own pushes (there is no previous view
+      # to compare against yet, so mount always pushes both) before
+      # exercising `select_event`, which changes only the selection.
+      assert_push_event(lv, "set_time_window", %{})
+      assert_push_event(lv, "set_view", %{})
+      assert_push_event(lv, "event_deselected", %{qid: nil})
+
+      lv |> element("#map") |> render_hook("select_event", %{"qid" => event.qid})
+
+      assert_push_event(lv, "event_selected", %{qid: qid})
+      assert qid == event.qid
+
+      # The window/camera did not change: no redundant `/api/events`
+      # refetch or camera re-animation should be triggered in the hook.
+      refute_push_event(lv, "set_time_window", %{})
+      refute_push_event(lv, "set_view", %{})
+    end
+
     test "deselect_event removes sel from the URL and closes the panel", %{conn: conn} do
       event = event_fixture()
       {:ok, lv, _html} = live(conn, ~p"/?sel=#{event.qid}")
@@ -129,6 +159,30 @@ defmodule AmanogawaWeb.ExploreLiveTest do
       lv |> element("#map") |> render_hook("select_event", %{})
 
       refute_patched(lv)
+      assert Process.alive?(lv.pid)
+    end
+  end
+
+  describe "handle_event: select_event rate limiting" do
+    test "requests beyond the dedicated selection quota are ignored, without a crash and without a patch",
+         %{conn: conn} do
+      event = event_fixture()
+      conn = put_peer_ip(conn, unique_ip())
+      {:ok, lv, _html} = live(conn, ~p"/")
+
+      # config/test.exs caps AmanogawaWeb.ExploreLive's selection quota at
+      # 3/minute: three full select/deselect round trips exhaust it.
+      for _ <- 1..3 do
+        lv |> element("#map") |> render_hook("select_event", %{"qid" => event.qid})
+        assert has_element?(lv, "#event-panel")
+
+        lv |> element("#map") |> render_hook("deselect_event", %{})
+        refute has_element?(lv, "#event-panel")
+      end
+
+      lv |> element("#map") |> render_hook("select_event", %{"qid" => event.qid})
+
+      refute has_element?(lv, "#event-panel")
       assert Process.alive?(lv.pid)
     end
   end
@@ -262,6 +316,41 @@ defmodule AmanogawaWeb.ExploreLiveTest do
     end
   end
 
+  describe "event panel accessibility (security review)" do
+    test "the panel carries an aria-label and is focusable (tabindex -1, phx-mounted)", %{
+      conn: conn
+    } do
+      event = event_fixture()
+
+      {:ok, lv, _html} = live(conn, ~p"/?sel=#{event.qid}")
+
+      assert has_element?(lv, "#event-panel[aria-label]")
+      assert has_element?(lv, "#event-panel[tabindex='-1']")
+      assert has_element?(lv, "#event-panel[phx-mounted]")
+    end
+
+    test "Escape closes the panel (phx-window-keydown, bound only while the panel is mounted)",
+         %{conn: conn} do
+      event = event_fixture(label_fr: "Chute de Constantinople")
+
+      {:ok, lv, _html} = live(conn, ~p"/?sel=#{event.qid}")
+      assert has_element?(lv, "#event-panel")
+
+      lv |> element("#event-panel") |> render_keydown(%{"key" => "Escape"})
+
+      assert_patch(lv, ~p"/")
+      refute has_element?(lv, "#event-panel")
+    end
+
+    test "no #event-panel element exists to bind Escape to when no event is selected", %{
+      conn: conn
+    } do
+      {:ok, lv, _html} = live(conn, ~p"/")
+
+      refute has_element?(lv, "#event-panel")
+    end
+  end
+
   describe "browser navigation" do
     test "re-applying a previous URL through handle_params restores its state", %{conn: conn} do
       event = event_fixture(label_fr: "Prise de la Bastille")
@@ -277,5 +366,25 @@ defmodule AmanogawaWeb.ExploreLiveTest do
       {:ok, _lv2, html} = live(conn, ~p"/?sel=#{event.qid}&from=-100&to=100")
       assert html =~ "Prise de la Bastille"
     end
+  end
+
+  # A unique fake remote IP per call: what gives the rate-limiting test its
+  # own isolated Hammer bucket, distinct from every other test's default
+  # (127.0.0.1) peer, mirroring
+  # AmanogawaWeb.Controllers.Api.EventControllerTest's own `unique_conn/1`.
+  #
+  # `get_connect_info(socket, :peer_data)` (the LiveView socket, read by
+  # `AmanogawaWeb.ExploreLive.peer_ip/1`) resolves through
+  # `Plug.Conn.get_peer_data/1`, which reads the test adapter's own
+  # `peer_data` payload field, entirely independent of `conn.remote_ip`
+  # (unlike `AmanogawaWeb.Plugs.RateLimit`'s `client_key/1`, which reads
+  # `conn.remote_ip` directly): `Plug.Test.put_peer_data/2` is the one that
+  # actually reaches it.
+  defp put_peer_ip(conn, ip),
+    do: Plug.Test.put_peer_data(conn, %{address: ip, port: 111_317, ssl_cert: nil})
+
+  defp unique_ip do
+    n = System.unique_integer([:positive, :monotonic])
+    {10, rem(div(n, 65_536), 256), rem(div(n, 256), 256), rem(n, 256)}
   end
 end

@@ -7,9 +7,11 @@ defmodule AmanogawaWeb.Plugs.ContentSecurityPolicy do
   `blob:` URLs, decoded images use `data:`/`blob:`, vector tiles, glyphs,
   and sprites are fetched from the OpenFreeMap origin, and event
   thumbnails (issue #016) are fetched from the Wikimedia upload origin,
-  the only host `Amanogawa.Ingestion.WikimediaUrl` ever lets a
-  `thumbnail_url` point to. The LiveView websocket origin is derived from
-  the endpoint configuration.
+  the only host `Amanogawa.WikimediaUrl.valid_thumbnail?/1` ever accepts
+  for a `thumbnail_url` (a strictly narrower check than the general
+  `Amanogawa.WikimediaUrl.valid?/1`, which also accepts `*.wikipedia.org`
+  article hosts that this CSP does *not* allow as an image source). The
+  LiveView websocket origin is derived from the endpoint configuration.
   """
   @behaviour Plug
 
@@ -31,8 +33,8 @@ defmodule AmanogawaWeb.Plugs.ContentSecurityPolicy do
   Returns the origin serving Wikipedia article thumbnails (issue #016).
 
   Exposed for the same reason as `tiles_origin/0`: tests assert the CSP
-  and the actual data source (`Amanogawa.Ingestion.WikimediaUrl`) never
-  drift apart.
+  and the actual data source (`Amanogawa.WikimediaUrl.valid_thumbnail?/1`)
+  never drift apart.
   """
   @spec wikimedia_images_origin() :: String.t()
   def wikimedia_images_origin, do: @wikimedia_images_origin

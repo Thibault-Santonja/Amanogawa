@@ -14,7 +14,9 @@ defmodule AmanogawaWeb.Controllers.Api.EventControllerTest do
       conn =
         conn
         |> unique_conn()
-        |> get(~p"/api/events?bbox=-180,-90,180,90&from=-13800000000&to=2026&limit=10")
+        |> get(
+          ~p"/api/events?bbox=-180,-90,180,90&from=-13800000000&to=#{Date.utc_today().year}&limit=10"
+        )
 
       assert json_response(conn, 200)
       assert [content_type] = get_resp_header(conn, "content-type")

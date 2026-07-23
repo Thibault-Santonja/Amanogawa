@@ -17,7 +17,7 @@
 // fetched from origins allowed by the Content-Security-Policy.
 import maplibregl from "maplibre-gl"
 
-import {boundsToBbox} from "../map/bbox.js"
+import {boundsToBbox, normalizedMapMovedPayload} from "../map/bbox.js"
 import {debounce} from "../map/debounce.js"
 import {
   EVENTS_CIRCLE_LAYER_ID,
@@ -30,6 +30,7 @@ import {
   textOpacityExpression
 } from "../map/event_layers.js"
 import {createHoverCard} from "../map/hover_card.js"
+import {fadeTransition} from "../map/style_utils.js"
 import {
   HIDDEN_OPACITY as LINKS_HIDDEN_OPACITY,
   LINKS_LAYER_ID,
@@ -54,6 +55,14 @@ const MAP_MOVED_DEBOUNCE_MS = 250
 // Duration of the programmatic camera move triggered by a server-pushed
 // `set_view` (skipped entirely, via `jumpTo`, under reduced motion).
 const SET_VIEW_EASE_DURATION_MS = 500
+
+// Tolerances `matchesCurrentView` uses to skip a server-pushed `set_view`
+// that already matches the camera (issue security-review #2): zoom is a
+// single float with comparatively coarse practical resolution, lat/lng
+// need a much tighter tolerance since a real, meaningfully different
+// coordinate can differ by a tiny fraction of a degree.
+const ZOOM_EPSILON = 1e-3
+const COORDINATE_EPSILON = 1e-6
 
 // Delay (issue #016) between a marker being hovered and the hover card
 // appearing: a single timer, reärmed on every newly hovered feature, not a
@@ -230,24 +239,46 @@ const MapHook = {
     }
     this.darkScheme.addEventListener("change", this.onSchemeChange)
 
+    // Applied immediately, not deferred to the next `style.load` (theme
+    // change or reload): a `prefers-reduced-motion` change should take
+    // effect on the very next fade, not require the user to also flip
+    // their OS theme first (issue security-review #13).
     this.onMotionChange = event => {
       this.reducedMotion = event.matches
+      this.applyMotionPreference()
     }
     this.motionQuery.addEventListener("change", this.onMotionChange)
 
     // Consumed by the LiveView Explore (#018): a fresh time window pushed
     // from the server always triggers an immediate refetch (not debounced,
     // the client-side drag on the future timeline hook already debounces
-    // before pushing).
+    // before pushing). Skipped when `from`/`to` are identical to the
+    // window already applied: `handle_params/3` still pushes this event
+    // whenever a URL patch touches state it did not cause (a pure
+    // selection change, browser back/forward replaying the same window),
+    // and re-fetching identical data on every such patch is wasted work
+    // (issue security-review #2).
     this.handleEvent("set_time_window", ({from, to}) => {
+      if (from === this.timeWindow.from && to === this.timeWindow.to) return
+
       this.timeWindow = {from, to}
       this.fetchEvents()
     })
 
     // Consumed by the LiveView Explore (#018): a server-pushed camera move
     // (URL navigation, shared link). Flagged as programmatic so the
-    // resulting `moveend` is not echoed back as `map_moved`.
-    this.handleEvent("set_view", ({z, lat, lng}) => this.setView(z, lat, lng))
+    // resulting `moveend` is not echoed back as `map_moved`. Skipped when
+    // `z`/`lat`/`lng` already match the current camera (within a small
+    // epsilon, since the camera's own floating-point state and the
+    // server's round-tripped value are never bit-identical): otherwise
+    // every URL patch not caused by a camera move (a pure selection
+    // change) would re-trigger a pointless `easeTo`/`jumpTo` (issue
+    // security-review #2).
+    this.handleEvent("set_view", ({z, lat, lng}) => {
+      if (this.matchesCurrentView(z, lat, lng)) return
+
+      this.setView(z, lat, lng)
+    })
 
     // Consumed by the LiveView Explore (#016 poses the contract, #017
     // fills it in): a selection fetches and traces the event's relations,
@@ -286,6 +317,31 @@ const MapHook = {
       linksLineLayer({colors: linkColors, reducedMotion: this.reducedMotion}),
       EVENTS_CIRCLE_LAYER_ID
     )
+  },
+
+  // Re-applies the `-transition` paint property of every layer already on
+  // the map to match the current `this.reducedMotion`, so a live
+  // `prefers-reduced-motion` change (`onMotionChange` above) takes effect
+  // on the next fade rather than only after the style next reloads
+  // (issue security-review #13). Each layer is checked with `getLayer`
+  // first: this can run before `setupEventsLayer`/`setupLinksLayer` have
+  // ever added them (a motion preference flip racing the very first
+  // `style.load`), in which case there is simply nothing to update yet,
+  // the layers will be created with the right transition from the start.
+  applyMotionPreference() {
+    const transition = fadeTransition(this.reducedMotion)
+
+    if (this.map.getLayer(EVENTS_CIRCLE_LAYER_ID)) {
+      this.map.setPaintProperty(EVENTS_CIRCLE_LAYER_ID, "circle-opacity-transition", transition)
+    }
+
+    if (this.map.getLayer(EVENTS_LABEL_LAYER_ID)) {
+      this.map.setPaintProperty(EVENTS_LABEL_LAYER_ID, "text-opacity-transition", transition)
+    }
+
+    if (this.map.getLayer(LINKS_LAYER_ID)) {
+      this.map.setPaintProperty(LINKS_LAYER_ID, "line-opacity-transition", transition)
+    }
   },
 
   buildEventsUrl() {
@@ -348,6 +404,21 @@ const MapHook = {
       this.map.setPaintProperty(EVENTS_CIRCLE_LAYER_ID, "circle-opacity", VISIBLE_OPACITY)
       this.map.setPaintProperty(EVENTS_LABEL_LAYER_ID, "text-opacity", textOpacityExpression())
     }
+  },
+
+  // Whether `z`/`lat`/`lng` already match the current camera, within a
+  // small epsilon: `map.getZoom()`/`getCenter()` and the value round-tripped
+  // through the LiveView (`AmanogawaWeb.Params.ExploreParams` parses the
+  // URL's string params back into floats) are never bit-identical, so an
+  // exact `===` comparison would never dedupe a real no-op `set_view`.
+  matchesCurrentView(zoom, lat, lng) {
+    const center = this.map.getCenter()
+
+    return (
+      Math.abs(this.map.getZoom() - zoom) < ZOOM_EPSILON &&
+      Math.abs(center.lat - lat) < COORDINATE_EPSILON &&
+      Math.abs(center.lng - lng) < COORDINATE_EPSILON
+    )
   },
 
   setView(zoom, lat, lng) {
@@ -512,11 +583,10 @@ const MapHook = {
   pushMapMoved() {
     const center = this.map.getCenter()
 
-    this.pushEvent("map_moved", {
-      z: this.map.getZoom(),
-      lat: center.lat,
-      lng: center.lng
-    })
+    this.pushEvent(
+      "map_moved",
+      normalizedMapMovedPayload(this.map.getZoom(), center.lat, center.lng)
+    )
   },
 
   destroyed() {

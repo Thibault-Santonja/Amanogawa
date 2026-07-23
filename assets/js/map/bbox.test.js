@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import {test} from "node:test"
 
-import {boundsToBbox, normalizeLongitude} from "./bbox.js"
+import {boundsToBbox, normalizeLongitude, normalizedMapMovedPayload} from "./bbox.js"
 
 test("happy path: nominal bounds convert to min_lon,min_lat,max_lon,max_lat", () => {
   const bounds = {west: 2, south: 48, east: 3, north: 49}
@@ -50,4 +50,14 @@ test("normalizeLongitude wraps multiples of a full globe", () => {
   assert.equal(normalizeLongitude(190), -170)
   assert.equal(normalizeLongitude(-190), 170)
   assert.equal(normalizeLongitude(540), 180)
+})
+
+test("happy path: normalizedMapMovedPayload passes zoom/lat through and normalizes lng", () => {
+  assert.deepEqual(normalizedMapMovedPayload(4.5, 10, 20), {z: 4.5, lat: 10, lng: 20})
+})
+
+test("edge case: normalizedMapMovedPayload wraps a longitude past a full globe pan", () => {
+  // A center longitude beyond [-180, 180], as MapLibre's getCenter() readily
+  // returns after panning around the globe more than once.
+  assert.deepEqual(normalizedMapMovedPayload(3, 10, 190), {z: 3, lat: 10, lng: -170})
 })

@@ -163,6 +163,17 @@ defmodule Amanogawa.Atlas.EventQueries do
     |> Repo.all()
   end
 
+  # Server-side cap on the number of relations returned per direction
+  # (issue security-review #5): `list_links/1` has no client-controlled
+  # limit param (unlike `list_events/1`), so a highly connected event could
+  # otherwise return an unbounded number of `LineString` features. 200 per
+  # direction (400 total, worst case) comfortably covers every real event
+  # in the corpus while keeping the response bounded
+  # (`.claude/rules/security.md`: every user-controlled input is bounded
+  # server-side; here the input is the *event itself*, whose in-degree/
+  # out-degree is not something ingestion caps upstream).
+  @links_limit_per_direction 200
+
   @doc """
   Lists the typed relations of the event identified by `event_id` (issue
   #017): one row per relation where `event_id` is either the source or the
@@ -172,6 +183,13 @@ defmodule Amanogawa.Atlas.EventQueries do
   cannot be drawn. The `event_id` side's own geometry is the caller's
   concern (`Amanogawa.Atlas.list_event_links_geojson/1`), not filtered
   here.
+
+  Each direction is independently capped at #{@links_limit_per_direction}
+  rows (see `@links_limit_per_direction`), ranked by the *other* endpoint's
+  `sitelink_count` descending, tied by `qid` ascending for a deterministic
+  order (mirrors `list_events/1`'s own ranking/tie-break, so a highly
+  connected event's relations are truncated to its most important ones,
+  not an arbitrary database-order slice).
   """
   @spec list_links(Ecto.UUID.t()) :: [link_row()]
   def list_links(event_id) do
@@ -195,6 +213,8 @@ defmodule Amanogawa.Atlas.EventQueries do
     |> where([l], l.source_id == ^event_id)
     |> join(:inner, [l], t in Event, on: l.target_id == t.id)
     |> where([_l, t], not is_nil(t.geom))
+    |> order_by([_l, t], desc: t.sitelink_count, asc: t.qid)
+    |> limit(^@links_limit_per_direction)
     |> select([l, t], %{
       type: l.type,
       target_qid: t.qid,
@@ -209,6 +229,8 @@ defmodule Amanogawa.Atlas.EventQueries do
     |> where([l], l.target_id == ^event_id)
     |> join(:inner, [l], s in Event, on: l.source_id == s.id)
     |> where([_l, s], not is_nil(s.geom))
+    |> order_by([_l, s], desc: s.sitelink_count, asc: s.qid)
+    |> limit(^@links_limit_per_direction)
     |> select([l, s], %{
       type: l.type,
       target_qid: s.qid,

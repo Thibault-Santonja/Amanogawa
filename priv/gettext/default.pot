@@ -17,7 +17,7 @@ msgstr ""
 msgid "Attempting to reconnect"
 msgstr ""
 
-#: lib/amanogawa_web/live/home_live.ex:12
+#: lib/amanogawa_web/live/explore_live.ex:48
 #, elixir-autogen, elixir-format
 msgid "Carte du monde"
 msgstr ""
@@ -50,4 +50,25 @@ msgstr ""
 #: lib/amanogawa_web/components/layouts.ex:47
 #, elixir-autogen, elixir-format
 msgid "À propos"
+msgstr ""
+
+#: lib/amanogawa_web/components/event_panel.ex:45
+#, elixir-autogen, elixir-format
+msgid "Détails de l'événement"
+msgstr ""
+
+#: lib/amanogawa_web/components/event_panel.ex:56
+#, elixir-autogen, elixir-format
+msgid "Fermer"
+msgstr ""
+
+#: lib/amanogawa_web/components/event_panel.ex:85
+#, elixir-autogen, elixir-format
+msgid "Lire sur Wikipédia"
+msgstr ""
+
+#: lib/amanogawa_web/components/event_panel.ex:75
+#: lib/amanogawa_web/live/explore_live.ex:227
+#, elixir-autogen, elixir-format
+msgid "Texte"
 msgstr ""

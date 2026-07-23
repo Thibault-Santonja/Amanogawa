@@ -21,6 +21,18 @@ export function normalizeLongitude(lon) {
   return normalized
 }
 
+// Builds the `{z, lat, lng}` payload for the `map_moved` intent pushed to
+// the LiveView (`assets/js/hooks/map_hook.js`'s `pushMapMoved`): longitude
+// normalized back into [-180, 180], for the same reason `boundsToBbox`
+// above normalizes bounds (MapLibre's `getCenter()` readily returns a
+// longitude outside that range once the map has been panned around the
+// globe more than once, which `AmanogawaWeb.Params.ExploreParams.
+// valid_view?/3` would otherwise reject outright, silently dropping the
+// intent past the first full pan of the globe).
+export function normalizedMapMovedPayload(zoom, lat, lng) {
+  return {z: zoom, lat, lng: normalizeLongitude(lng)}
+}
+
 function clampLatitude(lat) {
   return Math.min(Math.max(lat, WORLD_MIN_LAT), WORLD_MAX_LAT)
 }

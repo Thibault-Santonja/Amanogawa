@@ -26,10 +26,30 @@ const CARD_CLASS =
 // hovers just above the marker rather than sitting under the pointer.
 const CURSOR_OFFSET_PX = 8
 
+// Default label fallbacks, used only if `container` carries no
+// `data-i18n-*` attribute at all (defensive: the LiveView always renders
+// one, see `AmanogawaWeb.ExploreLive`'s `#map` container).
+const DEFAULT_LABELS = {text: "Texte"}
+
+// Reads the server-rendered, translated labels this card needs off
+// `container`'s `data-i18n-*` attributes (issue security-review #9: no
+// French label hardcoded in JS, `AmanogawaWeb.ExploreLive` renders them
+// through `gettext/1` server-side). Exported (rather than an inline
+// closure) so this reading/fallback logic is unit-testable with plain
+// node:test against a plain `{dataset: {...}}` object, with no real DOM
+// element required.
+export function readLabels(container) {
+  return {
+    text: container.dataset.i18nTextLabel || DEFAULT_LABELS.text
+  }
+}
+
 // Builds the hover card DOM element, appended once to `container` (the map
 // container element) and reused for every marker: `show`/`hide` toggle its
 // content and visibility, `destroy` removes it from the DOM.
 export function createHoverCard(container) {
+  const labels = readLabels(container)
+
   const el = document.createElement("div")
   el.className = CARD_CLASS
   el.setAttribute("role", "tooltip")
@@ -46,7 +66,7 @@ export function createHoverCard(container) {
   }
 
   function show(summary, point) {
-    el.replaceChildren(...cardChildren(summary))
+    el.replaceChildren(...cardChildren(summary, labels))
     reposition(point)
     el.setAttribute("aria-hidden", "false")
   }
@@ -58,11 +78,11 @@ export function createHoverCard(container) {
   return {show, hide, reposition, destroy, element: el}
 }
 
-function cardChildren(summary) {
+function cardChildren(summary, labels) {
   const children = [titleElement(summary.label)]
 
   if (summary.extract) {
-    children.push(extractElement(summary.extract), attributionElement(summary.wiki_url))
+    children.push(extractElement(summary.extract), attributionElement(summary.wiki_url, labels))
   }
 
   if (summary.thumbnail_url) {
@@ -86,14 +106,14 @@ function extractElement(extract) {
   return paragraph
 }
 
-function attributionElement(wikiUrl) {
+function attributionElement(wikiUrl, labels) {
   const paragraph = document.createElement("p")
   paragraph.className = "mt-1 text-text-muted"
 
   if (wikiUrl) {
-    paragraph.append("Texte : ", wikipediaLink(wikiUrl), ", CC BY-SA 4.0")
+    paragraph.append(`${labels.text} : `, wikipediaLink(wikiUrl), ", CC BY-SA 4.0")
   } else {
-    paragraph.textContent = "Texte : Wikipédia, CC BY-SA 4.0"
+    paragraph.textContent = `${labels.text} : Wikipédia, CC BY-SA 4.0`
   }
 
   return paragraph

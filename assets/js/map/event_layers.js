@@ -3,6 +3,10 @@
 // dependency: unit-testable with plain node:test, wired into the map by
 // `assets/js/hooks/map_hook.js`.
 
+import {emptyFeatureCollection, withTransition} from "./style_utils.js"
+
+export {emptyFeatureCollection} from "./style_utils.js"
+
 export const EVENTS_SOURCE_ID = "events"
 export const EVENTS_CIRCLE_LAYER_ID = "events-circles"
 export const EVENTS_LABEL_LAYER_ID = "events-labels"
@@ -12,34 +16,12 @@ export const EVENTS_LABEL_LAYER_ID = "events-labels"
 // map never turns into label soup while zoomed out on the whole world.
 export const LABEL_MIN_ZOOM = 3
 
-// Paint-property transition applied to circle/text opacity, the mechanism
-// behind the marker fade-in (`.claude/rules/tailwind.md`: animations
-// respect `prefers-reduced-motion`). Omitted entirely (rather than set to a
-// zero duration) when motion is reduced: no transition definition at all.
-const FADE_DURATION_MS = 300
-
-export function emptyFeatureCollection() {
-  return {type: "FeatureCollection", features: []}
-}
-
 // `promoteId` lets the hook address a feature by its `qid` property
 // through `map.setFeatureState`, used for the selection highlight
 // (issue #018 point d'attention: pose the selection contract without
 // building #016's full event panel).
 export function eventsSource() {
   return {type: "geojson", data: emptyFeatureCollection(), promoteId: "qid"}
-}
-
-function fadeTransition(reducedMotion) {
-  return reducedMotion ? {} : {duration: FADE_DURATION_MS, delay: 0}
-}
-
-function withTransition(paint, property, reducedMotion) {
-  const transition = fadeTransition(reducedMotion)
-
-  if (Object.keys(transition).length === 0) return paint
-
-  return {...paint, [`${property}-transition`]: transition}
 }
 
 // Circle radius grows with both zoom (small points far out, plain circles

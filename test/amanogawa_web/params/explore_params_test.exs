@@ -15,7 +15,6 @@ defmodule AmanogawaWeb.Params.ExploreParamsTest do
         "from" => "-500",
         "to" => "500",
         "sel" => "Q123",
-        "kinds" => "Q178561,Q198",
         "z" => "3.5",
         "lat" => "48.85",
         "lng" => "2.35"
@@ -25,7 +24,6 @@ defmodule AmanogawaWeb.Params.ExploreParamsTest do
                from: -500,
                to: 500,
                selected_qid: "Q123",
-               kinds: ["Q178561", "Q198"],
                z: 3.5,
                lat: 48.85,
                lng: 2.35
@@ -39,7 +37,6 @@ defmodule AmanogawaWeb.Params.ExploreParamsTest do
                from: @min_year,
                to: @current_year,
                selected_qid: nil,
-               kinds: [],
                z: 1.5,
                lat: 20.0,
                lng: 0.0
@@ -53,11 +50,6 @@ defmodule AmanogawaWeb.Params.ExploreParamsTest do
       assert state.from == @min_year
       assert state.to == @current_year
       assert state.selected_qid == nil
-      assert state.kinds == []
-    end
-
-    test "an empty kinds string yields an empty list" do
-      assert ExploreParams.parse(%{"kinds" => ""}).kinds == []
     end
 
     test "negative years at the extreme are valid" do
@@ -100,15 +92,6 @@ defmodule AmanogawaWeb.Params.ExploreParamsTest do
       assert state.lat == 20.0
       assert state.lng == 0.0
     end
-
-    test "kinds entries that are not QID-shaped are dropped individually" do
-      assert ExploreParams.parse(%{"kinds" => "Q1,not-a-qid,Q2"}).kinds == ["Q1", "Q2"]
-    end
-
-    test "a hostile kinds[] list is normalized instead of crashing" do
-      assert ExploreParams.parse(%{"kinds" => ["Q1", "Q2"]}).kinds == ["Q1", "Q2"]
-      assert ExploreParams.parse(%{"kinds" => [1, 2]}).kinds == []
-    end
   end
 
   describe "parse/1 limit cases" do
@@ -131,12 +114,6 @@ defmodule AmanogawaWeb.Params.ExploreParamsTest do
       state = ExploreParams.parse(%{"z" => "22"})
       assert state.z == 22.0
     end
-
-    test "kinds beyond the cap are truncated" do
-      kinds = Enum.map_join(1..25, ",", &"Q#{&1}")
-
-      assert length(ExploreParams.parse(%{"kinds" => kinds}).kinds) == 20
-    end
   end
 
   describe "to_query/1" do
@@ -145,7 +122,6 @@ defmodule AmanogawaWeb.Params.ExploreParamsTest do
         from: -500,
         to: 500,
         selected_qid: "Q123",
-        kinds: ["Q178561"],
         z: 3.5,
         lat: 48.85,
         lng: 2.35
@@ -178,8 +154,6 @@ defmodule AmanogawaWeb.Params.ExploreParamsTest do
         assert state.from <= state.to
 
         assert is_nil(state.selected_qid) or state.selected_qid =~ ~r/\AQ\d+\z/
-        assert length(state.kinds) <= 20
-        assert Enum.all?(state.kinds, &(&1 =~ ~r/\AQ\d+\z/))
 
         assert state.z >= 0 and state.z <= 22
         assert state.lat >= -90.0 and state.lat <= 90.0
@@ -192,23 +166,16 @@ defmodule AmanogawaWeb.Params.ExploreParamsTest do
     gen all from <- integer(@min_year..@current_year),
             to <- integer(from..@current_year),
             selected_qid <- one_of([constant(nil), qid()]),
-            kinds <- kinds_list(),
             z <- float(min: 0.0, max: 22.0),
             lat <- float(min: -90.0, max: 90.0),
             lng <- float(min: -180.0, max: 180.0) do
-      %{from: from, to: to, selected_qid: selected_qid, kinds: kinds, z: z, lat: lat, lng: lng}
+      %{from: from, to: to, selected_qid: selected_qid, z: z, lat: lat, lng: lng}
     end
   end
 
   defp qid do
     gen all n <- integer(1..999_999) do
       "Q#{n}"
-    end
-  end
-
-  defp kinds_list do
-    gen all ids <- uniq_list_of(integer(1..999_999), max_length: 5) do
-      Enum.map(ids, &"Q#{&1}")
     end
   end
 
@@ -228,7 +195,6 @@ defmodule AmanogawaWeb.Params.ExploreParamsTest do
     gen all from <- hostile_value(),
             to <- hostile_value(),
             sel <- hostile_value(),
-            kinds <- hostile_value(),
             z <- hostile_value(),
             lat <- hostile_value(),
             lng <- hostile_value() do
@@ -236,7 +202,6 @@ defmodule AmanogawaWeb.Params.ExploreParamsTest do
         "from" => from,
         "to" => to,
         "sel" => sel,
-        "kinds" => kinds,
         "z" => z,
         "lat" => lat,
         "lng" => lng

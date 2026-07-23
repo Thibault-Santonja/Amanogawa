@@ -10,6 +10,10 @@
 // straight-segment rendering of long-distance relations turns out to
 // justify it visually.
 
+import {emptyFeatureCollection, withTransition} from "./style_utils.js"
+
+export {emptyFeatureCollection} from "./style_utils.js"
+
 export const LINKS_SOURCE_ID = "event-links"
 export const LINKS_LAYER_ID = "event-links-lines"
 
@@ -20,12 +24,6 @@ export const LINK_TYPES = ["part_of", "follows", "cause", "effect", "significant
 // Causal relations draw a heavier line than purely structural/sequential
 // ones, so they read as the more significant connections at a glance.
 const HEAVY_LINK_TYPES = ["cause", "effect"]
-
-const FADE_DURATION_MS = 300
-
-export function emptyFeatureCollection() {
-  return {type: "FeatureCollection", features: []}
-}
 
 // A dedicated source, deliberately never mixed with the `events` point
 // source (`event_layers.js`): its lifecycle is independent, filled at
@@ -43,18 +41,6 @@ function lineColorExpression(colors) {
 function lineWidthExpression() {
   const cases = HEAVY_LINK_TYPES.flatMap(type => [type, 2.5])
   return ["match", ["get", "link_type"], ...cases, 1.5]
-}
-
-function fadeTransition(reducedMotion) {
-  return reducedMotion ? {} : {duration: FADE_DURATION_MS, delay: 0}
-}
-
-function withTransition(paint, property, reducedMotion) {
-  const transition = fadeTransition(reducedMotion)
-
-  if (Object.keys(transition).length === 0) return paint
-
-  return {...paint, [`${property}-transition`]: transition}
 }
 
 export const HIDDEN_OPACITY = 0

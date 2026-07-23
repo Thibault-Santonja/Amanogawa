@@ -15,39 +15,60 @@ msgstr ""
 #: lib/amanogawa_web/components/layouts.ex:110
 #, elixir-autogen, elixir-format
 msgid "Attempting to reconnect"
-msgstr ""
+msgstr "Attempting to reconnect"
 
-#: lib/amanogawa_web/live/home_live.ex:12
+#: lib/amanogawa_web/live/explore_live.ex:48
 #, elixir-autogen, elixir-format
 msgid "Carte du monde"
-msgstr ""
+msgstr "World map"
 
 #: lib/amanogawa_web/components/layouts.ex:58
 #, elixir-autogen, elixir-format
 msgid "Frise chronologique"
-msgstr ""
+msgstr "Timeline"
 
 #: lib/amanogawa_web/components/layouts.ex:102
 #, elixir-autogen, elixir-format
 msgid "Something went wrong!"
-msgstr ""
+msgstr "Something went wrong!"
 
 #: lib/amanogawa_web/components/layouts.ex:46
 #, elixir-autogen, elixir-format
 msgid "Sources"
-msgstr ""
+msgstr "Sources"
 
 #: lib/amanogawa_web/components/layouts.ex:87
 #, elixir-autogen, elixir-format
 msgid "We can't find the internet"
-msgstr ""
+msgstr "We can't find the internet"
 
 #: lib/amanogawa_web/components/core_components.ex:81
 #, elixir-autogen, elixir-format
 msgid "close"
-msgstr ""
+msgstr "close"
 
 #: lib/amanogawa_web/components/layouts.ex:47
 #, elixir-autogen, elixir-format
 msgid "À propos"
-msgstr ""
+msgstr "About"
+
+#: lib/amanogawa_web/components/event_panel.ex:45
+#, elixir-autogen, elixir-format
+msgid "Détails de l'événement"
+msgstr "Event details"
+
+#: lib/amanogawa_web/components/event_panel.ex:56
+#, elixir-autogen, elixir-format
+msgid "Fermer"
+msgstr "Close"
+
+#: lib/amanogawa_web/components/event_panel.ex:85
+#, elixir-autogen, elixir-format
+msgid "Lire sur Wikipédia"
+msgstr "Read on Wikipedia"
+
+#: lib/amanogawa_web/components/event_panel.ex:75
+#: lib/amanogawa_web/live/explore_live.ex:227
+#, elixir-autogen, elixir-format
+msgid "Texte"
+msgstr "Text"

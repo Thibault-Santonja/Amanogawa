@@ -85,8 +85,8 @@ defmodule AmanogawaWeb.Params.EventsQueryTest do
       assert [_message] = errors.bbox
     end
 
-    test "min_lat >= max_lat is rejected" do
-      assert {:error, errors} = EventsQuery.parse(%{"bbox" => "2.0,49.0,3.0,49.0"})
+    test "min_lat > max_lat is rejected" do
+      assert {:error, errors} = EventsQuery.parse(%{"bbox" => "2.0,49.5,3.0,49.0"})
       assert [_message] = errors.bbox
     end
 
@@ -108,6 +108,16 @@ defmodule AmanogawaWeb.Params.EventsQueryTest do
     test "a non-integer limit is rejected" do
       assert {:error, errors} = EventsQuery.parse(%{"limit" => "not-a-number"})
       assert [_message] = errors.limit
+    end
+  end
+
+  describe "parse/1 degenerate bbox" do
+    test "min_lat == max_lat (zero height) is accepted, matching bbox.js's documented contract" do
+      assert {:ok, opts} = EventsQuery.parse(%{"bbox" => "2.0,49.0,3.0,49.0"})
+
+      assert opts.envelopes == [
+               %{min_lon: 2.0, min_lat: 49.0, max_lon: 3.0, max_lat: 49.0}
+             ]
     end
   end
 
@@ -150,7 +160,7 @@ defmodule AmanogawaWeb.Params.EventsQueryTest do
           assert envelope.min_lat >= -90.0 and envelope.min_lat <= 90.0
           assert envelope.max_lat >= -90.0 and envelope.max_lat <= 90.0
           assert envelope.min_lon <= envelope.max_lon
-          assert envelope.min_lat < envelope.max_lat
+          assert envelope.min_lat <= envelope.max_lat
         end
 
         if min_lon > max_lon do
@@ -166,8 +176,7 @@ defmodule AmanogawaWeb.Params.EventsQueryTest do
     gen all min_lon <- float(min: -180.0, max: 180.0),
             max_lon <- float(min: -180.0, max: 180.0),
             lat_a <- float(min: -90.0, max: 90.0),
-            lat_b <- float(min: -90.0, max: 90.0),
-            lat_a != lat_b do
+            lat_b <- float(min: -90.0, max: 90.0) do
       min_lat = min(lat_a, lat_b)
       max_lat = max(lat_a, lat_b)
       {min_lon, min_lat, max_lon, max_lat}

@@ -130,8 +130,14 @@ defmodule AmanogawaWeb.Params.EventsQuery do
   defp validate_lat(lat) when lat >= -90.0 and lat <= 90.0, do: :ok
   defp validate_lat(_lat), do: {:error, "latitude must be within [-90, 90]"}
 
-  defp validate_lat_order(min_lat, max_lat) when min_lat < max_lat, do: :ok
-  defp validate_lat_order(_min_lat, _max_lat), do: {:error, "min_lat must be less than max_lat"}
+  # `<=`, not `<`: a zero-height bbox (`min_lat == max_lat`) is a
+  # degenerate but legitimate viewport (a fully zoomed-out-on-latitude
+  # view), matching the contract `assets/js/map/bbox.js#boundsToBbox`
+  # already documents and returns as-is rather than treating as an error.
+  defp validate_lat_order(min_lat, max_lat) when min_lat <= max_lat, do: :ok
+
+  defp validate_lat_order(_min_lat, _max_lat),
+    do: {:error, "min_lat must be less than or equal to max_lat"}
 
   defp envelopes(min_lon, min_lat, max_lon, max_lat) when min_lon > max_lon do
     [

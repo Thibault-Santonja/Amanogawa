@@ -71,7 +71,9 @@ defmodule Amanogawa.Ingestion.Workers.EnrichSummariesTest do
 
       updated_top = Atlas.get_event_by_qid(top.qid)
       assert updated_top.extract_fr == "Extrait fr"
-      assert updated_top.thumbnail_url == "https://example.org/thumb.jpg"
+
+      assert updated_top.thumbnail_url ==
+               "https://upload.wikimedia.org/wikipedia/commons/a/ab/Thumb.jpg"
 
       assert updated_top.extract_attribution == %{
                "article_url" => "https://fr.wikipedia.org/wiki/Bataille_de_Marathon",
@@ -534,7 +536,11 @@ defmodule Amanogawa.Ingestion.Workers.EnrichSummariesTest do
     refute Ingestion.get_sync_run(sync_run_id).status == :running
   end
 
-  defp summary_fixture(lang, article_url, thumbnail_url \\ "https://example.org/thumb.jpg") do
+  defp summary_fixture(
+         lang,
+         article_url,
+         thumbnail_url \\ "https://upload.wikimedia.org/wikipedia/commons/a/ab/Thumb.jpg"
+       ) do
     %Summary{
       title: "Titre",
       extract: extract_text(lang),

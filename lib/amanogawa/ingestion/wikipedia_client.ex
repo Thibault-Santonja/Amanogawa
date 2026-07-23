@@ -107,7 +107,7 @@ defmodule Amanogawa.Ingestion.WikipediaClient do
     WikipediaClient.Rest` and by its tests.
     """
 
-    alias Amanogawa.Ingestion.WikimediaUrl
+    alias Amanogawa.WikimediaUrl
 
     @enforce_keys [:title, :extract, :article_url, :lang]
     defstruct [:title, :description, :extract, :thumbnail_url, :article_url, :lang]
@@ -136,9 +136,9 @@ defmodule Amanogawa.Ingestion.WikipediaClient do
     Input bounds: `extract` is truncated to #{@max_extract_length}
     characters (an extract is a summary, anything longer is an anomaly not
     worth failing the event over); `thumbnail.source` must satisfy
-    `Amanogawa.Ingestion.WikimediaUrl.valid?/1` (https, Wikimedia host,
-    bounded length) or the field is dropped (`nil`), never the whole
-    summary.
+    `Amanogawa.WikimediaUrl.valid_thumbnail?/1` (https, specifically the
+    Wikimedia upload host, bounded length) or the field is dropped (`nil`),
+    never the whole summary.
 
     Returns `{:error, reason}` when the document does not parse as JSON, or
     parses but is missing one of the required fields.
@@ -182,12 +182,12 @@ defmodule Amanogawa.Ingestion.WikipediaClient do
       end
     end
 
-    # A thumbnail that is not an https Wikimedia URL (or is absurdly long)
-    # is dropped, never a reason to lose the summary: the extract is the
-    # data, the image is decoration.
+    # A thumbnail that is not an https upload.wikimedia.org URL (or is
+    # absurdly long) is dropped, never a reason to lose the summary: the
+    # extract is the data, the image is decoration.
     defp thumbnail_url(decoded) do
       url = get_in(decoded, ["thumbnail", "source"])
-      if WikimediaUrl.valid?(url), do: url, else: nil
+      if WikimediaUrl.valid_thumbnail?(url), do: url, else: nil
     end
   end
 end

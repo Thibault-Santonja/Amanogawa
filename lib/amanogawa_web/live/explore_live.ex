@@ -26,15 +26,29 @@ defmodule AmanogawaWeb.ExploreLive do
   alias Amanogawa.Atlas
   alias AmanogawaWeb.Components.EventPanel
   alias AmanogawaWeb.Params.ExploreParams
+  alias AmanogawaWeb.RateLimit
+
+  # Generous, dedicated quota for `select_event` (issue security-review
+  # #6: it is the only `handle_event` here that ends up loading from the
+  # database, through the `handle_params/3` that `push_patch` below
+  # triggers): independent from the public JSON API's own quota
+  # (`AmanogawaWeb.Plugs.RateLimit`, `config :amanogawa, AmanogawaWeb.
+  # RateLimit`), since 60 clicks/minute from one visitor is unremarkable
+  # here but would be a very different signal on the JSON API. Overridable
+  # via `config :amanogawa, #{inspect(__MODULE__)}` (see
+  # `selection_rate_limit_quota/0`), which is what lets tests reach the
+  # "throttled" path with a handful of hits instead of sixty.
+  @default_selection_rate_limit 60
+  @default_selection_rate_limit_scale_ms :timer.minutes(1)
 
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
      socket
      |> assign(:page_title, gettext("Carte du monde"))
+     |> assign(:peer_ip, peer_ip(socket))
      |> assign(:from, nil)
      |> assign(:to, nil)
-     |> assign(:kinds, [])
      |> assign(:z, nil)
      |> assign(:lat, nil)
      |> assign(:lng, nil)
@@ -42,38 +56,93 @@ defmodule AmanogawaWeb.ExploreLive do
      |> assign(:selected_event, nil)}
   end
 
+  # Captured once at mount, not re-read on every event: `get_connect_info/2`
+  # only returns data during the (single) connected mount, `nil` on the
+  # static, disconnected render. A `nil` peer (no connect_info at all, e.g.
+  # `mount/3` called directly as a plain function, as the "no DB in
+  # mount" test below does) is never throttled by
+  # `selection_rate_limited?/1`: there is no real client to protect
+  # against.
+  #
+  # Deliberately the raw socket peer, not corrected for a reverse proxy
+  # the way `AmanogawaWeb.Plugs.RateLimit`'s HTTP-side quota is (issue
+  # security-review #4's `RemoteIp` plug runs on the endpoint's HTTP
+  # pipeline, which a LiveView websocket connection never goes through):
+  # good enough to bound abuse from a single client, not meant to be an
+  # exact client identity behind arbitrary infrastructure.
+  #
+  # `get_connect_info/2` itself raises when `socket.private[:connect_info]`
+  # is entirely absent (a socket that never went through the LiveView
+  # mount lifecycle at all, as opposed to one that went through it but
+  # simply lacks a `:peer_data` key): guarded against explicitly here
+  # rather than left to crash, since `mount/3` is called directly, as a
+  # bare struct, by its own "no DB access" test below.
+  defp peer_ip(%{private: private} = socket) do
+    if Map.has_key?(private, :connect_info) do
+      case get_connect_info(socket, :peer_data) do
+        %{address: address} -> address
+        _other -> nil
+      end
+    else
+      nil
+    end
+  end
+
   @impl true
   def handle_params(params, _url, socket) do
     state = ExploreParams.parse(params)
+    previous = current_view(socket)
 
     socket =
       socket
-      |> assign(from: state.from, to: state.to, kinds: state.kinds)
+      |> assign(from: state.from, to: state.to)
       |> assign(z: state.z, lat: state.lat, lng: state.lng)
       |> apply_selection(state.selected_qid)
-      |> push_view_state(state)
+      |> push_view_state(state, previous)
 
     {:noreply, socket}
+  end
+
+  # Snapshot of the assigns `push_view_state/3` below decides against,
+  # taken *before* `handle_params/3` overwrites them with the freshly
+  # parsed `state`: this is what lets a patch that only changes, say, the
+  # selection (`select_event`) skip re-pushing `set_time_window`/`set_view`
+  # for a window/camera that did not actually move (issue security-review
+  # #2: every `handle_params/3` run used to unconditionally re-push both,
+  # triggering a redundant `/api/events` refetch in the hook on every
+  # selection change).
+  defp current_view(socket) do
+    %{
+      from: socket.assigns.from,
+      to: socket.assigns.to,
+      z: socket.assigns.z,
+      lat: socket.assigns.lat,
+      lng: socket.assigns.lng
+    }
   end
 
   # Pushed on every `handle_params/3` run, since every run is itself the
   # result of a URL change (initial load, `push_patch`, or browser
   # back/forward): the map hook's anti-loop guard (marking programmatic
   # moves) is what keeps a `map_moved`-triggered patch from re-triggering
-  # itself through the `set_view` pushed back here.
+  # itself through the `set_view` pushed back here. `set_time_window` and
+  # `set_view` are each only pushed when their value actually changed from
+  # `previous` (see `current_view/1`): a pure selection or browser
+  # back/forward replaying the same window/camera must not cause the hook
+  # to redundantly refetch events or re-animate the camera.
   #
   # `event_selected`/`event_deselected` carry `socket.assigns.selected_qid`
   # (the *resolved* selection, set by `apply_selection/2` above), not
   # `state.selected_qid`: a `sel` naming an unknown event resolves to no
   # selection, and the hook must be told that, not the dangling qid from
   # the URL.
-  defp push_view_state(socket, state) do
+  defp push_view_state(socket, state, previous) do
     if connected?(socket) do
       selected_qid = socket.assigns.selected_qid
 
       socket
-      |> push_event("set_time_window", %{from: state.from, to: state.to})
-      |> push_event("set_view", %{z: state.z, lat: state.lat, lng: state.lng})
+      |> maybe_push_time_window(state, previous)
+      |> maybe_push_view(state, previous)
       |> push_event(
         if(selected_qid, do: "event_selected", else: "event_deselected"),
         %{qid: selected_qid}
@@ -83,12 +152,35 @@ defmodule AmanogawaWeb.ExploreLive do
     end
   end
 
+  defp maybe_push_time_window(socket, state, previous) do
+    if {state.from, state.to} == {previous.from, previous.to} do
+      socket
+    else
+      push_event(socket, "set_time_window", %{from: state.from, to: state.to})
+    end
+  end
+
+  defp maybe_push_view(socket, state, previous) do
+    if {state.z, state.lat, state.lng} == {previous.z, previous.lat, previous.lng} do
+      socket
+    else
+      push_event(socket, "set_view", %{z: state.z, lat: state.lat, lng: state.lng})
+    end
+  end
+
   @impl true
   def handle_event("select_event", %{"qid" => qid}, socket) do
-    if ExploreParams.valid_qid?(qid) do
-      {:noreply, push_patch(socket, to: patch_path(socket, selected_qid: qid))}
-    else
-      {:noreply, socket}
+    cond do
+      not ExploreParams.valid_qid?(qid) ->
+        {:noreply, socket}
+
+      # Over quota: the event is dropped silently, no crash and no patch
+      # (issue security-review #6), exactly like an invalid payload above.
+      selection_rate_limited?(socket) ->
+        {:noreply, socket}
+
+      true ->
+        {:noreply, push_patch(socket, to: patch_path(socket, selected_qid: qid))}
     end
   end
 
@@ -123,7 +215,18 @@ defmodule AmanogawaWeb.ExploreLive do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash}>
-      <div id="map" phx-hook="MapHook" phx-update="ignore" class="absolute inset-0"></div>
+      <%!-- data-i18n-* carries the labels the hover card
+      (`assets/js/map/hover_card.js`) renders into its DOM, translated
+      server-side (security review, i18n finding): the hook reads them off
+      this container instead of hardcoding French text in JS. --%>
+      <div
+        id="map"
+        phx-hook="MapHook"
+        phx-update="ignore"
+        class="absolute inset-0"
+        data-i18n-text-label={gettext("Texte")}
+      >
+      </div>
       <EventPanel.event_panel :if={@selected_event} event={@selected_event} />
     </Layouts.app>
     """
@@ -154,7 +257,6 @@ defmodule AmanogawaWeb.ExploreLive do
       from: socket.assigns.from,
       to: socket.assigns.to,
       selected_qid: socket.assigns.selected_qid,
-      kinds: socket.assigns.kinds,
       z: socket.assigns.z,
       lat: socket.assigns.lat,
       lng: socket.assigns.lng
@@ -166,5 +268,31 @@ defmodule AmanogawaWeb.ExploreLive do
       empty when empty == %{} -> ~p"/"
       query -> "/?" <> URI.encode_query(query)
     end
+  end
+
+  defp selection_rate_limited?(%{assigns: %{peer_ip: nil}}), do: false
+
+  defp selection_rate_limited?(%{assigns: %{peer_ip: peer_ip}}) do
+    {limit, scale_ms} = selection_rate_limit_quota()
+
+    case RateLimit.hit({:explore_select, peer_ip}, scale_ms, limit) do
+      {:allow, _count} -> false
+      {:deny, _retry_after_ms} -> true
+    end
+  end
+
+  defp selection_rate_limit_quota do
+    config = Application.get_env(:amanogawa, __MODULE__, [])
+
+    limit = Keyword.get(config, :selection_rate_limit, @default_selection_rate_limit)
+
+    scale_ms =
+      Keyword.get(
+        config,
+        :selection_rate_limit_scale_ms,
+        @default_selection_rate_limit_scale_ms
+      )
+
+    {limit, scale_ms}
   end
 end

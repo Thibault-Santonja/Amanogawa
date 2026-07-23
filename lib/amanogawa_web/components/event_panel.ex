@@ -16,6 +16,18 @@ defmodule AmanogawaWeb.Components.EventPanel do
   escapes it by default, which is what keeps a hostile extract (a
   `<script>` tag smuggled through a compromised Wikipedia article) inert
   (`.claude/rules/security.md`).
+
+  Accessibility (security review, a11y finding): the `<aside>` carries an
+  `aria-label` (it has no visible heading of its own beyond the event
+  title, which a screen reader would otherwise announce with no context),
+  closes on Escape (`phx-window-keydown`, bound only while the panel is in
+  the DOM, i.e. only "when open" by construction: `:if={@selected_event}`
+  in `AmanogawaWeb.ExploreLive` mounts and unmounts this component, it is
+  never merely hidden), and receives focus as soon as it mounts
+  (`phx-mounted`, `tabindex="-1"` since the `<aside>` itself is not
+  otherwise an interactive element) so a keyboard/screen-reader user
+  selecting a marker lands inside the panel rather than the focus staying
+  stranded on the map.
   """
 
   use AmanogawaWeb, :html
@@ -30,6 +42,11 @@ defmodule AmanogawaWeb.Components.EventPanel do
     <aside
       id="event-panel"
       class="absolute inset-y-0 right-0 w-full max-w-sm overflow-y-auto border-l border-border bg-surface p-4 shadow-lg sm:w-96"
+      aria-label={gettext("Détails de l'événement")}
+      tabindex="-1"
+      phx-window-keydown="deselect_event"
+      phx-key="Escape"
+      phx-mounted={JS.focus()}
     >
       <div class="flex items-start justify-between gap-2">
         <h2 class="text-lg font-semibold text-text">{label(@event)}</h2>

@@ -72,6 +72,7 @@ defmodule Amanogawa.MixProject do
       {:req, "~> 0.5"},
       {:oban, "~> 2.19"},
       {:hammer, "~> 7.4"},
+      {:remote_ip, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},

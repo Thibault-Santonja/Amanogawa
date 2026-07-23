@@ -18,6 +18,7 @@ defmodule Amanogawa.Atlas.Event do
   import Ecto.Changeset
 
   alias Amanogawa.HistoricalDate
+  alias Amanogawa.WikimediaUrl
 
   @type t :: %__MODULE__{}
 
@@ -117,6 +118,18 @@ defmodule Amanogawa.Atlas.Event do
   so the invariant is defined in exactly one place. `end_*` is left alone
   when `end_year` is nil (most events are punctual). The geometry, when
   present, must be a `Geo.Point` with SRID 4326.
+
+  `wiki_url_fr`/`wiki_url_en` and `thumbnail_url`, when present, are
+  validated against `Amanogawa.WikimediaUrl` (defense in depth,
+  security review: ingestion already rejects a hostile URL before it
+  reaches storage, `Amanogawa.Ingestion.Wikidata.EventDecoder` and
+  `Amanogawa.Ingestion.WikipediaClient.Summary`, but this changeset is
+  also the one general-purpose write path shared with test fixtures and
+  any future direct write, so the invariant is enforced here too rather
+  than trusted to hold by construction everywhere it is called).
+  `thumbnail_url` is held to the stricter `valid_thumbnail?/1` (only the
+  Wikimedia upload host, matching the CSP's `img-src`), the wiki URLs to
+  the more permissive `valid?/1` (any `*.wikipedia.org` host).
   """
   @spec changeset(t(), map()) :: Ecto.Changeset.t()
   def changeset(event, attrs) do
@@ -128,6 +141,9 @@ defmodule Amanogawa.Atlas.Event do
     |> apply_historical_date_invariants(:begin)
     |> apply_historical_date_invariants(:end)
     |> validate_geom_srid()
+    |> validate_wikimedia_url(:wiki_url_fr, &WikimediaUrl.valid?/1)
+    |> validate_wikimedia_url(:wiki_url_en, &WikimediaUrl.valid?/1)
+    |> validate_wikimedia_url(:thumbnail_url, &WikimediaUrl.valid_thumbnail?/1)
     |> validate_attribution()
   end
 
@@ -141,11 +157,15 @@ defmodule Amanogawa.Atlas.Event do
   `:not_found` attempt (`mark_summary_attempt/1`) sets only
   `extract_fetched_at`, so the cache still treats the article as recently
   checked without fabricating an extract.
+
+  `thumbnail_url`, when present, is validated the same way as in
+  `changeset/2` above (`Amanogawa.WikimediaUrl.valid_thumbnail?/1`).
   """
   @spec summary_changeset(t(), map()) :: Ecto.Changeset.t()
   def summary_changeset(event, attrs) do
     event
     |> cast(attrs, @summary_fields)
+    |> validate_wikimedia_url(:thumbnail_url, &WikimediaUrl.valid_thumbnail?/1)
     |> validate_attribution()
   end
 
@@ -310,6 +330,24 @@ defmodule Amanogawa.Atlas.Event do
       %Geo.Point{srid: 4326} -> changeset
       %Geo.Point{} -> add_error(changeset, :geom, "must have SRID 4326")
       _ -> add_error(changeset, :geom, "must be a Point geometry")
+    end
+  end
+
+  # A `nil` field (most events lack one or more of these URLs) is never an
+  # error: only a *present but invalid* value is rejected. `validator` is
+  # `WikimediaUrl.valid?/1` or the stricter `valid_thumbnail?/1`, chosen
+  # per field by the caller.
+  defp validate_wikimedia_url(changeset, field, validator) do
+    case get_field(changeset, field) do
+      nil ->
+        changeset
+
+      url ->
+        if validator.(url) do
+          changeset
+        else
+          add_error(changeset, field, "must be a valid Wikimedia URL")
+        end
     end
   end
 

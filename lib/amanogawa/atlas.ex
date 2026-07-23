@@ -8,12 +8,14 @@ defmodule Amanogawa.Atlas do
   `Amanogawa.Repo` directly from another context.
   """
 
+  import Ecto.Changeset, only: [add_error: 3]
   import Ecto.Query
 
   alias Amanogawa.Atlas.Event
   alias Amanogawa.Atlas.EventLink
   alias Amanogawa.Atlas.EventQueries
   alias Amanogawa.Repo
+  alias Amanogawa.WikimediaUrl
 
   # PostgreSQL allows at most 65535 bound parameters per statement; with
   # around twenty columns per event row, 500 rows per batch stays
@@ -254,6 +256,15 @@ defmodule Amanogawa.Atlas do
   internal types (`.claude/rules/architecture.md`). Required keys:
   `:lang` (`:fr` or `:en`), `:extract`, `:article_url`; `:thumbnail_url` is
   optional (`nil` when the article has no image).
+
+  `article_url` is validated (`Amanogawa.WikimediaUrl.valid?/1`, defense in
+  depth: `Amanogawa.Ingestion.WikipediaClient.Rest` always populates it
+  from the response's own `content_urls.desktop.page`, itself already a
+  Wikimedia URL by construction, but this is the write boundary, the one
+  place a malformed or hostile value would otherwise reach storage
+  regardless of how it got here). An invalid `article_url` fails the same
+  way any other invalid changeset field does: `{:error, changeset}`,
+  nothing is written.
   """
   @spec put_event_summary(Event.t(), map()) :: {:ok, Event.t()} | {:error, Ecto.Changeset.t()}
   def put_event_summary(
@@ -275,6 +286,7 @@ defmodule Amanogawa.Atlas do
 
     event
     |> Event.summary_changeset(changeset_attrs)
+    |> validate_article_url(article_url)
     |> Repo.update()
   end
 
@@ -298,6 +310,14 @@ defmodule Amanogawa.Atlas do
 
   defp extract_field(:fr), do: :extract_fr
   defp extract_field(:en), do: :extract_en
+
+  defp validate_article_url(changeset, article_url) do
+    if WikimediaUrl.valid?(article_url) do
+      changeset
+    else
+      add_error(changeset, :extract_attribution, "article_url must be a valid Wikimedia URL")
+    end
+  end
 
   defp insert_event_batch(batch) do
     {count, _} =

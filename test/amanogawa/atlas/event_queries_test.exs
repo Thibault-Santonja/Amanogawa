@@ -132,8 +132,8 @@ defmodule Amanogawa.Atlas.EventQueriesTest do
 
     property "every feature is within the bbox, its year within the window, and count <= limit" do
       check all bbox_string <- valid_bbox_string(),
-                from <- integer(-3000..2026),
-                to <- integer(from..2026),
+                from <- integer(-3000..Date.utc_today().year),
+                to <- integer(from..Date.utc_today().year),
                 limit <- integer(1..50),
                 max_runs: 30 do
         {:ok, envelopes} = EventsQuery.parse_bbox(bbox_string)
@@ -158,7 +158,7 @@ defmodule Amanogawa.Atlas.EventQueriesTest do
       check all bbox_string <- valid_bbox_string(),
                 max_runs: 20 do
         {:ok, envelopes} = EventsQuery.parse_bbox(bbox_string)
-        opts = %{envelopes: envelopes, from: -3000, to: 2026, limit: 500}
+        opts = %{envelopes: envelopes, from: -3000, to: Date.utc_today().year, limit: 500}
 
         importances =
           opts
@@ -212,6 +212,76 @@ defmodule Amanogawa.Atlas.EventQueriesTest do
     defp unique_qid, do: "Q#{System.unique_integer([:positive])}"
   end
 
+  describe "list_links/1 limit and order" do
+    test "outgoing relations beyond the per-direction cap are dropped, keeping the most important by target sitelink_count, then qid" do
+      center = event_fixture(qid: "Q1", geom: %Geo.Point{coordinates: {0.0, 0.0}, srid: 4326})
+
+      for i <- 1..205 do
+        target =
+          event_fixture(
+            qid: "Q#{1000 + i}",
+            geom: %Geo.Point{coordinates: {0.0, 0.0}, srid: 4326},
+            sitelink_count: i
+          )
+
+        event_link_fixture(source_id: center.id, target_id: target.id, type: :part_of)
+      end
+
+      assert {:ok, %{"features" => features}} = Atlas.list_event_links_geojson("Q1")
+      assert length(features) == 200
+
+      target_qids = Enum.map(features, & &1["properties"]["target_qid"])
+      # The 5 least important targets (sitelink_count 1..5) are dropped;
+      # the rest come back ranked by sitelink_count descending.
+      expected_qids = for i <- 205..6//-1, do: "Q#{1000 + i}"
+
+      assert target_qids == expected_qids
+    end
+
+    test "incoming relations are capped independently of outgoing ones" do
+      center = event_fixture(qid: "Q1", geom: %Geo.Point{coordinates: {0.0, 0.0}, srid: 4326})
+
+      for i <- 1..205 do
+        source =
+          event_fixture(
+            qid: "Q#{2000 + i}",
+            geom: %Geo.Point{coordinates: {0.0, 0.0}, srid: 4326},
+            sitelink_count: i
+          )
+
+        event_link_fixture(source_id: source.id, target_id: center.id, type: :follows)
+      end
+
+      assert {:ok, %{"features" => features}} = Atlas.list_event_links_geojson("Q1")
+      assert length(features) == 200
+      assert Enum.all?(features, &(&1["properties"]["direction"] == "incoming"))
+    end
+
+    test "targets tied on sitelink_count are tie-broken by qid ascending" do
+      center = event_fixture(qid: "Q1", geom: %Geo.Point{coordinates: {0.0, 0.0}, srid: 4326})
+
+      higher_qid =
+        event_fixture(
+          qid: "Q30",
+          geom: %Geo.Point{coordinates: {0.0, 0.0}, srid: 4326},
+          sitelink_count: 10
+        )
+
+      lower_qid =
+        event_fixture(
+          qid: "Q20",
+          geom: %Geo.Point{coordinates: {0.0, 0.0}, srid: 4326},
+          sitelink_count: 10
+        )
+
+      event_link_fixture(source_id: center.id, target_id: higher_qid.id, type: :part_of)
+      event_link_fixture(source_id: center.id, target_id: lower_qid.id, type: :part_of)
+
+      assert {:ok, %{"features" => features}} = Atlas.list_event_links_geojson("Q1")
+      assert Enum.map(features, & &1["properties"]["target_qid"]) == ["Q20", "Q30"]
+    end
+  end
+
   defp within_any_envelope?(lon, lat, envelopes) do
     Enum.any?(envelopes, fn envelope ->
       lon >= envelope.min_lon and lon <= envelope.max_lon and
@@ -235,7 +305,7 @@ defmodule Amanogawa.Atlas.EventQueriesTest do
 
   defp full_range_opts(overrides \\ []) do
     Map.merge(
-      %{envelopes: [@world], from: -13_800_000_000, to: 2026, limit: 500},
+      %{envelopes: [@world], from: -13_800_000_000, to: Date.utc_today().year, limit: 500},
       Map.new(overrides)
     )
   end
