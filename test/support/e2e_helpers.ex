@@ -40,6 +40,21 @@ defmodule AmanogawaWeb.E2EHelpers do
     end
 
     assert_has(session, Query.css("#map[data-events-loaded='true']", visible: :any))
+
+    # Webdriver's `displayed` check needs a nonzero box: surface the real
+    # geometry when the layout collapses instead of failing later with an
+    # opaque "0 visible elements" on a child query.
+    Wallaby.Browser.execute_script(
+      session,
+      "var r = document.querySelector('#map').getBoundingClientRect();" <>
+        "return [r.width, r.height, window.innerWidth, window.innerHeight];",
+      fn [w, h, iw, ih] ->
+        if h < 10 or w < 10 do
+          raise "#map collapsed to #{w}x#{h} (viewport #{iw}x#{ih}): " <>
+                  "the layout gives the map zero size in this browser."
+        end
+      end
+    )
   rescue
     error in [Wallaby.QueryError, Wallaby.ExpectationNotMetError] ->
       # Diagnostic of last resort: what page is the browser actually on?
