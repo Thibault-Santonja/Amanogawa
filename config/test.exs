@@ -64,7 +64,11 @@ config :wallaby,
   otp_app: :amanogawa,
   screenshot_on_failure: true,
   chromedriver: [
-    headless: true,
+    # `headless: true` would append Chrome's LEGACY `--headless` flag
+    # (wallaby appends the bare flag), whose rendering stack cannot create
+    # a software WebGL context. The modern mode is opted into explicitly
+    # through `--headless=new` in the args below instead.
+    headless: false,
     capabilities: %{
       javascriptEnabled: true,
       loadImages: true,
@@ -78,6 +82,10 @@ config :wallaby,
       loggingPrefs: %{browser: "DEBUG"},
       chromeOptions: %{
         args: [
+          # Modern headless mode: unlike the legacy `--headless` (which
+          # wallaby's `headless: true` would append), it shares the regular
+          # browser's rendering stack and supports software WebGL.
+          "--headless=new",
           # `--no-sandbox`: chromedriver commonly runs as root in a CI
           # container, where Chrome's own sandbox refuses to start at all.
           "--no-sandbox",
