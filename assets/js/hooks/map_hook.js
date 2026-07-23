@@ -5,12 +5,15 @@
 // fetched from `GET /api/events`, styled by data-driven expressions in
 // `assets/js/map/event_layers.js`, refetched as the viewport or the time
 // window changes), the hover card and click-to-select event panel (#016),
-// and the relation lines traced around the selected event (#017). State
-// (the time window, the map view, the selection) is owned by the LiveView
-// (ADR 0005, issue #018): this hook only renders and reports lightweight
-// intents (`map_moved`, `select_event`, `deselect_event`), it never holds
-// the event list or the selected event's data outside the MapLibre
-// sources and its own small hover/link caches.
+// and the relation lines traced around the selected event (#017), and the
+// historical borders layer (#025: a GeoJSON source fetched from
+// `GET /api/borders`, styled by `assets/js/map/border_layers.js`, refetched
+// only when the time window's upper bound, the reference year, changes).
+// State (the time window, the map view, the selection) is owned by the
+// LiveView (ADR 0005, issue #018): this hook only renders and reports
+// lightweight intents (`map_moved`, `select_event`, `deselect_event`), it
+// never holds the event list or the selected event's data outside the
+// MapLibre sources and its own small hover/link caches.
 //
 // The vendored styles (assets/vendor/map-styles/) are bundled into app.js:
 // only tiles, glyphs, sprites, and Wikipedia thumbnails (issue #016) are
@@ -18,6 +21,17 @@
 import maplibregl from "maplibre-gl"
 
 import {boundsToBbox, normalizedMapMovedPayload} from "../map/bbox.js"
+import {
+  BORDERS_FILL_LAYER_ID,
+  BORDERS_LABEL_LAYER_ID,
+  BORDERS_SOURCE_ID,
+  HIDDEN_OPACITY as BORDERS_HIDDEN_OPACITY,
+  VISIBLE_OPACITY as BORDERS_VISIBLE_OPACITY,
+  bordersFillLayer,
+  bordersLabelLayer,
+  bordersSource,
+  emptyFeatureCollection as emptyBordersFeatureCollection
+} from "../map/border_layers.js"
 import {debounce} from "../map/debounce.js"
 import {
   EVENTS_CIRCLE_LAYER_ID,
@@ -52,6 +66,18 @@ import lightStyle from "../../vendor/map-styles/light.json"
 
 const INITIAL_CENTER = [0, 20]
 const INITIAL_ZOOM = 1.5
+
+// Attribution for the two border sources (issue #025's own task list,
+// ADR 0004's licensing obligations: CC BY 4.0 for Cliopatria, GPL-3.0 for
+// historical-basemaps): appended to the map's own `AttributionControl`
+// (`customAttribution`, below) alongside the basemap's OpenFreeMap/
+// OpenStreetMap credit already declared in `assets/vendor/map-styles/
+// {light,dark}.json`. `docs/features/006-deploiement/002-page-sources-
+// legal.md` covers the full Sources page; this is the map-level minimum.
+const BORDER_SOURCE_ATTRIBUTIONS = [
+  '<a href="https://github.com/Seshat-Global-History-Databank/cliopatria" target="_blank">Cliopatria (CC BY 4.0)</a>',
+  '<a href="https://github.com/aourednik/historical-basemaps" target="_blank">historical-basemaps (GPL-3.0)</a>'
+]
 
 // Time between the last `moveend`/`zoomend` and the events refetch, and
 // between the last `moveend` and the `map_moved` intent pushed to the
@@ -136,6 +162,17 @@ const MapHook = {
     this.previewWindow = {from: null, to: null}
     this.abortController = null
     this.eventsLoadedOnce = false
+    // Borders state (issue #025): `bordersYear` is the reference year
+    // (the time window's upper bound) the currently loaded/loading source
+    // data was fetched for, so a `set_time_window` push that leaves the
+    // upper bound unchanged (only `from` moved) never triggers a redundant
+    // refetch. `bordersAbortController`/`bordersOpacityFrame` mirror the
+    // event-links fields below: cancel an in-flight fetch or pending fade
+    // frame on cleanup/replacement so a slow response or stale animation
+    // frame can never land against torn-down state.
+    this.bordersYear = null
+    this.bordersAbortController = null
+    this.bordersOpacityFrame = null
     // Monotonic counter of successful `setEventsData` calls, rendered as
     // `data-events-fetch-count` (issue #029): unlike the `data-events-
     // loaded` flag below, a count lets the E2E dark-mode scenario detect
@@ -183,7 +220,7 @@ const MapHook = {
         style: this.darkScheme.matches ? darkStyle : lightStyle,
         center: INITIAL_CENTER,
         zoom: INITIAL_ZOOM,
-        attributionControl: {compact: true},
+        attributionControl: {compact: true, customAttribution: BORDER_SOURCE_ATTRIBUTIONS},
         // MapLibre already skips camera easing when the user prefers reduced
         // motion; also disable symbol fade-in so labels appear instantly.
         fadeDuration: this.reducedMotion ? 0 : 300
@@ -217,17 +254,29 @@ const MapHook = {
     // the data is refetched rather than cached (this hook never stores the
     // event list outside the MapLibre source, issue #015 point d'attention).
     this.onStyleLoad = () => {
+      // Borders set up FIRST, before events/links: MapLibre appends a
+      // newly added layer on top of the whole current stack unless a
+      // `beforeId` is given, so adding the borders fill/label pair here,
+      // ahead of `setupEventsLayer`/`setupLinksLayer`, is what keeps them
+      // under the events and relation lines (issue #025's own point
+      // d'attention on layer order) without needing a `beforeId` that
+      // would otherwise have to reference a not-yet-created layer.
+      this.setupBordersLayer()
       this.setupEventsLayer()
       this.setupLinksLayer()
       this.eventsLoadedOnce = false
+      this.bordersYear = null
       // Cleared while the style reloads (theme change) and re-set by
-      // `setEventsData` once the refetch lands: the one DOM signal the E2E
-      // suite (issue #029) synchronizes on before asserting anything about
-      // rendered markers, since the WebGL canvas itself is not assertable.
-      // Harmless in every environment, not gated like `data-e2e-test-api`
-      // below: it carries no information beyond "events are up to date".
+      // `setEventsData`/`setBordersData` once the refetch lands: the DOM
+      // signals the E2E suite (issue #029) synchronizes on before
+      // asserting anything about rendered markers or borders, since the
+      // WebGL canvas itself is not assertable. Harmless in every
+      // environment, not gated like `data-e2e-test-api` below: they carry
+      // no information beyond "events/borders are up to date".
       this.el.removeAttribute("data-events-loaded")
+      this.el.removeAttribute("data-borders-loaded")
       this.fetchEvents()
+      this.fetchBorders()
     }
     this.map.on("style.load", this.onStyleLoad)
 
@@ -338,10 +387,20 @@ const MapHook = {
       this.previewWindow = {from, to}
       this.updateGradientPaint()
 
-      if (from === this.timeWindow.from && to === this.timeWindow.to) return
+      if (from !== this.timeWindow.from || to !== this.timeWindow.to) {
+        this.timeWindow = {from, to}
+        this.fetchEvents()
+      }
 
-      this.timeWindow = {from, to}
-      this.fetchEvents()
+      // Borders (issue #025): the reference year is the window's upper
+      // bound ALONE (F05 design, `AmanogawaWeb.ExploreLive` moduledoc), so
+      // a `from`-only change above must not trigger a borders refetch;
+      // kept as an independent check (not folded into the `if` above) so
+      // the two contracts stay free to diverge. `fetchBorders` itself is
+      // the AbortController-guarded fetch (mirrors `fetchEvents`); this is
+      // only the "did the year that matters to borders actually change"
+      // gate.
+      if (to !== this.bordersYear) this.fetchBorders()
     })
 
     // Consumed from `TimelineHook`'s local drag rendering (issue #022,
@@ -482,6 +541,23 @@ const MapHook = {
     this.map.setPaintProperty(EVENTS_CIRCLE_LAYER_ID, "circle-opacity", this.circleOpacityExpression())
   },
 
+  // Adds the `borders` source and its fill/label layers (issue #025). Must
+  // run BEFORE `setupEventsLayer`/`setupLinksLayer` (`onStyleLoad` always
+  // calls it first): MapLibre stacks a newly added layer on top of
+  // whatever already exists unless a `beforeId` is given, so adding
+  // borders first, with no `beforeId`, is what keeps it under the events
+  // and relation lines added afterward, without referencing a layer id
+  // that would not exist yet at this point in the sequence.
+  setupBordersLayer() {
+    if (this.map.getSource(BORDERS_SOURCE_ID)) return
+
+    const {textColor, haloColor} = readDesignTokens()
+
+    this.map.addSource(BORDERS_SOURCE_ID, bordersSource())
+    this.map.addLayer(bordersFillLayer({reducedMotion: this.reducedMotion}))
+    this.map.addLayer(bordersLabelLayer({textColor, haloColor}))
+  },
+
   // Adds the `event-links` source and its line layer below the events
   // layers (`beforeId: EVENTS_CIRCLE_LAYER_ID`), so relation lines never
   // draw over event markers. Must run after `setupEventsLayer/0`, which it
@@ -520,6 +596,10 @@ const MapHook = {
 
     if (this.map.getLayer(LINKS_LAYER_ID)) {
       this.map.setPaintProperty(LINKS_LAYER_ID, "line-opacity-transition", transition)
+    }
+
+    if (this.map.getLayer(BORDERS_FILL_LAYER_ID)) {
+      this.map.setPaintProperty(BORDERS_FILL_LAYER_ID, "fill-opacity-transition", transition)
     }
   },
 
@@ -588,6 +668,75 @@ const MapHook = {
     this.eventsFetchCount += 1
     this.el.setAttribute("data-events-loaded", "true")
     this.el.setAttribute("data-events-fetch-count", String(this.eventsFetchCount))
+  },
+
+  buildBordersUrl() {
+    return `/api/borders?year=${encodeURIComponent(this.timeWindow.to)}`
+  },
+
+  // Fetches the borders active at the current reference year (issue #025:
+  // the time window's upper bound, `this.timeWindow.to`). A no-op while no
+  // window has been received yet (`this.timeWindow.to` still `null`, the
+  // brief gap between `mounted()` and the first `set_time_window`):
+  // `GET /api/borders` requires `year` (unlike `/api/events`'s optional
+  // `from`/`to`, `buildEventsUrl` above), so there is nothing valid to
+  // fetch yet. Any request still in flight is aborted first, mirroring
+  // `fetchEvents`/`fetchEventLinks`.
+  async fetchBorders() {
+    if (this.timeWindow.to === null) return
+
+    this.bordersYear = this.timeWindow.to
+
+    if (this.bordersAbortController) this.bordersAbortController.abort()
+
+    const controller = new AbortController()
+    this.bordersAbortController = controller
+
+    try {
+      const response = await fetch(this.buildBordersUrl(), {signal: controller.signal})
+
+      if (!response.ok) {
+        throw new Error(`borders request failed with status ${response.status}`)
+      }
+
+      const featureCollection = await response.json()
+      this.setBordersData(featureCollection)
+    } catch (error) {
+      if (error.name === "AbortError") return
+
+      if (process.env.NODE_ENV !== "production") {
+        console.error("MapHook: failed to fetch borders", error)
+      }
+    }
+  },
+
+  // Replaces the borders source data and cross-fades it in: opacity drops
+  // to hidden synchronously, then is raised on the next animation frame
+  // (mirrors `setLinksData` below), so the browser always registers the
+  // hidden state first and `fill-opacity-transition`
+  // (`assets/js/map/border_layers.js`, skipped entirely under reduced
+  // motion) animates every fresh year's fill in, not just the first one
+  // (issue #025's own "transition douce au changement d'année").
+  setBordersData(featureCollection) {
+    const source = this.map.getSource(BORDERS_SOURCE_ID)
+    if (!source) return
+
+    if (this.bordersOpacityFrame !== null) cancelAnimationFrame(this.bordersOpacityFrame)
+
+    this.map.setPaintProperty(BORDERS_FILL_LAYER_ID, "fill-opacity", BORDERS_HIDDEN_OPACITY)
+    source.setData(featureCollection)
+
+    this.bordersOpacityFrame = requestAnimationFrame(() => {
+      this.bordersOpacityFrame = null
+      this.map.setPaintProperty(BORDERS_FILL_LAYER_ID, "fill-opacity", BORDERS_VISIBLE_OPACITY)
+    })
+
+    // The fill/label layers are a WebGL source, not assertable directly
+    // (mirrors `data-links-count`/`data-events-loaded` above): the DOM
+    // proxy the E2E suite reads to confirm the borders layer rendered for
+    // the current reference year.
+    this.el.setAttribute("data-borders-loaded", "true")
+    this.el.setAttribute("data-borders-count", String(featureCollection.features.length))
   },
 
   // Whether `z`/`lat`/`lng` already match the current camera, within a
@@ -817,6 +966,9 @@ const MapHook = {
 
     if (this.linksAbortController) this.linksAbortController.abort()
     if (this.linksOpacityFrame !== null) cancelAnimationFrame(this.linksOpacityFrame)
+
+    if (this.bordersAbortController) this.bordersAbortController.abort()
+    if (this.bordersOpacityFrame !== null) cancelAnimationFrame(this.bordersOpacityFrame)
 
     this.map.off("style.load", this.onStyleLoad)
     this.map.off("moveend", this.onMoveEnd)

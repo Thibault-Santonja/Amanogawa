@@ -22,6 +22,9 @@ erl_crash.dump
 # Temporary files, for example, from tests.
 /tmp/
 
+# Wallaby's failure screenshots (test/e2e, mix test.e2e).
+/screenshots/
+
 # Ignore package tarball (built via "mix hex.build").
 amanogawa-*.tar
 

@@ -1,10 +1,12 @@
 defmodule Amanogawa.Atlas.BorderQueries do
   @moduledoc """
   The PostGIS geometry pipeline for `atlas.borders` (ADR 0007, issue #023):
-  every fragment that validates, repairs and simplifies a border geometry
-  lives here (`.claude/rules/architecture.md`: "Raw SQL for geo -> use
-  PostGIS functions via fragments in one query module"), so no other module
-  builds one of these expressions.
+  every fragment that validates, repairs, simplifies, or reads back a
+  border geometry lives here (`.claude/rules/architecture.md`: "Raw SQL for
+  geo -> use PostGIS functions via fragments in one query module"), so no
+  other module builds one of these expressions. `list_active_borders/1` and
+  `last_import_at/0` (issue #025) are the read side of that same pipeline,
+  serving `GET /api/borders`.
 
   ## Pipeline
 
@@ -46,6 +48,7 @@ defmodule Amanogawa.Atlas.BorderQueries do
   import Ecto.Query
 
   alias Amanogawa.Atlas.Border
+  alias Amanogawa.Atlas.Polity
   alias Amanogawa.Repo
 
   # Starting point suggested by issue #023, to be recalibrated once real
@@ -69,6 +72,14 @@ defmodule Amanogawa.Atlas.BorderQueries do
           repaired: non_neg_integer(),
           inserted: non_neg_integer(),
           rejected_empty: non_neg_integer()
+        }
+
+  @type active_row :: %{
+          name: String.t(),
+          source: String.t(),
+          precision: integer() | nil,
+          geometry: String.t(),
+          area_km2: float()
         }
 
   @insert_sql """
@@ -119,6 +130,54 @@ defmodule Amanogawa.Atlas.BorderQueries do
   def purge_source(source) do
     {count, _} = Border |> where([b], b.source == ^source) |> Repo.delete_all()
     count
+  end
+
+  @doc """
+  Lists the polygons active at `year` (issue #025, `from_year <= year AND
+  to_year >= year`, both bounds inclusive), joined to their polity's
+  `name`, at the default web simplification level (`geom_medium`, #023: the
+  web edge never simplifies at request time).
+
+  `geometry` is already `ST_AsGeoJSON` text (ADR 0007: GeoJSON serialization
+  happens here, in the query module, never in the controller or the
+  client); `area_km2` is `ST_Area` over the geography cast of the same
+  simplified geometry (not the full-precision `geom`: the area a client
+  filters labels by should match what it actually renders, and computing
+  it against `geom` would be needlessly more expensive for a value this
+  query already returns per row).
+
+  Ordered by polity name then border id, for a deterministic response
+  (`Amanogawa.Atlas.list_borders_geojson/1`'s feature order is otherwise at
+  the mercy of undefined row order across two structurally identical
+  queries, which would make caching and tests flaky).
+  """
+  @spec list_active_borders(integer()) :: [active_row()]
+  def list_active_borders(year) do
+    Border
+    |> join(:inner, [b], p in Polity, on: b.polity_id == p.id)
+    |> where([b], b.from_year <= ^year and b.to_year >= ^year)
+    |> order_by([b, p], asc: p.name, asc: b.id)
+    |> select([b, p], %{
+      name: p.name,
+      source: b.source,
+      precision: b.precision,
+      geometry: fragment("ST_AsGeoJSON(?)", b.geom_medium),
+      area_km2: fragment("ST_Area(?::geography) / 1000000.0", b.geom_medium)
+    })
+    |> Repo.all()
+  end
+
+  @doc """
+  The timestamp of the most recent `atlas.borders` write (`max(updated_at)`),
+  or `nil` when the table is empty. Backs the borders endpoint's ETag
+  (issue #025, `AmanogawaWeb.Controllers.Api.BorderController`): a fresh
+  import (`Amanogawa.Atlas.replace_borders/2`) always advances this value,
+  which is what invalidates every previously cached response, without a
+  dedicated import-metadata table.
+  """
+  @spec last_import_at() :: DateTime.t() | nil
+  def last_import_at do
+    Repo.one(from b in Border, select: max(b.updated_at))
   end
 
   @doc """

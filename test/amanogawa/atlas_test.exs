@@ -6,6 +6,7 @@ defmodule Amanogawa.AtlasTest do
 
   alias Amanogawa.Atlas
   alias Amanogawa.Atlas.Event
+  alias Amanogawa.Atlas.PolityColor
   alias Amanogawa.Atlas.TimeScale
   alias Amanogawa.Repo
 
@@ -595,6 +596,65 @@ defmodule Amanogawa.AtlasTest do
 
       assert Atlas.count_polities() == 1
       assert Atlas.count_borders() == 1
+    end
+  end
+
+  describe "list_borders_geojson/1" do
+    test "happy path: returns a FeatureCollection with every documented property" do
+      {:ok, polity} = Atlas.upsert_polity(%{name: "Roman Empire", source: "cliopatria"})
+      {:ok, _} = Atlas.replace_borders("cliopatria", [border_row(polity.id, %{precision: 2})])
+
+      assert %{"type" => "FeatureCollection", "features" => [feature]} =
+               Atlas.list_borders_geojson(0)
+
+      assert feature["type"] == "Feature"
+      assert %{"type" => "MultiPolygon"} = feature["geometry"]
+
+      assert %{
+               "name" => "Roman Empire",
+               "source" => "cliopatria",
+               "precision" => 2,
+               "color" => color,
+               "area_km2" => area_km2
+             } = feature["properties"]
+
+      assert color == PolityColor.for_name("Roman Empire")
+      assert is_float(area_km2)
+    end
+
+    test "edge case: a year with no matching border returns an empty FeatureCollection" do
+      assert Atlas.list_borders_geojson(50_000) == %{
+               "type" => "FeatureCollection",
+               "features" => []
+             }
+    end
+
+    test "the same polity keeps the same color across two different years' responses" do
+      {:ok, polity} = Atlas.upsert_polity(%{name: "Roman Empire", source: "cliopatria"})
+
+      {:ok, _} =
+        Atlas.replace_borders("cliopatria", [
+          border_row(polity.id, %{from_year: -100, to_year: 100}),
+          border_row(polity.id, %{from_year: 200, to_year: 300})
+        ])
+
+      %{"features" => [feature_at_0]} = Atlas.list_borders_geojson(0)
+      %{"features" => [feature_at_250]} = Atlas.list_borders_geojson(250)
+
+      assert feature_at_0["properties"]["color"] == feature_at_250["properties"]["color"]
+    end
+  end
+
+  describe "last_border_import_at/0" do
+    test "returns nil when no borders have ever been imported" do
+      assert Atlas.last_border_import_at() == nil
+    end
+
+    test "returns a timestamp once a border has been imported" do
+      {:ok, polity} = Atlas.upsert_polity(%{name: "Roman Empire", source: "cliopatria"})
+      {:ok, _} = Atlas.replace_borders("cliopatria", [border_row(polity.id)])
+
+      assert %DateTime{} = Atlas.last_border_import_at()
     end
   end
 

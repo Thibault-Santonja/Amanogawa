@@ -147,6 +147,29 @@ defmodule AmanogawaWeb.E2EHelpers do
   end
 
   @doc """
+  Waits for the map hook's borders layer to have rendered at least once
+  (`data-borders-loaded="true"` on `#map`, set by `MapHook#setBordersData`,
+  issue #025): the WebGL canvas itself is not assertable, this is the DOM
+  proxy for "the `GET /api/borders` fetch for the current reference year
+  landed".
+  """
+  @spec wait_for_borders_ready(Session.t()) :: Session.t()
+  def wait_for_borders_ready(session) do
+    assert_has(session, Query.css("#map[data-borders-loaded='true']", visible: :any))
+  end
+
+  @doc """
+  Waits until `#map`'s `data-borders-count` equals exactly `expected_count`
+  (`MapHook#setBordersData`, issue #025): the DOM proxy for "the borders
+  layer for the current reference year holds this many features",
+  mirroring `wait_for_links_count/2`.
+  """
+  @spec wait_for_borders_count(Session.t(), non_neg_integer()) :: Session.t()
+  def wait_for_borders_count(session, expected_count) do
+    assert_has(session, Query.css("#map[data-borders-count='#{expected_count}']"))
+  end
+
+  @doc """
   Selects `qid` through the test-only hook witness
   (`window.__amanogawaE2E__.selectEvent`, `assets/js/hooks/map_hook.js`,
   only wired when `config :amanogawa, :expose_e2e_test_api` is `true`):

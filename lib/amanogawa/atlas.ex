@@ -1,7 +1,8 @@
 defmodule Amanogawa.Atlas do
   @moduledoc """
   Public API of the Atlas bounded context: the read model served to the UI
-  (historical events and the typed links between them).
+  (historical events, the typed links between them, and the historical
+  borders/"zones of influence" of political entities, ADR 0004).
 
   Ingestion writes into Atlas exclusively through this facade: never by
   calling `Amanogawa.Atlas.Event`/`Amanogawa.Atlas.EventLink` internals or
@@ -17,6 +18,7 @@ defmodule Amanogawa.Atlas do
   alias Amanogawa.Atlas.EventLink
   alias Amanogawa.Atlas.EventQueries
   alias Amanogawa.Atlas.Polity
+  alias Amanogawa.Atlas.PolityColor
   alias Amanogawa.Atlas.TimeScale
   alias Amanogawa.Repo
   alias Amanogawa.WikimediaUrl
@@ -329,6 +331,45 @@ defmodule Amanogawa.Atlas do
   @spec count_borders() :: non_neg_integer()
   def count_borders, do: Repo.aggregate(Border, :count)
 
+  @doc """
+  Lists the polygons active at `year` as a GeoJSON `FeatureCollection`
+  (issue #025): `year` is already clamped and validated by
+  `AmanogawaWeb.Params.BorderQuery.parse/1` before it reaches here.
+
+  Read-only and side-effect free. The query itself, including the
+  `ST_AsGeoJSON` serialization and the `area_km2` computation, is
+  centralized in `Amanogawa.Atlas.BorderQueries.list_active_borders/1`;
+  this function only shapes the result into GeoJSON and attaches each
+  feature's stable color (`Amanogawa.Atlas.PolityColor.for_name/1`), the
+  boundary where PostGIS geometry becomes wire format
+  (`.claude/rules/geo-temporal.md`).
+
+  Every feature carries `name`, `source`, `precision`, `color` (hashed
+  from `name`, stable across years so the same entity keeps the same hue
+  as the caller changes `year`) and `area_km2` (used by the map hook to
+  gate labels to large entities only, issue #025).
+  """
+  @spec list_borders_geojson(integer()) :: map()
+  def list_borders_geojson(year) do
+    features =
+      year
+      |> BorderQueries.list_active_borders()
+      |> Enum.map(&border_row_to_feature/1)
+
+    %{"type" => "FeatureCollection", "features" => features}
+  end
+
+  @doc """
+  The timestamp of the most recent borders import, or `nil` when
+  `atlas.borders` is empty. Delegates to
+  `Amanogawa.Atlas.BorderQueries.last_import_at/0`, exposed here so the
+  web layer (the borders endpoint's ETag,
+  `AmanogawaWeb.Controllers.Api.BorderController`) only ever depends on
+  `Amanogawa.Atlas`'s public API.
+  """
+  @spec last_border_import_at() :: DateTime.t() | nil
+  def last_border_import_at, do: BorderQueries.last_import_at()
+
   @doc "Counts polities. Used by tests and import summaries."
   @spec count_polities() :: non_neg_integer()
   def count_polities, do: Repo.aggregate(Polity, :count)
@@ -539,6 +580,26 @@ defmodule Amanogawa.Atlas do
         "year" => row.year,
         "precision" => row.precision,
         "importance" => row.importance
+      }
+    }
+  end
+
+  # `row.geometry` is already GeoJSON text (`ST_AsGeoJSON`,
+  # `BorderQueries.list_active_borders/1`): decoded here into the map
+  # `Jason.encode!/1` needs at the controller's `json/2` call, never
+  # re-serialized from a `Geo` struct the way `event_row_to_feature/1`
+  # above does (borders never build one, ADR 0007's "GeoJSON at the web
+  # edge" is already satisfied one layer down, in SQL).
+  defp border_row_to_feature(row) do
+    %{
+      "type" => "Feature",
+      "geometry" => Jason.decode!(row.geometry),
+      "properties" => %{
+        "name" => row.name,
+        "source" => row.source,
+        "precision" => row.precision,
+        "color" => PolityColor.for_name(row.name),
+        "area_km2" => Float.round(row.area_km2, 1)
       }
     }
   end

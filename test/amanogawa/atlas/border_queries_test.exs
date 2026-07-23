@@ -146,6 +146,79 @@ defmodule Amanogawa.Atlas.BorderQueriesTest do
     end
   end
 
+  describe "list_active_borders/1" do
+    test "returns only polygons active at the given year (from_year and to_year both inclusive)" do
+      polity = polity_fixture(name: "Roman Empire")
+      border_fixture(polity_id: polity.id, from_year: -100, to_year: 100)
+
+      assert [row] = BorderQueries.list_active_borders(-100)
+      assert row.name == "Roman Empire"
+
+      assert [row] = BorderQueries.list_active_borders(100)
+      assert row.name == "Roman Empire"
+
+      assert [row] = BorderQueries.list_active_borders(0)
+      assert row.name == "Roman Empire"
+    end
+
+    test "excludes a polygon the year before from_year or the year after to_year" do
+      polity = polity_fixture()
+      border_fixture(polity_id: polity.id, from_year: -100, to_year: 100)
+
+      assert BorderQueries.list_active_borders(-101) == []
+      assert BorderQueries.list_active_borders(101) == []
+    end
+
+    test "a year with no matching border returns an empty list" do
+      assert BorderQueries.list_active_borders(50_000) == []
+    end
+
+    test "each row carries name, source, precision, GeoJSON geometry text and area_km2" do
+      polity = polity_fixture(name: "Roman Empire", source: "cliopatria")
+      border_fixture(polity_id: polity.id, source: "cliopatria", precision: 2)
+
+      assert [row] = BorderQueries.list_active_borders(0)
+      assert row.name == "Roman Empire"
+      assert row.source == "cliopatria"
+      assert row.precision == 2
+      assert %{"type" => "MultiPolygon"} = Jason.decode!(row.geometry)
+      assert is_float(row.area_km2)
+      assert row.area_km2 > 0
+    end
+
+    test "results are ordered by polity name, deterministically" do
+      polity_b = polity_fixture(name: "B Empire")
+      polity_a = polity_fixture(name: "A Empire")
+      border_fixture(polity_id: polity_b.id)
+      border_fixture(polity_id: polity_a.id)
+
+      assert [%{name: "A Empire"}, %{name: "B Empire"}] = BorderQueries.list_active_borders(0)
+    end
+  end
+
+  describe "last_import_at/1" do
+    test "returns nil when atlas.borders is empty" do
+      assert BorderQueries.last_import_at() == nil
+    end
+
+    test "returns the most recent updated_at across every border" do
+      polity = polity_fixture()
+      older = border_fixture(polity_id: polity.id)
+
+      older
+      |> Ecto.Changeset.change(updated_at: ~U[2020-01-01 00:00:00Z])
+      |> Repo.update!()
+
+      newer = border_fixture(polity_id: polity.id)
+
+      newer
+      |> Ecto.Changeset.change(updated_at: ~U[2025-06-01 00:00:00Z])
+      |> Repo.update!()
+
+      assert BorderQueries.last_import_at() == ~U[2025-06-01 00:00:00Z]
+    end
+  end
+
   defp valid_geometry?(geom) do
     %{rows: [[valid]]} = Repo.query!("SELECT ST_IsValid($1)", [geom])
     valid
