@@ -12,6 +12,7 @@ defmodule Amanogawa.Atlas do
 
   alias Amanogawa.Atlas.Event
   alias Amanogawa.Atlas.EventLink
+  alias Amanogawa.Atlas.EventQueries
   alias Amanogawa.Repo
 
   # PostgreSQL allows at most 65535 bound parameters per statement; with
@@ -115,6 +116,28 @@ defmodule Amanogawa.Atlas do
       |> Enum.reduce(0, &(insert_link_batch(&1) + &2))
 
     {:ok, %{created: created, skipped_missing: skipped}}
+  end
+
+  @doc """
+  Lists events for the map viewport as a GeoJSON `FeatureCollection`
+  (issue #014, ADR 0007): `opts` is the normalized output of
+  `AmanogawaWeb.Params.EventsQuery.parse/1` (bbox envelopes, `from`/`to`
+  year window, `limit`), already bounded server-side by the caller.
+
+  Read-only and side-effect free. The query itself, including every
+  PostGIS fragment, is centralized in `Amanogawa.Atlas.EventQueries`; this
+  function only shapes the result into GeoJSON, the boundary where
+  PostGIS geometry becomes wire format (`.claude/rules/geo-temporal.md`:
+  "convert to GeoJSON only at the web edge").
+  """
+  @spec list_events_geojson(EventQueries.opts()) :: map()
+  def list_events_geojson(opts) do
+    features =
+      opts
+      |> EventQueries.list_events()
+      |> Enum.map(&event_row_to_feature/1)
+
+    %{"type" => "FeatureCollection", "features" => features}
   end
 
   @doc "Fetches an event by its Wikidata QID, or `nil` if unknown locally."
@@ -291,6 +314,20 @@ defmodule Amanogawa.Atlas do
 
   defp atom_key(key) when is_atom(key), do: key
   defp atom_key(key) when is_binary(key), do: String.to_existing_atom(key)
+
+  defp event_row_to_feature(row) do
+    %{
+      "type" => "Feature",
+      "geometry" => Geo.JSON.encode!(row.geom),
+      "properties" => %{
+        "qid" => row.qid,
+        "label" => row.label,
+        "year" => row.year,
+        "precision" => row.precision,
+        "importance" => row.importance
+      }
+    }
+  end
 
   defp utc_now, do: DateTime.truncate(DateTime.utc_now(), :second)
 end

@@ -89,3 +89,11 @@ config :amanogawa, Amanogawa.Ingestion.Workers.ImportLinks,
   page_size: 3,
   slice_width: 10,
   max_qid: 20
+
+# Small quota so AmanogawaWeb.Controllers.Api.EventControllerTest can reach
+# the 429 path in a handful of requests. Every other conn test that hits
+# /api/events uses its own fake remote IP (distinct rate-limit bucket), so
+# this low quota never bleeds into unrelated tests.
+config :amanogawa, AmanogawaWeb.RateLimit,
+  limit: 5,
+  scale_ms: :timer.minutes(1)

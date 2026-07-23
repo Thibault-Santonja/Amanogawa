@@ -79,6 +79,14 @@ if config_env() == :prod do
 
   config :amanogawa, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
+  # Public JSON endpoint rate limit (issue #014): overridable per deployment
+  # without a rebuild, since AmanogawaWeb.Plugs.RateLimit reads this config
+  # at request time rather than at router compile time. Window stays fixed
+  # at one minute; only the quota is meant to be tuned per environment.
+  config :amanogawa, AmanogawaWeb.RateLimit,
+    limit: String.to_integer(System.get_env("RATE_LIMIT_PER_MINUTE", "120")),
+    scale_ms: :timer.minutes(1)
+
   config :amanogawa, AmanogawaWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],
     http: [
