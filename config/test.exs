@@ -62,8 +62,10 @@ config :amanogawa, Amanogawa.Ingestion.WikipediaClient.Rest,
 
 # Oban runs in manual testing mode: jobs are asserted with Oban.Testing
 # (enqueued jobs, `perform_job/2`) instead of executing through real queues,
-# so tests never race a background poller.
-config :amanogawa, Oban, testing: :manual
+# so tests never race a background poller. `plugins: false` overrides
+# config/config.exs's Oban.Plugins.Cron schedule entirely (#013): the
+# monthly sync must never fire during the test suite.
+config :amanogawa, Oban, testing: :manual, plugins: false
 
 # Tiny pagination plan so tests can exercise several slices and several
 # pages per slice against small fixtures instead of the production

@@ -139,6 +139,36 @@ defmodule Amanogawa.Ingestion do
     end
   end
 
+  @doc """
+  Blocks the caller until `sync_run` reaches a terminal status (`:completed`
+  or `:failed`), by polling `Amanogawa.Ingestion.SyncRun` every
+  `:poll_interval_ms` (default 200ms) up to `:timeout_ms` (default 5
+  minutes). Returns `{:ok, closed_run}` once terminal, or
+  `{:error, :timeout}` if the deadline elapses first: the run itself is left
+  untouched (still `:running`) in that case, only the wait gives up.
+
+  `:on_progress`, when given, is called with the freshly re-fetched
+  `SyncRun` on every poll (including the very first, and the last, terminal
+  one): the mix task (#013) uses this to report counters and cursor as a
+  run advances, without this facade having to know anything about how that
+  progress is displayed.
+
+  This is a synchronous convenience for callers that need to observe a
+  run's outcome without subscribing to Oban telemetry: the mix task
+  (#013) uses it to wait for each step of an `all` sync before starting the
+  next. Meant for runs actually progressing in the background (a normal
+  Oban queue polling for jobs); it does not itself drive job execution.
+  """
+  @spec await_run(SyncRun.t(), keyword()) :: {:ok, SyncRun.t()} | {:error, :timeout}
+  def await_run(%SyncRun{id: id}, opts \\ []) do
+    timeout_ms = Keyword.get(opts, :timeout_ms, :timer.minutes(5))
+    poll_interval_ms = Keyword.get(opts, :poll_interval_ms, 200)
+    on_progress = Keyword.get(opts, :on_progress, fn _sync_run -> :ok end)
+
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+    poll_until_closed(id, deadline, poll_interval_ms, on_progress)
+  end
+
   @doc "Fetches a sync run by id, or `nil` if unknown."
   @spec get_sync_run(Ecto.UUID.t()) :: SyncRun.t() | nil
   def get_sync_run(id), do: Repo.get(SyncRun, id)
@@ -232,5 +262,23 @@ defmodule Amanogawa.Ingestion do
     SyncRun
     |> where([s], s.kind == ^kind and s.status == :running)
     |> Repo.exists?()
+  end
+
+  defp poll_until_closed(id, deadline, poll_interval_ms, on_progress) do
+    sync_run = get_sync_run(id)
+    on_progress.(sync_run)
+
+    case sync_run do
+      %SyncRun{status: status} when status in [:completed, :failed] ->
+        {:ok, sync_run}
+
+      %SyncRun{} ->
+        if System.monotonic_time(:millisecond) >= deadline do
+          {:error, :timeout}
+        else
+          Process.sleep(poll_interval_ms)
+          poll_until_closed(id, deadline, poll_interval_ms, on_progress)
+        end
+    end
   end
 end

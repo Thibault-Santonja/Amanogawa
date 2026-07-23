@@ -137,6 +137,74 @@ defmodule Amanogawa.IngestionTest do
     end
   end
 
+  describe "await_run/2" do
+    test "returns immediately when the run is already closed" do
+      {:ok, sync_run} = Ingestion.start_events_import()
+
+      closed =
+        sync_run
+        |> SyncRun.close_changeset(%{status: :completed})
+        |> Repo.update!()
+
+      assert {:ok, %SyncRun{status: :completed}} =
+               Ingestion.await_run(closed, timeout_ms: 1000, poll_interval_ms: 1000)
+    end
+
+    test "polls until the run closes, calling on_progress on every tick" do
+      {:ok, sync_run} = Ingestion.start_events_import()
+      ticks = :counters.new(1, [])
+
+      on_progress = fn run ->
+        :counters.add(ticks, 1, 1)
+
+        if run.status == :running and :counters.get(ticks, 1) >= 2 do
+          run |> SyncRun.close_changeset(%{status: :completed}) |> Repo.update!()
+        end
+      end
+
+      assert {:ok, %SyncRun{status: :completed}} =
+               Ingestion.await_run(sync_run,
+                 timeout_ms: 1000,
+                 poll_interval_ms: 1,
+                 on_progress: on_progress
+               )
+
+      assert :counters.get(ticks, 1) >= 2
+    end
+
+    test "returns {:error, :timeout} when the run never closes before the deadline" do
+      {:ok, sync_run} = Ingestion.start_events_import()
+
+      assert {:error, :timeout} =
+               Ingestion.await_run(sync_run, timeout_ms: 5, poll_interval_ms: 1)
+
+      assert Ingestion.get_sync_run(sync_run.id).status == :running
+    end
+
+    test "defaults on_progress to a no-op when not given" do
+      {:ok, sync_run} = Ingestion.start_events_import()
+
+      closed =
+        sync_run
+        |> SyncRun.close_changeset(%{status: :completed})
+        |> Repo.update!()
+
+      assert {:ok, %SyncRun{status: :completed}} = Ingestion.await_run(closed)
+    end
+
+    test "closes on a :failed status too, not only :completed" do
+      {:ok, sync_run} = Ingestion.start_events_import()
+
+      failed =
+        sync_run
+        |> SyncRun.close_changeset(%{status: :failed, last_error: "boom"})
+        |> Repo.update!()
+
+      assert {:ok, %SyncRun{status: :failed}} =
+               Ingestion.await_run(failed, timeout_ms: 1000, poll_interval_ms: 1000)
+    end
+  end
+
   describe "get_sync_run/1 and last_sync_run/1" do
     test "get_sync_run/1 returns nil for an unknown id" do
       assert Ingestion.get_sync_run(Ecto.UUID.generate()) == nil

@@ -59,10 +59,26 @@ config :amanogawa, Amanogawa.Ingestion.Workers.EnrichSummaries,
 # (.claude/rules/ethics.md); :wikipedia likewise enforces "one Wikipedia
 # request at a time". Transient backoff is handled by each adapter itself,
 # durable resume by the sync_run cursor/selection.
+#
+# Monthly ingestion sync (ADR 0003, #013), off-peak (UTC), through
+# Amanogawa.Ingestion.Workers.ScheduledSync (the only worker Oban.Plugins.
+# Cron targets, itself delegating to the Amanogawa.Ingestion facade):
+# events first on the 1st, links the next day (needs events populated
+# first), summaries the day after (the 30-day extract cache means a
+# monthly run only refreshes what expired). Disabled in test
+# (config/test.exs): a schedule must never fire during the test suite.
 config :amanogawa, Oban,
   engine: Oban.Engines.Basic,
   repo: Amanogawa.Repo,
-  queues: [ingestion: 1, wikipedia: 1]
+  queues: [ingestion: 1, wikipedia: 1],
+  plugins: [
+    {Oban.Plugins.Cron,
+     crontab: [
+       {"0 2 1 * *", Amanogawa.Ingestion.Workers.ScheduledSync, args: %{"kind" => "events"}},
+       {"0 2 2 * *", Amanogawa.Ingestion.Workers.ScheduledSync, args: %{"kind" => "links"}},
+       {"0 2 3 * *", Amanogawa.Ingestion.Workers.ScheduledSync, args: %{"kind" => "summaries"}}
+     ]}
+  ]
 
 # French is the source and default locale of the user-facing text.
 config :amanogawa, AmanogawaWeb.Gettext, default_locale: "fr"
