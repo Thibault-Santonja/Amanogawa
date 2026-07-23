@@ -271,7 +271,7 @@ defmodule AmanogawaWeb.ExploreLive do
         data-i18n-webgl-fallback={
           gettext("Carte interactive indisponible : ce navigateur ne fournit pas WebGL.")
         }
-        data-e2e-test-api={@expose_e2e_test_api}
+        data-e2e-test-api={@expose_e2e_test_api && "true"}
       >
       </div>
       <EventPanel.event_panel :if={@selected_event} event={@selected_event} />

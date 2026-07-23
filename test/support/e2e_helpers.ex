@@ -75,6 +75,34 @@ defmodule AmanogawaWeb.E2EHelpers do
   end
 
   @doc """
+  Waits until MapLibre reports itself fully loaded (`Map#loaded()` through
+  the test witness's `mapLoaded`): `wait_for_map_ready/1`'s
+  `data-events-loaded` proves the events reached the GeoJSON source, but
+  the engine still processes and renders the tiles a few frames later, and
+  until then a real pointer event over a marker hit-tests against nothing.
+  Required before any scenario drives the canvas with a real cursor
+  (hover); scenarios that only talk to the LiveView contract do not need
+  it.
+  """
+  @spec wait_for_map_rendered(Session.t(), non_neg_integer()) :: Session.t()
+  def wait_for_map_rendered(session, attempts_left \\ 50) do
+    {:ok, loaded} =
+      WebdriverClient.execute_script(session, "return window.__amanogawaE2E__.mapLoaded()", [])
+
+    cond do
+      loaded == true ->
+        session
+
+      attempts_left > 0 ->
+        Process.sleep(100)
+        wait_for_map_rendered(session, attempts_left - 1)
+
+      true ->
+        raise "MapLibre never reached loaded() (tiles still processing or rendering)"
+    end
+  end
+
+  @doc """
   The current `data-events-fetch-count` on `#map`, as an integer: the
   number of times `MapHook#setEventsData` has run since the page loaded.
   """
@@ -158,12 +186,22 @@ defmodule AmanogawaWeb.E2EHelpers do
   `Wallaby.Chrome.start_session/1`).
   """
   @spec emulate_dark_mode(Session.t()) :: Session.t()
-  def emulate_dark_mode(session) do
+  def emulate_dark_mode(session), do: emulate_color_scheme(session, "dark")
+
+  @doc """
+  Emulates an arbitrary `prefers-color-scheme` value (same CDP passthrough
+  as `emulate_dark_mode/1`). The dark-mode scenario emulates `"light"`
+  BEFORE loading the page: headless Chrome inherits the host OS theme, so
+  without pinning the baseline the later switch to dark would be a no-op
+  (no `change` event, no style reload) whenever the host itself runs dark.
+  """
+  @spec emulate_color_scheme(Session.t(), String.t()) :: Session.t()
+  def emulate_color_scheme(session, scheme) do
     {:ok, _response} =
       Req.post(session.session_url <> "/chromium/send_command",
         json: %{
           cmd: "Emulation.setEmulatedMedia",
-          params: %{features: [%{name: "prefers-color-scheme", value: "dark"}]}
+          params: %{features: [%{name: "prefers-color-scheme", value: scheme}]}
         }
       )
 

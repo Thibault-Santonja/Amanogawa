@@ -79,6 +79,7 @@ defmodule AmanogawaWeb.E2E.ExploreMapTest do
     session
     |> visit(centered_path())
     |> wait_for_map_ready()
+    |> wait_for_map_rendered()
     |> hover(Query.css("#map canvas"))
     |> assert_has(Query.css("[role='tooltip'][aria-hidden='false']", text: source.label_fr))
 
@@ -113,7 +114,12 @@ defmodule AmanogawaWeb.E2E.ExploreMapTest do
 
   feature "switches the map to the dark style on prefers-color-scheme: dark, keeping events displayed",
           %{session: session} do
+    # Pinned BEFORE the page loads (the CDP emulation persists across
+    # navigations within the session): headless Chrome inherits the host
+    # OS theme, so a host already in dark mode would otherwise make the
+    # later dark emulation a no-op (no `change` event, no style reload).
     session
+    |> emulate_color_scheme("light")
     |> visit(centered_path())
     |> wait_for_map_ready()
 

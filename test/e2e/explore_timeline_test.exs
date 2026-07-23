@@ -29,12 +29,19 @@ defmodule AmanogawaWeb.E2E.ExploreTimelineTest do
 
   alias Wallaby.Query
 
-  # A minimum window width in years the axis leaves at each end of the
-  # 1400px viewport (`config/test.exs`'s `--window-size=1400,1000`) that
-  # counts as "the axis spans (close enough to) the whole strip":
-  # `TimelineHook`'s own `MARGIN.left`/`MARGIN.right` are 16px each, a few
-  # pixels of tolerance absorbs tick-label centering/anti-aliasing without
-  # weakening what the assertion actually proves.
+  # What counts as "the axis spans (close enough to) the whole strip" on
+  # the 1400px viewport (`config/test.exs`'s `--window-size=1400,1000`).
+  # The tick positions read off the DOM live in the SVG's own coordinate
+  # system, whose x-scale range is `[MARGIN.left, width - MARGIN.right]`
+  # (`TimelineHook`, 16px each side): a tick exactly at the domain minimum
+  # already sits at x = 16, never at 0. On the right, the symlog tick
+  # generation lands its last graduation up to one tick interval (about
+  # `PIXELS_PER_TICK`, 80px) short of the domain edge (the CE portion of
+  # the domain is narrower than one interval), so the assertion allows
+  # that much slack plus a few pixels of tolerance for label centering.
+  @strip_width_px 1400
+  @axis_margin_px 16
+  @axis_tick_interval_px 80
   @axis_edge_tolerance_px 10
 
   setup do
@@ -65,15 +72,26 @@ defmodule AmanogawaWeb.E2E.ExploreTimelineTest do
     |> wait_for_map_ready()
     |> wait_for_histogram_ready()
 
-    %{width: width_before} = svg_geometry(session, ".timeline-window-body")
+    %{x: x_before} = svg_geometry(session, ".timeline-window-body")
     fetch_count_before = events_fetch_count(session)
 
     session
     |> drag_element(".timeline-window-body", -200)
     |> wait_for_events_fetch_count(fetch_count_before + 1)
 
-    %{width: width_after} = svg_geometry(session, ".timeline-window-body")
-    assert_in_delta width_after, width_before, 1.0
+    # "Width preserved" means the window's SPAN IN YEARS (`translateWindow`,
+    # `assets/js/lib/time_window.js`): on the symlog axis the same span
+    # renders at a different pixel width once translated into a more (or
+    # less) compressed region, so the year values patched into the URL are
+    # the invariant, not the highlight rectangle's `width` attribute.
+    %{"from" => from, "to" => to} =
+      URI.decode_query(URI.parse(current_url(session)).query || "")
+
+    assert String.to_integer(to) - String.to_integer(from) == 7000
+    assert String.to_integer(from) < -5000, "expected a leftward drag to move the window older"
+
+    %{x: x_after} = svg_geometry(session, ".timeline-window-body")
+    assert_in_delta x_after - x_before, -200.0, 2.0
 
     refute current_url(session) =~ "from=-5000&to=2000"
   end
@@ -118,7 +136,9 @@ defmodule AmanogawaWeb.E2E.ExploreTimelineTest do
     assert positions != [], "expected the axis to render at least one tick"
     assert Enum.all?(positions, &is_number/1), "expected every tick to expose a numeric position"
 
-    assert Enum.min(positions) <= @axis_edge_tolerance_px
-    assert Enum.max(positions) >= 1400 - @axis_edge_tolerance_px
+    assert Enum.min(positions) <= @axis_margin_px + @axis_edge_tolerance_px
+
+    assert Enum.max(positions) >=
+             @strip_width_px - @axis_margin_px - @axis_tick_interval_px - @axis_edge_tolerance_px
   end
 end

@@ -41,7 +41,12 @@ import {
   linksLineLayer,
   linksSource
 } from "../map/link_layers.js"
-import {TIME_WINDOW_PREVIEW_EVENT, mapLibreColorExpression, readGradientTokens} from "../lib/time_gradient.js"
+import {
+  TIME_WINDOW_PREVIEW_EVENT,
+  mapLibreColorExpression,
+  parseCssColor,
+  readGradientTokens
+} from "../lib/time_gradient.js"
 import darkStyle from "../../vendor/map-styles/dark.json"
 import lightStyle from "../../vendor/map-styles/light.json"
 
@@ -78,21 +83,37 @@ const HOVER_DELAY_MS = 150
 // `readGradientTokens` (`assets/js/lib/time_gradient.js`), the same
 // function `TimelineHook` and `AmanogawaWeb.Components.TimeLegend`'s CSS
 // ultimately derive from: never re-parsed or hardcoded here.
+// Every color token handed to MapLibre goes through `maplibreColor`:
+// MapLibre validates paint colors with its own parser (csscolorparser
+// lineage), which predates modern CSS color spaces, so an `oklch()` token
+// read verbatim off `getComputedStyle` is rejected as "color expected" and
+// the WHOLE layer silently refused at `addLayer` (fired as a map `error`
+// event, not thrown). Resolving each token to a plain `rgb()` string
+// through the shared `parseCssColor` (`assets/js/lib/time_gradient.js`,
+// the exact converter the temporal gradient already uses) keeps the CSS
+// custom properties as the single source of truth while feeding MapLibre
+// a syntax it can parse.
+function maplibreColor(value) {
+  const {r, g, b} = parseCssColor(value)
+  return `rgb(${r}, ${g}, ${b})`
+}
+
 function readDesignTokens() {
   const rootStyle = getComputedStyle(document.documentElement)
+  const token = name => maplibreColor(rootStyle.getPropertyValue(name).trim())
 
   return {
-    accentColor: rootStyle.getPropertyValue("--palette-accent").trim(),
-    haloColor: rootStyle.getPropertyValue("--palette-surface").trim(),
-    textColor: rootStyle.getPropertyValue("--palette-text").trim(),
+    accentColor: token("--palette-accent"),
+    haloColor: token("--palette-surface"),
+    textColor: token("--palette-text"),
     gradientTokens: readGradientTokens(document.documentElement),
     linkColors: {
-      part_of: rootStyle.getPropertyValue("--palette-link-part-of").trim(),
-      follows: rootStyle.getPropertyValue("--palette-link-follows").trim(),
-      cause: rootStyle.getPropertyValue("--palette-link-cause").trim(),
-      effect: rootStyle.getPropertyValue("--palette-link-effect").trim(),
-      significant: rootStyle.getPropertyValue("--palette-link-significant").trim(),
-      default: rootStyle.getPropertyValue("--palette-link-default").trim()
+      part_of: token("--palette-link-part-of"),
+      follows: token("--palette-link-follows"),
+      cause: token("--palette-link-cause"),
+      effect: token("--palette-link-effect"),
+      significant: token("--palette-link-significant"),
+      default: token("--palette-link-default")
     }
   }
 }
@@ -172,6 +193,20 @@ const MapHook = {
       this.renderWebglFallback()
       return
     }
+
+    // MapLibre's own `trackResize` observer deliberately ignores the
+    // initial `ResizeObserver` delivery, so a container resize happening
+    // between `Map` construction and that first delivery is swallowed
+    // entirely: the transform keeps the stale size and every pointer
+    // hit-test misses markers by the delta. That gap is real, not
+    // theoretical: the layout's `h-dvh` settles right after load (the
+    // dynamic viewport), shrinking `#map` before MapLibre's observer ever
+    // reports. This hook therefore owns its container's sizing: `resize()`
+    // is cheap and a no-op re-render when nothing changed.
+    this.mapResizeObserver = new ResizeObserver(() => {
+      if (this.map) this.map.resize()
+    })
+    this.mapResizeObserver.observe(this.el)
 
     this.debouncedFetchEvents = debounce(() => this.fetchEvents(), FETCH_DEBOUNCE_MS)
     this.debouncedPushMapMoved = debounce(() => this.pushMapMoved(), MAP_MOVED_DEBOUNCE_MS)
@@ -374,7 +409,15 @@ const MapHook = {
     if (this.el.dataset.e2eTestApi === "true") {
       window.__amanogawaE2E__ = {
         selectEvent: qid => this.pushEvent("select_event", {qid}),
-        deselectEvent: () => this.pushEvent("deselect_event", {})
+        deselectEvent: () => this.pushEvent("deselect_event", {}),
+        // `data-events-loaded` proves the events reached the source
+        // (`setEventsData`), but MapLibre still processes and renders the
+        // GeoJSON tiles a few frames later: until then a real mouse event
+        // over a marker hit-tests against nothing. `Map#loaded()` is the
+        // engine's own "fully processed and rendered" signal, polled by
+        // `AmanogawaWeb.E2EHelpers.wait_for_map_rendered/1` before any
+        // scenario drives the canvas with a real pointer.
+        mapLoaded: () => this.map.loaded()
       }
     }
   },
@@ -763,6 +806,7 @@ const MapHook = {
       return
     }
 
+    this.mapResizeObserver.disconnect()
     this.debouncedFetchEvents.cancel()
     this.debouncedPushMapMoved.cancel()
     if (this.abortController) this.abortController.abort()
