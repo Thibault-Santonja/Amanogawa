@@ -14,6 +14,24 @@ config :amanogawa, Amanogawa.Repo,
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: System.schedulers_online() * 2
 
+# GET /health (issue #026): the ConnCase integration test hits this default
+# Mox-backed value directly (a real HTTP round trip through the plug
+# pipeline, no per-test override needed) by stubbing the mock to delegate
+# to the real, Repo-backed implementation; every other test that needs a
+# specific outcome sets its own `expect`. A short timeout keeps the "check
+# hangs" limit-case test fast without a real multi-second wait.
+config :amanogawa, :health_check, Amanogawa.HealthCheckMock
+config :amanogawa, Amanogawa.HealthCheck, timeout_ms: 100
+
+# Alerting (issue #028): never auto-started/attached as a global `:logger`
+# handler during the test suite (`Amanogawa.Application`'s own
+# rationale): the suite deliberately logs many `:error` events (ingestion
+# hostile-fixture tests among others) that must never drive a real alert
+# or an unexpected Mox call. Tests of Amanogawa.Alerting.ErrorReporter
+# itself start and attach their own instance with `start_supervised!/2`.
+config :amanogawa, :start_error_reporter, false
+config :amanogawa, Amanogawa.Mailer, adapter: Swoosh.Adapters.Test
+
 # A real HTTP listener is required for the E2E suite (issue #029): Chrome,
 # driven through Wallaby/chromedriver, is an actual browser process that
 # connects over the network, unlike `Phoenix.ConnTest`'s in-process conn.

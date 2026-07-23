@@ -109,6 +109,45 @@ if config_env() == :prod do
     ],
     secret_key_base: secret_key_base
 
+  # Structured JSON logs (issue #028): production only, development keeps
+  # the human-readable template format unchanged (config/dev.exs). Every
+  # metadata key Logger holds is forwarded to the formatter
+  # (`Amanogawa.Logging.JSONFormatter` sanitizes anything it cannot
+  # serialize, never crashes), unlike the narrower `[:request_id]` list
+  # used by the default formatter elsewhere (config/config.exs): a
+  # production incident benefits from more context (module, function,
+  # line, crash_reason on exception logs), not less.
+  config :logger, :default_formatter,
+    format: {Amanogawa.Logging.JSONFormatter, :format},
+    metadata: :all
+
+  # Alerting (issue #028, option A): sober thresholds, overridable without
+  # a rebuild. No mail is ever sent unless ALERT_RECIPIENT_EMAIL is set:
+  # a deployment that never configures it simply runs without alerting
+  # rather than crashing at boot (self-hosting a minimal setup, ADR 0008,
+  # must not require SMTP just to start).
+  config :amanogawa, Amanogawa.Alerting,
+    threshold: String.to_integer(System.get_env("ALERT_ERROR_THRESHOLD", "10")),
+    window_minutes: String.to_integer(System.get_env("ALERT_WINDOW_MINUTES", "5")),
+    silence_minutes: String.to_integer(System.get_env("ALERT_SILENCE_MINUTES", "60")),
+    from: System.get_env("ALERT_FROM_EMAIL"),
+    recipient: System.get_env("ALERT_RECIPIENT_EMAIL")
+
+  # Local SMTP relay (issue #028): the same relay already used by the
+  # other projects on this VPS (msmtp or equivalent, `.claude/memory/
+  # tech-stack.md`), never a third-party transactional email provider.
+  # No authentication by default (`SMTP_USERNAME` unset): a relay bound to
+  # localhost typically needs none.
+  config :amanogawa, Amanogawa.Mailer,
+    adapter: Swoosh.Adapters.SMTP,
+    relay: System.get_env("SMTP_RELAY_HOST", "localhost"),
+    port: String.to_integer(System.get_env("SMTP_RELAY_PORT", "25")),
+    username: System.get_env("SMTP_USERNAME"),
+    password: System.get_env("SMTP_PASSWORD"),
+    ssl: System.get_env("SMTP_SSL") in ~w(true 1),
+    tls: :if_available,
+    auth: if(System.get_env("SMTP_USERNAME"), do: :always, else: :never)
+
   # ## SSL Support
   #
   # To get SSL working, you will need to add the `https` key

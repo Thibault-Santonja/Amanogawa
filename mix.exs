@@ -71,6 +71,11 @@ defmodule Amanogawa.MixProject do
       {:gettext, "~> 1.0"},
       {:jason, "~> 1.2"},
       {:req, "~> 0.5"},
+      # Alerting mailer (issue #028, option A): the smallest way to send a
+      # mail through the VPS's own local SMTP relay, no third-party
+      # tracking/APM service (`.claude/rules/ethics.md`).
+      {:swoosh, "~> 1.16"},
+      {:gen_smtp, "~> 1.2"},
       {:oban, "~> 2.19"},
       {:hammer, "~> 7.4"},
       {:remote_ip, "~> 1.2"},

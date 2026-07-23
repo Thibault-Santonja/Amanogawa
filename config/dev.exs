@@ -56,6 +56,11 @@ config :amanogawa, AmanogawaWeb.Endpoint,
 # Enable dev routes for dashboard and mailbox
 config :amanogawa, dev_routes: true
 
+# Alerting mailer (issue #028): stores mail in memory instead of sending
+# it, so a developer triggering the alerting handler locally never
+# depends on a real SMTP relay.
+config :amanogawa, Amanogawa.Mailer, adapter: Swoosh.Adapters.Local
+
 # Do not include metadata nor timestamps in development logs
 config :logger, :default_formatter, format: "[$level] $message\n"
 

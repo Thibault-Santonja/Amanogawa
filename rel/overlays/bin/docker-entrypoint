@@ -1,0 +1,31 @@
+#!/bin/sh
+# Container entrypoint (issue #026): runs pending migrations, then starts
+# the Phoenix server. Copied into the release under `rel/overlays/` (Mix
+# releases copy `rel/overlays/` verbatim into the release root, standard
+# Phoenix "Deploying with releases" pattern) and set as the Dockerfile's
+# ENTRYPOINT.
+#
+# Runs on every container start, including every container of a rolling
+# deploy: `Ecto.Migrator`'s own advisory lock (`Amanogawa.Release.migrate/0`)
+# serializes concurrent migration attempts rather than racing them, so this
+# is safe even when the old and the new container briefly overlap. This is
+# exactly why every migration shipped must stay compatible with the
+# previous release (`docs/ops/deploy.md`, "Zero downtime"): the old
+# container keeps serving traffic against an already-migrated schema until
+# kamal-proxy cuts it over.
+set -eu
+
+cd -P -- "$(dirname -- "$0")"
+
+echo "[docker-entrypoint] running migrations..."
+./amanogawa eval "Amanogawa.Release.migrate()"
+
+echo "[docker-entrypoint] starting the application ($*)..."
+case "${1:-start}" in
+  start)
+    PHX_SERVER=true exec ./amanogawa start
+    ;;
+  *)
+    exec ./amanogawa "$@"
+    ;;
+esac

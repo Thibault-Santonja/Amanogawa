@@ -1,2 +1,5 @@
 Mox.defmock(Amanogawa.Ingestion.SparqlClientMock, for: Amanogawa.Ingestion.SparqlClient)
 Mox.defmock(Amanogawa.Ingestion.WikipediaClientMock, for: Amanogawa.Ingestion.WikipediaClient)
+Mox.defmock(Amanogawa.HealthCheckMock, for: Amanogawa.HealthCheck)
+Mox.defmock(Amanogawa.Alerting.NotifierMock, for: Amanogawa.Alerting.Notifier)
+Mox.defmock(Amanogawa.Alerting.ClockMock, for: Amanogawa.Alerting.Clock)

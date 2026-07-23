@@ -47,20 +47,11 @@ defmodule AmanogawaWeb.Layouts do
   def app(assigns) do
     ~H"""
     <div class="flex h-dvh flex-col overflow-hidden">
-      <header
-        id="topbar"
-        class="flex h-12 shrink-0 items-center justify-between border-b border-border bg-surface px-4"
-      >
-        <a href="/" class="text-topbar font-topbar tracking-wide text-text">Amanogawa</a>
-        <nav class="flex items-center gap-4 text-topbar text-text-muted">
-          <%!-- Placeholders: Sources and About pages arrive in a later feature. --%>
-          <span>{gettext("Sources")}</span>
-          <span>{gettext("À propos")}</span>
-        </nav>
-      </header>
+      <.topbar />
 
       <main id="map-zone" class="relative min-h-0 flex-1">
         {render_slot(@inner_block)}
+        <.legal_footer id="legal-footer" class="absolute inset-x-0 bottom-0 bg-surface/90" />
       </main>
 
       <footer
@@ -73,6 +64,92 @@ defmodule AmanogawaWeb.Layouts do
     </div>
 
     <.flash_group flash={@flash} />
+    """
+  end
+
+  @doc """
+  Renders the static content layout used by `AmanogawaWeb.PageController`
+  (issue #027: Sources/About, legal notice, privacy policy). Unlike `app/1`
+  above, `main` scrolls normally: these are ordinary text pages, not the
+  full-screen map.
+  """
+  attr :page_title, :string, required: true
+
+  slot :inner_block, required: true
+
+  def page(assigns) do
+    ~H"""
+    <div class="flex h-dvh flex-col overflow-hidden">
+      <.topbar />
+
+      <main class="min-h-0 flex-1 overflow-y-auto">
+        <div class="mx-auto max-w-3xl px-4 py-10 text-text">
+          <h1 class="mb-6 text-2xl font-semibold">{@page_title}</h1>
+          {render_slot(@inner_block)}
+        </div>
+
+        <.legal_footer id="legal-footer" class="border-t border-border bg-surface" />
+      </main>
+    </div>
+    """
+  end
+
+  @doc """
+  The topbar shared by `app/1` and `page/1`: the site name plus the
+  Sources/About links (issue #027, wired to the combined `/sources` page:
+  a single page serves as both the exhaustive source list and the "About"
+  page, so both entries point there).
+  """
+  def topbar(assigns) do
+    ~H"""
+    <header
+      id="topbar"
+      class="flex h-12 shrink-0 items-center justify-between border-b border-border bg-surface px-4"
+    >
+      <a href="/" class="text-topbar font-topbar tracking-wide text-text">Amanogawa</a>
+      <nav class="flex items-center gap-4 text-topbar text-text-muted">
+        <.link href={~p"/sources"} class="hover:text-text">{gettext("Sources")}</.link>
+        <.link href={~p"/sources"} class="hover:text-text">{gettext("À propos")}</.link>
+      </nav>
+    </header>
+    """
+  end
+
+  @doc """
+  The site-wide legal footer (issue #027): links to the three static
+  pages plus the AGPL-3.0 source-offer notice (article 13 AGPL, satisfied
+  by linking the deployed service to its own source repository).
+
+  Rendered twice: as the real page footer on the static pages (`page/1`),
+  and as a compact overlay docked to the bottom of the map viewport on the
+  full-screen app layout (`app/1`), so the same attributions and legal
+  links stay reachable from the home page without adding a fourth
+  fixed-height flex zone to the `h-dvh` layout.
+  """
+  attr :id, :string, required: true
+  attr :class, :string, default: nil
+
+  def legal_footer(assigns) do
+    ~H"""
+    <footer id={@id} class={["px-4 py-2 text-xs text-text-muted", @class]}>
+      <nav class="mx-auto flex max-w-3xl flex-wrap items-center gap-x-4 gap-y-1">
+        <.link href={~p"/sources"} class="hover:text-text">{gettext("Sources")}</.link>
+        <.link href={~p"/mentions-legales"} class="hover:text-text">
+          {gettext("Mentions légales")}
+        </.link>
+        <.link href={~p"/confidentialite"} class="hover:text-text">
+          {gettext("Confidentialité")}
+        </.link>
+        <a
+          href="https://github.com/Thibault-Santonja/Amanogawa"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="hover:text-text"
+        >
+          {gettext("Code source sous licence AGPL-3.0")}
+        </a>
+      </nav>
+    </footer>
     """
   end
 

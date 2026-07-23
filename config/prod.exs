@@ -8,13 +8,20 @@ import Config
 config :amanogawa, AmanogawaWeb.Endpoint, cache_static_manifest: "priv/static/cache_manifest.json"
 
 # Force using SSL in production. This also sets the "strict-security-transport" header,
-# known as HSTS. If you have a health check endpoint, you may want to exclude it below.
-# Note `:force_ssl` is required to be set at compile-time.
+# known as HSTS. Note `:force_ssl` is required to be set at compile-time.
+#
+# `/health` (issue #026) is excluded: kamal-proxy probes it directly over
+# the private Docker network (plain HTTP, no `x-forwarded-proto` header),
+# never through the public HTTPS edge it terminates TLS for itself.
+# Without this exclusion, `Plug.SSL` would see what looks like a bare HTTP
+# request and redirect the probe to `https://`, which kamal-proxy's own
+# healthcheck client does not follow, permanently marking the container
+# unhealthy.
 config :amanogawa, AmanogawaWeb.Endpoint,
   force_ssl: [
     rewrite_on: [:x_forwarded_proto],
     exclude: [
-      # paths: ["/health"],
+      paths: ["/health"],
       hosts: ["localhost", "127.0.0.1"]
     ]
   ]

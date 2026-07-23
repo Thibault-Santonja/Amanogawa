@@ -1,0 +1,89 @@
+# Kamal 2 deployment configuration (issue #026).
+#
+# This file is the official self-hosting entry point (ADR 0008, AGPL-3.0):
+# it stays generic and holds no value specific to any one operator's VPS.
+# Every PLACEHOLDER below (marked explicitly) MUST be replaced before a
+# real `kamal setup`/`kamal deploy`; see docs/ops/deploy.md for the exact
+# list and the reasoning behind each one. No deployment was attempted from
+# this repository state: no server exists to deploy to yet.
+
+service: amanogawa
+
+# PLACEHOLDER: push to your own registry and account. ghcr.io is used
+# here because it is free for public repositories and ties directly into
+# GitHub Actions credentials; Docker Hub or a self-hosted registry work
+# identically, only `server`/`username` change.
+image: ghcr.io/PLACEHOLDER_GITHUB_USER/amanogawa
+
+# PLACEHOLDER: the VPS this application runs on. A single server is
+# enough for the MVP (one Hetzner VPS, mutualized with other projects per
+# `.claude/memory/tech-stack.md`); add more entries under `web:` only if
+# the application is ever scaled beyond one host.
+servers:
+  web:
+    - PLACEHOLDER_VPS_HOST_OR_IP
+
+# kamal-proxy: TLS termination (Let's Encrypt, automatic renewal) and the
+# healthcheck-gated, zero-downtime cutover between the old and the new
+# container (issue #026's own "Zero downtime" requirement: this
+# healthcheck, together with the release's backward-compatible migrations,
+# is what makes `kamal deploy` safe to run against live traffic).
+proxy:
+  ssl: true
+  # PLACEHOLDER: the public hostname this deployment serves. Must match
+  # PHX_HOST below and the DNS record pointed at the VPS.
+  host: amanogawa.example
+  healthcheck:
+    path: /health
+    interval: 3
+    timeout: 5
+
+registry:
+  server: ghcr.io
+  # PLACEHOLDER: the account that owns the image above.
+  username: PLACEHOLDER_GITHUB_USER
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+
+# Plain, non-secret configuration (issue #026's own `clear`/`secret` split,
+# `.claude/rules/security.md`: "no secrets in the repo, ever"). Everything
+# here is read by `config/runtime.exs` exactly as in any other environment
+# variable-driven deployment; nothing is Kamal-specific in the app code.
+env:
+  clear:
+    PHX_HOST: amanogawa.example
+    PORT: "4000"
+    POOL_SIZE: "10"
+  secret:
+    - SECRET_KEY_BASE
+    - DATABASE_URL
+
+# PostGIS accessory (issue #026): same image family as docker-compose.yml
+# and the CI workflow, so the extension and PostgreSQL major version
+# match development and test exactly. No `port:` mapping is declared on
+# purpose: the accessory is reachable by the application container only
+# over Kamal's own private Docker network on this host, never on a
+# publicly routable port (`.claude/rules/security.md`). An operator who
+# needs a `psql` shell uses `kamal accessory exec db "psql -U postgres"`,
+# never a published port.
+accessories:
+  db:
+    image: postgis/postgis:18-3.6
+    host: PLACEHOLDER_VPS_HOST_OR_IP
+    env:
+      clear:
+        POSTGRES_DB: amanogawa_prod
+      secret:
+        - POSTGRES_PASSWORD
+    directories:
+      # PostgreSQL 18 images keep PGDATA under /var/lib/postgresql
+      # (mirrors docker-compose.yml's own volume mount): the whole
+      # directory is the persistent, versioned data directory.
+      - data:/var/lib/postgresql
+
+# Zero-downtime deploy relies on three things together (docs/ops/deploy.md
+# has the full explanation): this healthcheck, kamal-proxy only routing
+# traffic to a container once it passes, and every migration staying
+# backward-compatible with the previous release (Amanogawa.Release.migrate/0
+# runs automatically on every container boot, rel/overlays/bin/
+# docker-entrypoint).

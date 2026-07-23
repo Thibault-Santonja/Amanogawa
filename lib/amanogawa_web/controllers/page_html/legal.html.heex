@@ -1,0 +1,48 @@
+<Layouts.page page_title={@page_title}>
+  <.section title={gettext("Éditeur du site")}>
+    <p>{gettext("Amanogawa est édité par Thibault Santonja, à titre personnel.")}</p>
+    <p>{gettext("Contact")} : thibault.santonja@gmail.com</p>
+    <p>{gettext("Directeur de la publication : Thibault Santonja.")}</p>
+  </.section>
+
+  <.section title={gettext("Hébergeur")}>
+    <p>{gettext("L'application est hébergée par :")}</p>
+    <p>
+      Hetzner Online GmbH<br /> Industriestr. 25<br /> 91710 Gunzenhausen<br />
+      {gettext("Allemagne")}
+    </p>
+    <p>
+      <.external_link href="https://www.hetzner.com">hetzner.com</.external_link>
+    </p>
+  </.section>
+
+  <.section title={gettext("Licence du code source")}>
+    <p>
+      {gettext(
+        "Le code source d'Amanogawa est publié sous licence AGPL-3.0 (GNU Affero General Public License, version 3). Cette licence impose notamment, pour tout service en réseau utilisant une version modifiée du code, la mise à disposition du code source correspondant (article 13 de l'AGPL)."
+      )}
+    </p>
+    <p>
+      <.external_link href="https://github.com/Thibault-Santonja/Amanogawa">
+        {gettext("Dépôt du code source")}
+      </.external_link>
+      ·
+      <.external_link href="https://www.gnu.org/licenses/agpl-3.0.html">
+        {gettext("Texte de la licence AGPL-3.0")}
+      </.external_link>
+    </p>
+  </.section>
+
+  <.section title={gettext("Sources des données")}>
+    <p>
+      {gettext(
+        "Les licences des données affichées (Wikidata, Wikipedia, Cliopatria, historical-basemaps, fond de carte) sont détaillées sur la page Sources."
+      )}
+    </p>
+    <p>
+      <.link href={~p"/sources"} class="underline hover:text-accent">
+        {gettext("Voir la page Sources")}
+      </.link>
+    </p>
+  </.section>
+</Layouts.page>
