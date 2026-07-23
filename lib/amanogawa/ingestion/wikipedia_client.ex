@@ -55,16 +55,19 @@ defmodule Amanogawa.Ingestion.WikipediaClient do
 
   @doc """
   Extracts the plain article title from a stored Wikipedia article URL: the
-  last path segment, URL-decoded.
+  URL's path with its `/wiki/` prefix trimmed, URL-decoded. Working on the
+  parsed path (never on "the last `/`-separated segment") preserves titles
+  that legitimately contain a slash, like `Naissance/Fêtes`.
 
-  Pure and total: never raises, whatever segment shape the URL carries.
+  Pure and total: never raises, whatever shape the URL carries.
   `URI.decode/1` itself never raises on malformed percent-encoding (it
   passes an invalid escape through unchanged); the real failure mode is a
   percent-encoded byte sequence that decodes to something that is not
   valid UTF-8 (e.g. a raw, non-UTF-8 `%FF`). Wikidata's `schema:about`
   article URLs are always well-formed absolute URLs in practice, but this
   stays defensive against that case by falling back to the raw (still
-  usable) segment rather than handing the worker a corrupt title.
+  usable) segment rather than handing the worker a corrupt title. A URL
+  without a `/wiki/` path falls back to the last path segment.
 
       iex> Amanogawa.Ingestion.WikipediaClient.title_from_wiki_url("https://fr.wikipedia.org/wiki/Bataille_de_Marathon")
       "Bataille_de_Marathon"
@@ -75,16 +78,24 @@ defmodule Amanogawa.Ingestion.WikipediaClient do
       iex> Amanogawa.Ingestion.WikipediaClient.title_from_wiki_url("https://fr.wikipedia.org/wiki/Charles_%27le_T%C3%A9m%C3%A9raire%27")
       "Charles_'le_Téméraire'"
 
+      iex> Amanogawa.Ingestion.WikipediaClient.title_from_wiki_url("https://fr.wikipedia.org/wiki/Sege/Histoire_d%27un_titre")
+      "Sege/Histoire_d'un_titre"
+
   """
   @spec title_from_wiki_url(String.t()) :: String.t()
   def title_from_wiki_url(wiki_url) when is_binary(wiki_url) do
-    segment = last_segment(wiki_url)
+    segment = title_segment(wiki_url)
     decoded = URI.decode(segment)
 
     if String.valid?(decoded), do: decoded, else: segment
   end
 
-  defp last_segment(wiki_url), do: wiki_url |> String.split("/") |> List.last()
+  defp title_segment(wiki_url) do
+    case URI.parse(wiki_url).path do
+      "/wiki/" <> title -> title
+      path -> (path || wiki_url) |> String.split("/") |> List.last() || ""
+    end
+  end
 
   defmodule Summary do
     @moduledoc """
@@ -95,6 +106,8 @@ defmodule Amanogawa.Ingestion.WikipediaClient do
     `page/summary` JSON shape, reused by `Amanogawa.Ingestion.
     WikipediaClient.Rest` and by its tests.
     """
+
+    alias Amanogawa.Ingestion.WikimediaUrl
 
     @enforce_keys [:title, :extract, :article_url, :lang]
     defstruct [:title, :description, :extract, :thumbnail_url, :article_url, :lang]
@@ -108,6 +121,8 @@ defmodule Amanogawa.Ingestion.WikipediaClient do
             lang: :fr | :en
           }
 
+    @max_extract_length 8192
+
     @doc """
     Decodes a `page/summary` response body into a `Summary`.
 
@@ -117,6 +132,13 @@ defmodule Amanogawa.Ingestion.WikipediaClient do
     display markup out of stored data) and a desktop `content_urls.desktop.page`
     (the canonical article URL, mandatory for CC BY-SA attribution).
     `thumbnail.source` is optional: absent when the article has no image.
+
+    Input bounds: `extract` is truncated to #{@max_extract_length}
+    characters (an extract is a summary, anything longer is an anomaly not
+    worth failing the event over); `thumbnail.source` must satisfy
+    `Amanogawa.Ingestion.WikimediaUrl.valid?/1` (https, Wikimedia host,
+    bounded length) or the field is dropped (`nil`), never the whole
+    summary.
 
     Returns `{:error, reason}` when the document does not parse as JSON, or
     parses but is missing one of the required fields.
@@ -137,8 +159,8 @@ defmodule Amanogawa.Ingestion.WikipediaClient do
            %__MODULE__{
              title: title,
              description: Map.get(decoded, "description"),
-             extract: extract,
-             thumbnail_url: get_in(decoded, ["thumbnail", "source"]),
+             extract: truncate_extract(extract),
+             thumbnail_url: thumbnail_url(decoded),
              article_url: article_url,
              lang: lang
            }}
@@ -151,5 +173,21 @@ defmodule Amanogawa.Ingestion.WikipediaClient do
     def decode(%{} = _decoded, _lang), do: {:error, :invalid_summary_shape}
 
     defp article_url(decoded), do: get_in(decoded, ["content_urls", "desktop", "page"])
+
+    defp truncate_extract(extract) do
+      if String.length(extract) > @max_extract_length do
+        String.slice(extract, 0, @max_extract_length)
+      else
+        extract
+      end
+    end
+
+    # A thumbnail that is not an https Wikimedia URL (or is absurdly long)
+    # is dropped, never a reason to lose the summary: the extract is the
+    # data, the image is decoration.
+    defp thumbnail_url(decoded) do
+      url = get_in(decoded, ["thumbnail", "source"])
+      if WikimediaUrl.valid?(url), do: url, else: nil
+    end
   end
 end

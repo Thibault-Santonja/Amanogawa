@@ -64,6 +64,11 @@ defmodule Amanogawa.Atlas do
   enrichment columns (Wikipedia extracts) are preserved: see
   `@wikidata_columns`.
 
+  Rows are deduplicated on `:qid` (first occurrence wins) before insertion:
+  PostgreSQL's `ON CONFLICT DO UPDATE` refuses to affect the same row twice
+  within one statement, so a page containing the same QID twice (a hostile
+  or buggy endpoint) must never crash the batch.
+
   `insert_all/3` bypasses changesets by design; callers are expected to
   hand in already-normalized data (as produced by the ingestion SPARQL
   decoder). Database constraints (QID format is not enforced here, only
@@ -74,6 +79,7 @@ defmodule Amanogawa.Atlas do
     upserted =
       events
       |> Enum.map(&prepare_event_row/1)
+      |> Enum.uniq_by(& &1.qid)
       |> Enum.chunk_every(@max_batch_size)
       |> Enum.reduce(0, &(insert_event_batch(&1) + &2))
 
@@ -89,7 +95,9 @@ defmodule Amanogawa.Atlas do
   routinely processes events before some of their relations exist locally.
   Insertion is idempotent: the unique `(source_id, target_id, type)` index
   combined with `on_conflict: :nothing` means replaying a batch creates no
-  duplicate.
+  duplicate. Rows are also deduplicated on `(source_id, target_id, type)`
+  within the batch itself, so the `created` count stays exact when a page
+  repeats a pair.
   """
   @spec upsert_event_links([
           %{source_qid: String.t(), target_qid: String.t(), type: EventLink.link_type()}
@@ -114,6 +122,14 @@ defmodule Amanogawa.Atlas do
   def get_event_by_qid(qid) do
     Repo.get_by(Event, qid: qid)
   end
+
+  @doc """
+  Flattens an `Amanogawa.HistoricalDate` (or `nil`) into `begin_*`/`end_*`
+  attributes for `upsert_events/1` rows. Delegates to
+  `Amanogawa.Atlas.Event.flatten_date/2`, exposed here so other contexts
+  (Ingestion) never reach into Atlas internals.
+  """
+  defdelegate flatten_date(date, group), to: Event
 
   @doc "Maps every given QID known locally to its internal id."
   @spec event_ids_by_qids([String.t()]) :: %{String.t() => Ecto.UUID.t()}
@@ -255,7 +271,12 @@ defmodule Amanogawa.Atlas do
         end
       end)
 
-    {Enum.reverse(rows), skipped}
+    rows =
+      rows
+      |> Enum.reverse()
+      |> Enum.uniq_by(&{&1.source_id, &1.target_id, &1.type})
+
+    {rows, skipped}
   end
 
   defp prepare_event_row(attrs) do

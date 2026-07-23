@@ -110,11 +110,27 @@ an HTML error page instead of the expected
 `application/sparql-results+json`, as a generic `502 Bad Gateway` (nginx)
 page. Constructed by hand on 2026-07-23.
 
+## Date token shape (all event fixtures below)
+
+`Amanogawa.Ingestion.Wikidata.Templates.events_page/1` samples each date
+bound as a *single* `time|precision|calendar` token
+(`SAMPLE(CONCAT(STR(?t), "|", STR(?p), "|", STR(?c)))` per bound,
+`beginToken`/`endToken`), never as three independent `SAMPLE`s: over an
+event with several `P585` statements, independent samples can mix the time
+of one statement with the precision of another. The event fixtures below
+were originally captured with the pre-token query shape (three separate
+`beginTime`/`beginPrecision`/`beginCalendar` variables) and mechanically
+re-serialized on 2026-07-23 into the token shape, concatenating each
+binding's own three values with `|` (exactly what the endpoint's `CONCAT`
+produces for a single statement); no data value was altered.
+
 ## events_page.json (#009)
 
 Captured 2026-07-23 from `https://qlever.dev/api/wikidata`, by rendering
 and running the exact query `Amanogawa.Ingestion.Wikidata.Templates.
-events_page/1` produces for the slice `[178000, 179300)`:
+events_page/1` produces for the slice `[178000, 179300)` (pre-token query
+shape shown below for provenance; the stored file carries the equivalent
+token shape, see "Date token shape" above):
 
 ```sparql
 PREFIX wd: <http://www.wikidata.org/entity/>
@@ -184,16 +200,36 @@ referred to the battle of Marathon as `Q46335`, which is in fact
 "typewriter" on Wikidata. The real battle of Marathon is `Q31900`; every
 reference in code, tests and docs now uses `Q31900`.
 
+## mixed_precision_begin.json
+
+Not captured: constructed by hand on 2026-07-23 as the non-regression
+fixture for the single-token date sampling (see "Date token shape" above).
+It represents the battle of Marathon (`Q31900`) as an event carrying *two*
+`P585` statements of different precisions on Wikidata:
+
+  * statement A: `-0489-09-07T00:00:00Z`, precision 11 (day), Julian
+    (`Q1985786`), the statement `marathon.json` carries;
+  * statement B: `-0490-01-01T00:00:00Z`, precision 9 (year), Gregorian
+    (`Q1985727`).
+
+The fixture's `beginToken` is statement B's complete triplet
+(`-0490-01-01T00:00:00Z|9|http://www.wikidata.org/entity/Q1985727`): the
+regression test asserts the decoded date is *entirely* statement B (year
+`-490`, precision 9, Gregorian, no month/day). Under the pre-token query
+shape, three independent `SAMPLE`s could return statement B's time with
+statement A's precision, decoding to the incoherent "day-precise January
+1, 490 BCE, Julian" this fixture guards against.
+
 ## hostile_bindings.json (#009)
 
 Not captured: each row is a data-quality failure `EventDecoder.decode/1`
 must reject without crashing, which QLever does not spontaneously produce
 for a syntactically valid query. Constructed by hand on 2026-07-23,
-`events_page.json`-shaped, one row per failure mode: a date missing
-`beginPrecision`, a `coordDirect` WKT literal that is not a `POINT(...)`,
-an entity URI that is a statement node rather than a plain QID entity
-(`http://www.wikidata.org/entity/statement/Q31900-...`), and a `beginTime`
-literal that does not match the RDF time format at all.
+`events_page.json`-shaped, one row per failure mode: a date token missing
+its precision part (`time||calendar`), a `coordDirect` WKT literal that is
+not a `POINT(...)`, an entity URI that is a statement node rather than a
+plain QID entity (`http://www.wikidata.org/entity/statement/Q31900-...`),
+and a token whose time part does not match the RDF time format at all.
 
 ## links_page.json (#011)
 

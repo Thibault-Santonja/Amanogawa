@@ -14,8 +14,27 @@ defmodule Amanogawa.AtlasTest do
       assert {:ok, %{upserted: 2}} = Atlas.upsert_events(events)
       assert Atlas.count_events() == 2
 
+      first_rows = all_events_comparable()
+
       assert {:ok, %{upserted: 2}} = Atlas.upsert_events(events)
       assert Atlas.count_events() == 2
+
+      # The full structs must survive the replay unchanged; only updated_at
+      # (touched by the upsert) may differ.
+      assert all_events_comparable() == first_rows
+    end
+
+    test "a batch repeating the same QID is deduplicated instead of crashing the statement" do
+      events = [
+        event_attrs(qid: "Q1", label_fr: "Premier"),
+        event_attrs(qid: "Q1", label_fr: "Doublon"),
+        event_attrs(qid: "Q2")
+      ]
+
+      assert {:ok, %{upserted: 2}} = Atlas.upsert_events(events)
+      assert Atlas.count_events() == 2
+      # First occurrence wins.
+      assert Atlas.get_event_by_qid("Q1").label_fr == "Premier"
     end
 
     test "a modified label updates the existing row instead of duplicating it" do
@@ -79,6 +98,19 @@ defmodule Amanogawa.AtlasTest do
       assert {:ok, %{created: 0, skipped_missing: 0}} = Atlas.upsert_event_links(links)
       assert Atlas.count_event_links() == 1
     end
+
+    test "a batch repeating the same pair is deduplicated within the batch (exact created count)" do
+      event_fixture(qid: "Q1")
+      event_fixture(qid: "Q2")
+
+      links = [
+        %{source_qid: "Q1", target_qid: "Q2", type: :part_of},
+        %{source_qid: "Q1", target_qid: "Q2", type: :part_of}
+      ]
+
+      assert {:ok, %{created: 1, skipped_missing: 0}} = Atlas.upsert_event_links(links)
+      assert Atlas.count_event_links() == 1
+    end
   end
 
   describe "get_event_by_qid/1 and event_ids_by_qids/1" do
@@ -105,6 +137,16 @@ defmodule Amanogawa.AtlasTest do
     test "events.geom has a GiST index" do
       assert index_exists?("atlas", "events", "gist")
     end
+  end
+
+  # Every event row stripped of what a legitimate replay may touch, keyed
+  # by qid: only updated_at changes on an idempotent upsert.
+  defp all_events_comparable do
+    Event
+    |> Repo.all()
+    |> Map.new(fn event ->
+      {event.qid, event |> Map.from_struct() |> Map.drop([:__meta__, :updated_at])}
+    end)
   end
 
   defp index_exists?(schema, table, using) do

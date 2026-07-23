@@ -36,6 +36,27 @@ defmodule Amanogawa.Ingestion.Workers.EnrichSummaries do
   rate-limited event and everything after it in the batch are naturally
   retried once the job resumes, because they are still eligible.
 
+  ## Other fetch errors and the non-progression guard
+
+  A *permanent* per-event error (an HTTP 4xx other than 429, or a
+  `:decode_error`: retrying the exact same request cannot succeed) is
+  handled like a `:not_found`: `extract_fetched_at` is stamped
+  (`Amanogawa.Atlas.mark_summary_attempt/1`) so the event leaves the
+  selection until the cache window expires, instead of being re-selected
+  and re-failed on every batch forever.
+
+  A *transient* error (timeout, transport failure, 5xx) leaves the event
+  untouched, eligible again on the next batch. To keep persistent
+  transient errors from looping forever (the same events re-selected, the
+  same failures, no state advancing), a batch that makes no progression at
+  all (no summary stored, no attempt stamped, nothing rate-limited) closes
+  the run `:failed` with an explicit `last_error`: the next selection would
+  be identical, so chaining another batch could only spin.
+
+  A crash on the job's final Oban attempt closes the run `:failed` before
+  re-raising (`Amanogawa.Ingestion.Workers.RunGuard`), so no exception can
+  leave an orphaned `:running` run behind.
+
   ## `dry_run`
 
   Walks the chain (selection, fetch, counting) for exactly one batch and
@@ -52,10 +73,10 @@ defmodule Amanogawa.Ingestion.Workers.EnrichSummaries do
   require Logger
 
   alias Amanogawa.Atlas
-  alias Amanogawa.Atlas.Event
   alias Amanogawa.Ingestion.SyncRun
   alias Amanogawa.Ingestion.WikipediaClient
   alias Amanogawa.Ingestion.WikipediaClient.Summary
+  alias Amanogawa.Ingestion.Workers.RunGuard
   alias Amanogawa.Repo
 
   @default_batch_size 50
@@ -64,9 +85,13 @@ defmodule Amanogawa.Ingestion.Workers.EnrichSummaries do
 
   @impl Oban.Worker
   @spec perform(Oban.Job.t()) :: :ok | {:snooze, pos_integer()}
-  def perform(%Oban.Job{args: %{"sync_run_id" => sync_run_id} = args}) do
+  def perform(%Oban.Job{args: %{"sync_run_id" => sync_run_id} = args} = job) do
     sync_run = Repo.get!(SyncRun, sync_run_id)
     run(sync_run, args)
+  rescue
+    exception ->
+      RunGuard.close_failed_on_final_attempt(job, exception, __MODULE__)
+      reraise exception, __STACKTRACE__
   end
 
   defp run(%SyncRun{status: :running} = sync_run, args) do
@@ -102,7 +127,7 @@ defmodule Amanogawa.Ingestion.Workers.EnrichSummaries do
   end
 
   defp process_batch(sync_run, events, limit, dry_run, max_age_days) do
-    {deltas, snoozed_for} = enrich_events(events, dry_run)
+    {deltas, progressed, snoozed_for} = enrich_events(events, dry_run)
 
     new_counts = SyncRun.merge_counts(sync_run.counts, deltas)
 
@@ -119,18 +144,38 @@ defmodule Amanogawa.Ingestion.Workers.EnrichSummaries do
         close_run(updated_run, :completed)
         :ok
 
+      not progressed ->
+        # Non-progression guard (see moduledoc): every event of the batch
+        # hit a transient error, nothing was written, the next selection
+        # would return the exact same events. Chaining would loop forever.
+        close_run(
+          updated_run,
+          :failed,
+          "no progression in batch: #{length(events)} event(s) all failed transiently; " <>
+            "the same events would be re-selected, refusing to loop"
+        )
+
+        :ok
+
       true ->
         enqueue_next(updated_run.id, limit, dry_run, max_age_days)
     end
   end
 
   # Stops at the first rate-limited event: `Enum.reduce_while/3` never fires
-  # another request once the endpoint has said "slow down".
+  # another request once the endpoint has said "slow down". `progressed`
+  # tracks whether at least one event advanced the run's persistent state
+  # (summary stored or attempt stamped); in dry_run mode nothing is ever
+  # written, so every handled event counts as progression there (the run
+  # closes after one batch anyway).
   defp enrich_events(events, dry_run) do
-    Enum.reduce_while(events, {%{}, nil}, fn event, {deltas, nil} ->
+    Enum.reduce_while(events, {%{}, false, nil}, fn event, {deltas, progressed, nil} ->
       case enrich_event(event, dry_run) do
-        {:ok, delta} -> {:cont, {SyncRun.merge_counts(deltas, delta), nil}}
-        {:rate_limited, retry_after} -> {:halt, {deltas, retry_after || default_snooze_seconds()}}
+        {:ok, delta, event_progressed} ->
+          {:cont, {SyncRun.merge_counts(deltas, delta), progressed or event_progressed, nil}}
+
+        {:rate_limited, retry_after} ->
+          {:halt, {deltas, true, retry_after || default_snooze_seconds()}}
       end
     end)
   end
@@ -141,28 +186,53 @@ defmodule Amanogawa.Ingestion.Workers.EnrichSummaries do
     case wikipedia_client().fetch_summary(lang, title) do
       {:ok, summary} ->
         unless dry_run, do: store_summary!(event, lang, summary)
-        {:ok, %{"fetched" => 1, enriched_counter(lang) => 1}}
+        {:ok, %{"fetched" => 1, enriched_counter(lang) => 1}, true}
 
       {:error, :not_found} ->
         unless dry_run, do: mark_attempt!(event)
-        {:ok, %{"fetched" => 1, "not_found" => 1}}
+        {:ok, %{"fetched" => 1, "not_found" => 1}, true}
 
       {:error, {:rate_limited, retry_after}} ->
         {:rate_limited, retry_after}
 
       {:error, reason} ->
-        Logger.warning("EnrichSummaries fetch failed for #{event.qid}: #{inspect(reason)}")
-        {:ok, %{"fetched" => 1, "errors" => 1}}
+        handle_fetch_error(event, reason, dry_run)
     end
   end
 
+  defp handle_fetch_error(event, reason, dry_run) do
+    if permanent_error?(reason) do
+      # Stamping the attempt defers the event for the whole cache window:
+      # retrying an unrecoverable request every batch would only re-fail.
+      Logger.warning(
+        "EnrichSummaries permanent fetch failure for #{event.qid}: #{inspect(reason)}"
+      )
+
+      unless dry_run, do: mark_attempt!(event)
+      {:ok, %{"fetched" => 1, "errors" => 1}, true}
+    else
+      Logger.warning("EnrichSummaries fetch failed for #{event.qid}: #{inspect(reason)}")
+      {:ok, %{"fetched" => 1, "errors" => 1}, dry_run}
+    end
+  end
+
+  # A 4xx (other than 429, surfaced as {:rate_limited, _} upstream) or an
+  # undecodable body cannot succeed on retry; everything else (timeout,
+  # transport, 5xx) legitimately can.
+  defp permanent_error?({:http_error, status}) when status in 400..499 and status != 429,
+    do: true
+
+  defp permanent_error?({:decode_error, _reason}), do: true
+  defp permanent_error?(_reason), do: false
+
   # fr is prioritized over en (ADR 0003); an event selected by
   # `Amanogawa.Atlas.list_events_to_enrich/1` always has at least one of the
-  # two.
-  defp fetch_target(%Event{wiki_url_fr: url}) when is_binary(url),
+  # two. Matched structurally (never on the struct name): Ingestion depends
+  # on the Atlas facade's contract, not on its internal schema module.
+  defp fetch_target(%{wiki_url_fr: url}) when is_binary(url),
     do: {:fr, WikipediaClient.title_from_wiki_url(url)}
 
-  defp fetch_target(%Event{wiki_url_en: url}) when is_binary(url),
+  defp fetch_target(%{wiki_url_en: url}) when is_binary(url),
     do: {:en, WikipediaClient.title_from_wiki_url(url)}
 
   defp store_summary!(event, lang, %Summary{} = summary) do

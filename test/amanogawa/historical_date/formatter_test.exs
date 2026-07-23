@@ -31,6 +31,27 @@ defmodule Amanogawa.HistoricalDate.FormatterTest do
     end
   end
 
+  describe "graceful degradation: precision promises more than the fields deliver" do
+    test "precision 11 without month or day degrades to the year level" do
+      date = HistoricalDate.new!(%{year: 1789, precision: 11})
+
+      assert Formatter.format(date, :fr) == "1789"
+      assert Formatter.format(date, :en) == "1789"
+    end
+
+    test "precision 11 with a month but no day degrades to the month level" do
+      date = HistoricalDate.new!(%{year: 1789, month: 7, precision: 11})
+
+      assert Formatter.format(date, :fr) == "juillet 1789"
+    end
+
+    test "precision 10 without a month degrades to the year level" do
+      date = HistoricalDate.new!(%{year: -489, precision: 10})
+
+      assert Formatter.format(date, :fr) == "490 av. J.-C."
+    end
+  end
+
   describe "year precision (9)" do
     test "formats a CE year plainly" do
       date = HistoricalDate.new!(%{year: 1789, precision: 9})

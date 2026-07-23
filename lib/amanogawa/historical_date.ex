@@ -18,6 +18,12 @@ defmodule Amanogawa.HistoricalDate do
   `precision == 10` (month), only `day` is forced to `nil`. This truncation
   happens in `changeset/2` itself, so it applies uniformly however a date is
   built.
+
+  `year` is bounded to `[-13_800_000_000, 3_000]`: from the age of the
+  universe (the deepest past Wikidata's precision-0 dates can describe) to
+  a near future no historical event can legitimately exceed. The bound is
+  enforced in `changeset/2`, so an out-of-range year is a validation error,
+  never a value that reaches storage.
   """
 
   use Ecto.Schema
@@ -34,6 +40,11 @@ defmodule Amanogawa.HistoricalDate do
           calendar: calendar()
         }
 
+  # Age of the universe (~13.8 billion years ago) down to a near future:
+  # the domain of every date this project can legitimately carry.
+  @min_year -13_800_000_000
+  @max_year 3_000
+
   @primary_key false
   embedded_schema do
     field :year, :integer
@@ -49,6 +60,7 @@ defmodule Amanogawa.HistoricalDate do
 
   Invariants enforced:
 
+    * `year` is required and must fall in `[#{@min_year}, #{@max_year}]`.
     * `precision` is required and must fall in `0..11`.
     * if `precision <= 9`, `month` and `day` are truncated to `nil`.
     * if `precision == 10`, `day` is truncated to `nil`.
@@ -60,6 +72,10 @@ defmodule Amanogawa.HistoricalDate do
     historical_date
     |> cast(attrs, [:year, :month, :day, :precision, :calendar])
     |> validate_required([:year, :precision])
+    |> validate_number(:year,
+      greater_than_or_equal_to: @min_year,
+      less_than_or_equal_to: @max_year
+    )
     |> validate_inclusion(:precision, 0..11)
     |> truncate_for_precision()
     |> validate_month_range()

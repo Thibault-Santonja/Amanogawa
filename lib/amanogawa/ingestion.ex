@@ -36,10 +36,9 @@ defmodule Amanogawa.Ingestion do
   """
   @spec start_events_import(keyword()) :: {:ok, SyncRun.t()} | {:error, :already_running}
   def start_events_import(opts \\ []) do
-    if running_sync_run?(:events) do
-      {:error, :already_running}
-    else
-      {:ok, do_start_events_import(opts)}
+    with {:ok, sync_run} <- start_sync_run(:events, opts) do
+      enqueue_import_job!(sync_run.id, sync_run.options)
+      {:ok, sync_run}
     end
   end
 
@@ -47,7 +46,9 @@ defmodule Amanogawa.Ingestion do
   Resumes a `:failed` events run from its existing `cursor`: reopens it to
   `:running` and enqueues a job referencing the same `sync_run_id`, so the
   worker resumes exactly where the failed run left off rather than
-  reprocessing already-imported pages.
+  reprocessing already-imported pages. The run's persisted start `options`
+  (`limit`, `dry_run`) are replayed as-is: a resumed dry run stays a dry
+  run.
 
   Runs with `:running` or `:completed` status cannot be resumed: returns
   `{:error, changeset}` (see `SyncRun.resume_changeset/1`).
@@ -56,7 +57,7 @@ defmodule Amanogawa.Ingestion do
   def resume_events_import(%SyncRun{} = sync_run) do
     case sync_run |> SyncRun.resume_changeset() |> Repo.update() do
       {:ok, resumed} ->
-        enqueue_import_job!(resumed.id, nil, false)
+        enqueue_import_job!(resumed.id, resumed.options)
         {:ok, resumed}
 
       {:error, changeset} ->
@@ -84,10 +85,9 @@ defmodule Amanogawa.Ingestion do
   """
   @spec start_links_import(keyword()) :: {:ok, SyncRun.t()} | {:error, :already_running}
   def start_links_import(opts \\ []) do
-    if running_sync_run?(:links) do
-      {:error, :already_running}
-    else
-      {:ok, do_start_links_import(opts)}
+    with {:ok, sync_run} <- start_sync_run(:links, opts) do
+      enqueue_links_job!(sync_run.id, sync_run.options)
+      {:ok, sync_run}
     end
   end
 
@@ -95,7 +95,9 @@ defmodule Amanogawa.Ingestion do
   Resumes a `:failed` links run from its existing `cursor`: reopens it to
   `:running` and enqueues a job referencing the same `sync_run_id`, so the
   worker resumes exactly where the failed run left off rather than
-  reprocessing already-imported pages.
+  reprocessing already-imported pages. The run's persisted start `options`
+  (`limit`, `dry_run`) are replayed as-is: a resumed dry run stays a dry
+  run.
 
   Runs with `:running` or `:completed` status cannot be resumed: returns
   `{:error, changeset}` (see `SyncRun.resume_changeset/1`).
@@ -104,7 +106,7 @@ defmodule Amanogawa.Ingestion do
   def resume_links_import(%SyncRun{} = sync_run) do
     case sync_run |> SyncRun.resume_changeset() |> Repo.update() do
       {:ok, resumed} ->
-        enqueue_links_job!(resumed.id, nil, false)
+        enqueue_links_job!(resumed.id, resumed.options)
         {:ok, resumed}
 
       {:error, changeset} ->
@@ -132,10 +134,11 @@ defmodule Amanogawa.Ingestion do
   """
   @spec start_summaries_enrichment(keyword()) :: {:ok, SyncRun.t()} | {:error, :already_running}
   def start_summaries_enrichment(opts \\ []) do
-    if running_sync_run?(:summaries) do
-      {:error, :already_running}
-    else
-      {:ok, do_start_summaries_enrichment(opts)}
+    max_age_days = Keyword.get(opts, :max_age_days)
+
+    with {:ok, sync_run} <- start_sync_run(:summaries, opts, %{"max_age_days" => max_age_days}) do
+      enqueue_enrich_job!(sync_run.id, sync_run.options)
+      {:ok, sync_run}
     end
   end
 
@@ -183,79 +186,67 @@ defmodule Amanogawa.Ingestion do
     |> Repo.one()
   end
 
-  defp do_start_summaries_enrichment(opts) do
-    limit = Keyword.get(opts, :limit)
-    dry_run = Keyword.get(opts, :dry_run, false)
-    max_age_days = Keyword.get(opts, :max_age_days)
+  # Creates the `:running` SyncRun row, persisting the start options
+  # (`limit`, `dry_run`, plus `extra_options` for kind-specific ones) so a
+  # later resume replays exactly what was asked. Concurrency is enforced
+  # twice: a friendly pre-check for the common case, and the
+  # `sync_runs_running_kind_index` partial unique index for the race two
+  # simultaneous starts would otherwise win together.
+  defp start_sync_run(kind, opts, extra_options \\ %{}) do
+    if running_sync_run?(kind) do
+      {:error, :already_running}
+    else
+      options =
+        Map.merge(
+          %{
+            "limit" => Keyword.get(opts, :limit),
+            "dry_run" => Keyword.get(opts, :dry_run, false)
+          },
+          extra_options
+        )
 
-    sync_run =
       %SyncRun{}
-      |> SyncRun.create_changeset(%{kind: :summaries})
-      |> Repo.insert!()
-
-    enqueue_enrich_job!(sync_run.id, limit, dry_run, max_age_days)
-
-    sync_run
+      |> SyncRun.create_changeset(%{kind: kind, options: options})
+      |> Repo.insert()
+      |> case do
+        {:ok, sync_run} -> {:ok, sync_run}
+        {:error, %Ecto.Changeset{}} -> {:error, :already_running}
+      end
+    end
   end
 
-  defp enqueue_enrich_job!(sync_run_id, limit, dry_run, max_age_days) do
+  defp enqueue_enrich_job!(sync_run_id, options) do
     {:ok, _job} =
-      %{
-        "sync_run_id" => sync_run_id,
-        "limit" => limit,
-        "dry_run" => dry_run,
-        "max_age_days" => max_age_days
-      }
+      options
+      |> job_args(sync_run_id)
       |> EnrichSummaries.new()
       |> Oban.insert()
 
     :ok
   end
 
-  defp do_start_events_import(opts) do
-    limit = Keyword.get(opts, :limit)
-    dry_run = Keyword.get(opts, :dry_run, false)
-
-    sync_run =
-      %SyncRun{}
-      |> SyncRun.create_changeset(%{kind: :events})
-      |> Repo.insert!()
-
-    enqueue_import_job!(sync_run.id, limit, dry_run)
-
-    sync_run
-  end
-
-  defp enqueue_import_job!(sync_run_id, limit, dry_run) do
+  defp enqueue_import_job!(sync_run_id, options) do
     {:ok, _job} =
-      %{"sync_run_id" => sync_run_id, "limit" => limit, "dry_run" => dry_run}
+      options
+      |> job_args(sync_run_id)
       |> ImportEvents.new()
       |> Oban.insert()
 
     :ok
   end
 
-  defp do_start_links_import(opts) do
-    limit = Keyword.get(opts, :limit)
-    dry_run = Keyword.get(opts, :dry_run, false)
-
-    sync_run =
-      %SyncRun{}
-      |> SyncRun.create_changeset(%{kind: :links})
-      |> Repo.insert!()
-
-    enqueue_links_job!(sync_run.id, limit, dry_run)
-
-    sync_run
-  end
-
-  defp enqueue_links_job!(sync_run_id, limit, dry_run) do
+  defp enqueue_links_job!(sync_run_id, options) do
     {:ok, _job} =
-      %{"sync_run_id" => sync_run_id, "limit" => limit, "dry_run" => dry_run}
+      options
+      |> job_args(sync_run_id)
       |> ImportLinks.new()
       |> Oban.insert()
 
     :ok
+  end
+
+  defp job_args(options, sync_run_id) when is_map(options) do
+    Map.put(options, "sync_run_id", sync_run_id)
   end
 
   defp running_sync_run?(kind) do

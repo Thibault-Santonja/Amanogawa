@@ -266,9 +266,7 @@ defmodule Mix.Tasks.Amanogawa.SyncTest do
   defp event_binding(qid) do
     %{
       "e" => uri("http://www.wikidata.org/entity/#{qid}"),
-      "beginTime" => literal("1900-01-01T00:00:00Z"),
-      "beginPrecision" => literal("9"),
-      "beginCalendar" => uri("http://www.wikidata.org/entity/Q1985727"),
+      "beginToken" => literal("1900-01-01T00:00:00Z|9|http://www.wikidata.org/entity/Q1985727"),
       "coordDirect" => literal("POINT(2.35 48.85)")
     }
   end

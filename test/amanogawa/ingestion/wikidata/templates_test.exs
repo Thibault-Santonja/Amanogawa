@@ -32,6 +32,37 @@ defmodule Amanogawa.Ingestion.Wikidata.TemplatesTest do
       refute query =~ "FILTER NOT EXISTS"
     end
 
+    test "regression: the P585 MINUS of the fallback branch comes AFTER the P580 triple of its group" do
+      # SPARQL 1.1 (18.2.2.6): MINUS applies to the solutions accumulated so
+      # far in its group. Rendered as the group's first element, it
+      # subtracts from an empty domain and is a no-op, so the fallback would
+      # also fire for events that do have a P585.
+      query = Templates.events_page(%{lower: 0, upper: 1000, limit: 500, offset: 0})
+
+      {p580_index, _} = :binary.match(query, "?e p:P580/psv:P580")
+      {minus_index, _} = :binary.match(query, "MINUS { ?e p:P585/psv:P585 ?anyBeginNode585 }")
+
+      assert p580_index < minus_index
+    end
+
+    test "samples the begin and end dates as single time|precision|calendar tokens" do
+      query = Templates.events_page(%{lower: 0, upper: 1000, limit: 500, offset: 0})
+
+      assert query =~ "(SAMPLE(?beginTokenV) AS ?beginToken)"
+      assert query =~ "(SAMPLE(?endTokenV) AS ?endToken)"
+
+      assert query =~
+               ~s[BIND(CONCAT(STR(?beginTimeRaw), "|", STR(?beginPrecisionRaw), "|", STR(?beginCalendarRaw)) AS ?beginTokenV)]
+
+      assert query =~
+               ~s[BIND(CONCAT(STR(?endTimeRaw), "|", STR(?endPrecisionRaw), "|", STR(?endCalendarRaw)) AS ?endTokenV)]
+
+      # No independent per-field SAMPLE remains: over an event with several
+      # date statements, they could mix parts of different statements.
+      refute query =~ "SAMPLE(?beginTimeRaw)"
+      refute query =~ "SAMPLE(?beginPrecisionRaw)"
+    end
+
     test "renders the requested slice bounds and pagination" do
       query = Templates.events_page(%{lower: 178_000, upper: 179_300, limit: 250, offset: 500})
 
@@ -150,7 +181,9 @@ defmodule Amanogawa.Ingestion.Wikidata.TemplatesTest do
                "BIND(xsd:integer(STRAFTER(STR(?source), \"http://www.wikidata.org/entity/Q\")) AS ?qidNum)"
 
       assert query =~ "?qidNum >= 178000 && ?qidNum < 179300"
-      assert query =~ "ORDER BY ?source"
+      # A total order (source, property, target): ordering on ?source alone
+      # leaves ties in endpoint-chosen order, making pagination unstable.
+      assert query =~ "ORDER BY ?source ?property ?target"
       assert query =~ "LIMIT 250"
       assert query =~ "OFFSET 500"
     end

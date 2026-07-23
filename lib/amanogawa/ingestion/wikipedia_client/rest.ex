@@ -13,15 +13,20 @@ defmodule Amanogawa.Ingestion.WikipediaClient.Rest do
   `Amanogawa/<version> (https://github.com/Thibault-Santonja/Amanogawa; thibault.santonja@gmail.com)`.
 
   On HTTP 429 the adapter retries with a bounded exponential backoff,
-  honoring the `Retry-After` header when present, up to `#{inspect(3)}`
-  attempts total; beyond that it returns `{:error, {:rate_limited, _}}`.
+  honoring the `Retry-After` header when present (clamped into
+  `[0, #{inspect(300)}]` seconds; a negative or non-numeric value is
+  ignored), up to `#{inspect(3)}` attempts total; beyond that it returns
+  `{:error, {:rate_limited, _}}`.
 
   This module is the only place where transport concerns (HTTP status
   codes, raw response bodies) are visible: every exit path returns either
   `{:ok, Summary.t()}` or one of the tagged errors of
-  `Amanogawa.Ingestion.WikipediaClient`. No exception ever crosses this
-  boundary; `try/rescue` is used here deliberately as this is a true system
-  boundary (`.claude/rules/architecture.md`).
+  `Amanogawa.Ingestion.WikipediaClient`. The `try/rescue` guarding the
+  response *decoding* path is deliberate and narrow: decoding an untrusted
+  body is the one place an out-of-contract document can raise, and this is
+  a true system boundary (`.claude/rules/architecture.md`). No other code
+  path hides behind a rescue: an unexpected exception elsewhere is a bug
+  and must surface as one.
   """
 
   @behaviour Amanogawa.Ingestion.WikipediaClient
@@ -43,13 +48,6 @@ defmodule Amanogawa.Ingestion.WikipediaClient.Rest do
           {:ok, Summary.t()} | {:error, Amanogawa.Ingestion.WikipediaClient.error()}
   def fetch_summary(lang, title) when lang in [:fr, :en] and is_binary(title) do
     attempt_fetch(lang, title, 1)
-  rescue
-    exception ->
-      Logger.error(
-        "Wikipedia summary response could not be decoded: #{Exception.message(exception)}"
-      )
-
-      {:error, {:decode_error, Exception.message(exception)}}
   end
 
   defp attempt_fetch(lang, title, attempt_number) do
@@ -121,18 +119,31 @@ defmodule Amanogawa.Ingestion.WikipediaClient.Rest do
     end
   end
 
+  # A negative or non-numeric Retry-After is ignored (nil: fall back to the
+  # exponential backoff); an absurdly large one is clamped to 300 seconds so
+  # a hostile or misconfigured endpoint cannot park the pipeline for hours.
   defp parse_retry_after(value) do
     case Integer.parse(value) do
-      {seconds, ""} -> seconds
+      {seconds, ""} when seconds >= 0 -> min(seconds, 300)
       _ -> nil
     end
   end
 
+  # Narrow rescue (see moduledoc): decoding an untrusted body is the one
+  # place an out-of-contract document can raise, converted here into the
+  # adapter's tagged error.
   defp decode_body(body, lang) do
     case Summary.decode(body, lang) do
       {:ok, summary} -> {:ok, summary}
       {:error, reason} -> {:error, {:decode_error, reason}}
     end
+  rescue
+    exception ->
+      Logger.error(
+        "Wikipedia summary response could not be decoded: #{Exception.message(exception)}"
+      )
+
+      {:error, {:decode_error, Exception.message(exception)}}
   end
 
   defp build_request(lang, title) do

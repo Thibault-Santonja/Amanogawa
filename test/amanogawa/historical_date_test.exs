@@ -125,6 +125,20 @@ defmodule Amanogawa.HistoricalDateTest do
       assert {:ok, %HistoricalDate{month: 12, day: 31}} =
                HistoricalDate.new(%{year: 2024, month: 12, day: 31, precision: 11})
     end
+
+    test "the year bounds [-13_800_000_000, 3000] are accepted, one step beyond is rejected" do
+      assert {:ok, _} = HistoricalDate.new(%{year: -13_800_000_000, precision: 0})
+      assert {:ok, _} = HistoricalDate.new(%{year: 3000, precision: 9})
+
+      assert {:error, %Ecto.Changeset{} = too_deep} =
+               HistoricalDate.new(%{year: -13_800_000_001, precision: 0})
+
+      assert {:error, %Ecto.Changeset{} = too_far} =
+               HistoricalDate.new(%{year: 3001, precision: 9})
+
+      assert Keyword.has_key?(too_deep.errors, :year)
+      assert Keyword.has_key?(too_far.errors, :year)
+    end
   end
 
   describe "new/1 and new!/1" do

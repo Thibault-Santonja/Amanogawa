@@ -212,7 +212,27 @@ defmodule Amanogawa.Ingestion.WikipediaClient.RestTest do
       assert {:error, {:rate_limited, nil}} = Rest.fetch_summary(:fr, "Bataille_de_Marathon")
     end
 
-    test "an extract of unusual length is stored integrally" do
+    test "429 with a negative Retry-After is ignored (treated as absent)" do
+      Req.Test.stub(Rest, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_header("retry-after", "-5")
+        |> Plug.Conn.send_resp(429, raw_wikipedia_fixture("rate_limited.json"))
+      end)
+
+      assert {:error, {:rate_limited, nil}} = Rest.fetch_summary(:fr, "Bataille_de_Marathon")
+    end
+
+    test "429 with an absurdly large Retry-After is clamped to 300 seconds" do
+      Req.Test.stub(Rest, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_header("retry-after", "86400")
+        |> Plug.Conn.send_resp(429, raw_wikipedia_fixture("rate_limited.json"))
+      end)
+
+      assert {:error, {:rate_limited, 300}} = Rest.fetch_summary(:fr, "Bataille_de_Marathon")
+    end
+
+    test "an extract of unusual length is stored integrally (below the 8192 bound)" do
       long_extract = String.duplicate("a", 5000)
 
       Req.Test.stub(Rest, fn conn ->

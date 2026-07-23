@@ -134,10 +134,23 @@ defmodule Amanogawa.HistoricalDate.WikidataTest do
       rdf_input = to_rdf_input(date)
       json_input = to_json_input(date)
 
-      assert {:ok, ^date} = Wikidata.from_rdf(rdf_input)
-      assert {:ok, ^date} = Wikidata.from_json(json_input)
+      # The Wikidata time-string format cannot express "month/day unknown"
+      # at precision 10/11 (unknown parts serialize as "01"), so a partial
+      # date round-trips to its 01-filled equivalent, never to nil parts.
+      expected = wire_representable(date)
+
+      assert {:ok, ^expected} = Wikidata.from_rdf(rdf_input)
+      assert {:ok, ^expected} = Wikidata.from_json(json_input)
     end
   end
+
+  defp wire_representable(%HistoricalDate{precision: 11} = date),
+    do: %{date | month: date.month || 1, day: date.day || 1}
+
+  defp wire_representable(%HistoricalDate{precision: 10} = date),
+    do: %{date | month: date.month || 1, day: nil}
+
+  defp wire_representable(date), do: date
 
   defp to_rdf_input(%HistoricalDate{} = date) do
     %{

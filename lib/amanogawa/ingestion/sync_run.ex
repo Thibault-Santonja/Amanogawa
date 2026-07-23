@@ -47,23 +47,35 @@ defmodule Amanogawa.Ingestion.SyncRun do
     field :cursor, :map
     field :last_error, :string
 
+    # Options the run was started with (`limit`, `dry_run`, ...), persisted
+    # so resuming a failed run replays exactly what was asked initially: a
+    # resumed dry run stays a dry run.
+    field :options, :map, default: %{}
+
     timestamps(type: :utc_datetime)
   end
 
   @doc """
   Starts a new run: `status` forced to `:running`, `started_at` to now,
-  `counts` to `%{}`. `attrs` may set `:kind` (required) and an initial
-  `:cursor` (defaults to whatever the schema/database default is, `nil`,
-  when omitted).
+  `counts` to `%{}`. `attrs` may set `:kind` (required), `:options` (the
+  start options to persist for resumption) and an initial `:cursor`
+  (defaults to whatever the schema/database default is, `nil`, when
+  omitted).
+
+  Carries the `sync_runs_running_kind_index` unique constraint (at most one
+  `:running` run per kind, enforced by a partial index): a concurrent
+  insert losing the race surfaces as a changeset error on `:kind` instead
+  of a raised constraint violation.
   """
   @spec create_changeset(t(), map()) :: Ecto.Changeset.t()
   def create_changeset(sync_run, attrs) do
     sync_run
-    |> cast(attrs, [:kind, :cursor])
+    |> cast(attrs, [:kind, :cursor, :options])
     |> validate_required([:kind])
     |> put_change(:status, :running)
     |> put_change(:started_at, utc_now())
     |> put_change(:counts, %{})
+    |> unique_running_constraint()
   end
 
   @doc """
@@ -97,7 +109,9 @@ defmodule Amanogawa.Ingestion.SyncRun do
   Reopens a `:failed` run to `:running`, clearing `last_error` and
   `finished_at`, so `Amanogawa.Ingestion.Workers.ImportEvents` can resume
   it from its existing `cursor` rather than restarting from scratch.
-  Rejected when the run is not currently `:failed`.
+  Rejected when the run is not currently `:failed`, or (through the
+  `sync_runs_running_kind_index` unique constraint) when another `:running`
+  run of the same kind already exists.
   """
   @spec resume_changeset(t()) :: Ecto.Changeset.t()
   def resume_changeset(sync_run) do
@@ -107,6 +121,7 @@ defmodule Amanogawa.Ingestion.SyncRun do
     |> put_change(:status, :running)
     |> put_change(:last_error, nil)
     |> put_change(:finished_at, nil)
+    |> unique_running_constraint()
   end
 
   @doc """
@@ -122,6 +137,13 @@ defmodule Amanogawa.Ingestion.SyncRun do
   @spec merge_counts(map(), map()) :: map()
   def merge_counts(counts, deltas) do
     Map.merge(counts, deltas, fn _key, current, delta -> current + delta end)
+  end
+
+  defp unique_running_constraint(changeset) do
+    unique_constraint(changeset, :kind,
+      name: :sync_runs_running_kind_index,
+      message: "a running sync run of this kind already exists"
+    )
   end
 
   defp require_current_status(changeset, expected, message) do

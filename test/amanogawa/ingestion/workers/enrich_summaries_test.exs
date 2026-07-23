@@ -252,7 +252,7 @@ defmodule Amanogawa.Ingestion.Workers.EnrichSummariesTest do
   end
 
   describe "integration: transient error" do
-    test "a non-rate-limit error is counted and logged, and leaves the event untouched (eligible again next batch)" do
+    test "a batch where every event fails transiently closes the run :failed instead of looping on the same selection" do
       event =
         event_fixture(%{
           wiki_url_fr: "https://fr.wikipedia.org/wiki/Bataille_de_Marathon",
@@ -270,16 +270,127 @@ defmodule Amanogawa.Ingestion.Workers.EnrichSummariesTest do
 
       assert log =~ "EnrichSummaries fetch failed for #{event.qid}"
 
-      # Not horodated (unlike :not_found): a transient error must not be
-      # deferred for the whole cache window, so the run stays running and
-      # would retry the same event on its next (chained) batch.
-      running = Ingestion.get_sync_run(sync_run.id)
-      assert running.status == :running
-      assert running.counts == %{"fetched" => 1, "errors" => 1}
+      # A transient error is not horodated (unlike :not_found): the event
+      # stays eligible. But a whole batch without any progression would
+      # re-select the exact same events forever, so the run closes :failed
+      # with an explicit error instead of chaining.
+      failed = Ingestion.get_sync_run(sync_run.id)
+      assert failed.status == :failed
+      assert failed.last_error =~ "no progression"
+      assert failed.counts == %{"fetched" => 1, "errors" => 1}
 
       untouched = Atlas.get_event_by_qid(event.qid)
       assert untouched.extract_fr == nil
       assert untouched.extract_fetched_at == nil
+    end
+
+    test "a batch mixing one success and one transient error keeps chaining (progression happened)" do
+      first =
+        event_fixture(%{
+          wiki_url_fr: "https://fr.wikipedia.org/wiki/Bataille_de_Marathon",
+          sitelink_count: 20
+        })
+
+      _second =
+        event_fixture(%{
+          wiki_url_fr: "https://fr.wikipedia.org/wiki/Bataille_d_Azincourt",
+          sitelink_count: 10
+        })
+
+      expect(WikipediaClientMock, :fetch_summary, fn :fr, "Bataille_de_Marathon" ->
+        {:ok, summary_fixture(:fr, first.wiki_url_fr)}
+      end)
+
+      expect(WikipediaClientMock, :fetch_summary, fn :fr, "Bataille_d_Azincourt" ->
+        {:error, :timeout}
+      end)
+
+      {:ok, sync_run} = Ingestion.start_summaries_enrichment()
+
+      capture_log(fn ->
+        assert :ok == perform_job(EnrichSummaries, job_args(sync_run.id))
+      end)
+
+      running = Ingestion.get_sync_run(sync_run.id)
+      assert running.status == :running
+      assert running.counts == %{"fetched" => 2, "enriched_fr" => 1, "errors" => 1}
+    end
+  end
+
+  describe "integration: permanent error (4xx, decode_error)" do
+    test "a 4xx other than 429 stamps extract_fetched_at so the event leaves the selection until the cache expires" do
+      event =
+        event_fixture(%{
+          wiki_url_fr: "https://fr.wikipedia.org/wiki/Bataille_de_Marathon",
+          sitelink_count: 10
+        })
+
+      expect(WikipediaClientMock, :fetch_summary, fn :fr, _title ->
+        {:error, {:http_error, 400}}
+      end)
+
+      {:ok, sync_run} = Ingestion.start_summaries_enrichment()
+
+      log =
+        capture_log(fn ->
+          run_to_completion(sync_run.id)
+        end)
+
+      assert log =~ "permanent fetch failure for #{event.qid}"
+
+      final = Ingestion.get_sync_run(sync_run.id)
+      assert final.status == :completed
+      assert final.counts == %{"fetched" => 1, "errors" => 1}
+
+      marked = Atlas.get_event_by_qid(event.qid)
+      assert marked.extract_fr == nil
+      assert marked.extract_fetched_at != nil
+
+      # No Mox expectation set here: the freshly stamped cache must exclude
+      # the event from the next run without another client call.
+      {:ok, second_run} = Ingestion.start_summaries_enrichment()
+      run_to_completion(second_run.id)
+      assert Ingestion.get_sync_run(second_run.id).counts == %{}
+    end
+
+    test "a decode_error is treated as permanent too" do
+      event =
+        event_fixture(%{
+          wiki_url_fr: "https://fr.wikipedia.org/wiki/Bataille_de_Marathon",
+          sitelink_count: 10
+        })
+
+      expect(WikipediaClientMock, :fetch_summary, fn :fr, _title ->
+        {:error, {:decode_error, :invalid_summary_shape}}
+      end)
+
+      {:ok, sync_run} = Ingestion.start_summaries_enrichment()
+
+      capture_log(fn -> run_to_completion(sync_run.id) end)
+
+      assert Ingestion.get_sync_run(sync_run.id).status == :completed
+      assert Atlas.get_event_by_qid(event.qid).extract_fetched_at != nil
+    end
+  end
+
+  describe "defensive: an exception escaping the job" do
+    test "an exception on the final attempt closes the run :failed with last_error before re-raising" do
+      event_fixture(%{
+        wiki_url_fr: "https://fr.wikipedia.org/wiki/Bataille_de_Marathon",
+        sitelink_count: 10
+      })
+
+      expect(WikipediaClientMock, :fetch_summary, fn :fr, _title -> raise "client exploded" end)
+
+      {:ok, sync_run} = Ingestion.start_summaries_enrichment()
+
+      assert_raise RuntimeError, "client exploded", fn ->
+        perform_job(EnrichSummaries, job_args(sync_run.id), attempt: 5)
+      end
+
+      failed = Ingestion.get_sync_run(sync_run.id)
+      assert failed.status == :failed
+      assert failed.last_error =~ "client exploded"
     end
   end
 
@@ -450,8 +561,8 @@ defmodule Amanogawa.Ingestion.Workers.EnrichSummariesTest do
       location_source: event.location_source,
       sitelink_count: event.sitelink_count
     }
-    |> Map.merge(Event.flatten_date(Event.begin_date(event), :begin))
-    |> Map.merge(Event.flatten_date(Event.end_date(event), :end))
+    |> Map.merge(Atlas.flatten_date(Event.begin_date(event), :begin))
+    |> Map.merge(Atlas.flatten_date(Event.end_date(event), :end))
   end
 
   defp days_ago(n), do: DateTime.add(utc_now(), -n, :day)

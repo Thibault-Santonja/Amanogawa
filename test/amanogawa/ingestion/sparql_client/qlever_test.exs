@@ -242,6 +242,26 @@ defmodule Amanogawa.Ingestion.SparqlClient.QLeverTest do
 
       assert {:error, {:rate_limited, nil}} = QLever.query("ASK {}", [])
     end
+
+    test "429 with a negative Retry-After is ignored (treated as absent)" do
+      Req.Test.stub(QLever, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_header("retry-after", "-5")
+        |> Plug.Conn.send_resp(429, "")
+      end)
+
+      assert {:error, {:rate_limited, nil}} = QLever.query("ASK {}", [])
+    end
+
+    test "429 with an absurdly large Retry-After is clamped to 300 seconds" do
+      Req.Test.stub(QLever, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_header("retry-after", "86400")
+        |> Plug.Conn.send_resp(429, "")
+      end)
+
+      assert {:error, {:rate_limited, 300}} = QLever.query("ASK {}", [])
+    end
   end
 
   describe "query/2 volume" do

@@ -71,6 +71,22 @@ defmodule Amanogawa.IngestionTest do
       assert {:error, changeset} = Ingestion.resume_events_import(sync_run)
       refute changeset.valid?
     end
+
+    test "replays the persisted start options: a resumed dry run stays a dry run, with its limit" do
+      {:ok, sync_run} = Ingestion.start_events_import(limit: 42, dry_run: true)
+
+      failed =
+        sync_run
+        |> SyncRun.close_changeset(%{status: :failed, last_error: "boom"})
+        |> Repo.update!()
+
+      assert {:ok, _resumed} = Ingestion.resume_events_import(failed)
+
+      assert_enqueued(
+        worker: ImportEvents,
+        args: %{"sync_run_id" => sync_run.id, "limit" => 42, "dry_run" => true}
+      )
+    end
   end
 
   describe "start_links_import/1 happy path" do
@@ -134,6 +150,52 @@ defmodule Amanogawa.IngestionTest do
 
       assert {:error, changeset} = Ingestion.resume_links_import(sync_run)
       refute changeset.valid?
+    end
+
+    test "replays the persisted start options: a resumed dry run stays a dry run, with its limit" do
+      {:ok, sync_run} = Ingestion.start_links_import(limit: 7, dry_run: true)
+
+      failed =
+        sync_run
+        |> SyncRun.close_changeset(%{status: :failed, last_error: "boom"})
+        |> Repo.update!()
+
+      assert {:ok, _resumed} = Ingestion.resume_links_import(failed)
+
+      assert_enqueued(
+        worker: ImportLinks,
+        args: %{"sync_run_id" => sync_run.id, "limit" => 7, "dry_run" => true}
+      )
+    end
+  end
+
+  describe "concurrency: the partial unique index backs the facade check" do
+    test "an insert racing past the application check surfaces as a changeset error, not a crash" do
+      {:ok, _running} = Ingestion.start_events_import()
+
+      # Simulates the losing side of a start race: the application-level
+      # exists? check has been passed (bypassed here), the partial unique
+      # index (one :running run per kind) must refuse the insert cleanly.
+      assert {:error, changeset} =
+               %SyncRun{}
+               |> SyncRun.create_changeset(%{kind: :events})
+               |> Repo.insert()
+
+      assert "a running sync run of this kind already exists" in errors_on(changeset).kind
+    end
+
+    test "resuming a failed run while another run of the same kind is running is refused cleanly" do
+      {:ok, first} = Ingestion.start_events_import()
+
+      failed =
+        first
+        |> SyncRun.close_changeset(%{status: :failed, last_error: "boom"})
+        |> Repo.update!()
+
+      {:ok, _second_running} = Ingestion.start_events_import()
+
+      assert {:error, changeset} = Ingestion.resume_events_import(failed)
+      assert "a running sync run of this kind already exists" in errors_on(changeset).kind
     end
   end
 

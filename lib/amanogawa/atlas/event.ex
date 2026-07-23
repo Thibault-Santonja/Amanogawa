@@ -106,7 +106,7 @@ defmodule Amanogawa.Atlas.Event do
     :extract_fetched_at
   ]
 
-  @qid_regex ~r/^Q\d+$/
+  @qid_regex ~r/\AQ\d+\z/
 
   @doc """
   Builds and validates a changeset.
@@ -287,17 +287,19 @@ defmodule Amanogawa.Atlas.Event do
     end)
   end
 
-  # Only :precision, :month and :day are mapped: :year is guarded away by
-  # `apply_date_group/7` (it only calls into HistoricalDate.changeset/2 when
-  # a year is already present) and :calendar cannot fail validation here
-  # (Event's own top-level cast/3 already rejects an invalid enum value
-  # before this code ever runs). A HistoricalDate error on any other field
-  # would mean the shared invariant grew a new case without this module
-  # being updated to match: let it crash rather than silently drop it.
+  # Only :year, :precision, :month and :day are mapped (:year can fail its
+  # bounds validation even when present); :calendar cannot fail validation
+  # here (Event's own top-level cast/3 already rejects an invalid enum
+  # value before this code ever runs). A HistoricalDate error on any other
+  # field would mean the shared invariant grew a new case without this
+  # module being updated to match: let it crash rather than silently drop
+  # it.
+  defp begin_error_field(:year), do: :begin_year
   defp begin_error_field(:month), do: :begin_month
   defp begin_error_field(:day), do: :begin_day
   defp begin_error_field(:precision), do: :begin_precision
 
+  defp end_error_field(:year), do: :end_year
   defp end_error_field(:month), do: :end_month
   defp end_error_field(:day), do: :end_day
   defp end_error_field(:precision), do: :end_precision

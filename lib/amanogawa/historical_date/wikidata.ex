@@ -46,7 +46,7 @@ defmodule Amanogawa.HistoricalDate.Wikidata do
   @gregorian_qid "Q1985727"
   @julian_qid "Q1985786"
 
-  @time_regex ~r/^([+-]?)(\d+)-(\d{2})-(\d{2})T\d{2}:\d{2}:\d{2}Z$/
+  @time_regex ~r/\A([+-]?)(\d+)-(\d{2})-(\d{2})T\d{2}:\d{2}:\d{2}Z\z/
 
   @type rdf_binding :: %{
           required(:time) => String.t(),
@@ -108,7 +108,7 @@ defmodule Amanogawa.HistoricalDate.Wikidata do
   defp apply_sign(_sign, value), do: value
 
   defp parse_calendar(url) when is_binary(url) do
-    case Regex.run(~r/(Q\d+)$/, url) do
+    case Regex.run(~r/(Q\d+)\z/, url) do
       [_, @gregorian_qid] -> {:ok, :gregorian}
       [_, @julian_qid] -> {:ok, :julian}
       _ -> {:error, {:invalid_calendar, url}}

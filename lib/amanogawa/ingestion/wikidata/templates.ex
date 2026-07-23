@@ -6,7 +6,7 @@ defmodule Amanogawa.Ingestion.Wikidata.Templates do
   Every rendering function below builds its query from fixed strings owned
   by this module; the only variable points (QID range bounds, `LIMIT`,
   `OFFSET`, explicit QID lists) are substituted after strict validation
-  (non-negative integers, `~r/^Q\\d+$/` QIDs). No caller-supplied string is
+  (non-negative integers, `~r/\\AQ\\d+\\z/` QIDs). No caller-supplied string is
   ever concatenated into a query: passing anything else raises
   `ArgumentError` before a query is built, so no external data can alter a
   query's shape (`.claude/rules/security.md`).
@@ -27,12 +27,23 @@ defmodule Amanogawa.Ingestion.Wikidata.Templates do
   `wikibase:timeCalendarModel`: the `wdt:` property shortcut is never used
   for dates, since it silently drops the precision a display layer needs to
   avoid rendering a fake "January 1" (`.claude/rules/geo-temporal.md`).
+  The fallback branch carries its own `MINUS { ?e p:P585/psv:P585 ... }`
+  placed *after* the `P580` triple of the same group: per SPARQL 1.1
+  (18.2.2.6) `MINUS` applies to the solutions accumulated so far in its
+  group, so a `MINUS` rendered as the first element of a group is a no-op
+  (empty accumulated domain).
 
   Every `OPTIONAL` variable is wrapped in `SAMPLE` under a `GROUP BY ?e`, so
   each query returns exactly one row per event regardless of how many
   optional patterns match (a place with several `P625` values, several
   `P585` statements as Wikidata's editors sometimes disagree on a date,
-  ...).
+  ...). The begin/end date is sampled as a *single* token
+  (`SAMPLE(CONCAT(time, "|", precision, "|", calendar))`), never as three
+  independent `SAMPLE`s: independent samples over an event with several
+  date statements (real case: Q31900, battle of Marathon, three `P585`
+  statements) can mix the time of one statement with the precision of
+  another. The token is decoded back into its three parts by
+  `Amanogawa.Ingestion.Wikidata.EventDecoder`.
 
   Labels and descriptions are read via `rdfs:label`/`schema:description`
   with an explicit `LANG()` filter rather than `SERVICE wikibase:label`,
@@ -58,7 +69,7 @@ defmodule Amanogawa.Ingestion.Wikidata.Templates do
 
   alias Amanogawa.Ingestion.Wikidata.Blocklist
 
-  @qid_regex ~r/^Q\d+$/
+  @qid_regex ~r/\AQ\d+\z/
 
   @prefixes """
   PREFIX wd: <http://www.wikidata.org/entity/>
@@ -76,8 +87,8 @@ defmodule Amanogawa.Ingestion.Wikidata.Templates do
          (SAMPLE(?labelFrV) AS ?labelFr) (SAMPLE(?labelEnV) AS ?labelEn)
          (SAMPLE(?descFrV) AS ?descFr) (SAMPLE(?descEnV) AS ?descEn)
          (SAMPLE(?kindV) AS ?kind)
-         (SAMPLE(?beginTimeRaw) AS ?beginTime) (SAMPLE(?beginPrecisionRaw) AS ?beginPrecision) (SAMPLE(?beginCalendarRaw) AS ?beginCalendar)
-         (SAMPLE(?endTimeV) AS ?endTime) (SAMPLE(?endPrecisionV) AS ?endPrecision) (SAMPLE(?endCalendarV) AS ?endCalendar)
+         (SAMPLE(?beginTokenV) AS ?beginToken)
+         (SAMPLE(?endTokenV) AS ?endToken)
          (SAMPLE(?coordDirectV) AS ?coordDirect) (SAMPLE(?coordPlaceV) AS ?coordPlace)
          (SAMPLE(?articleFrV) AS ?articleFr) (SAMPLE(?articleEnV) AS ?articleEn)
          (SAMPLE(?sitelinkCountV) AS ?sitelinkCount)\
@@ -85,6 +96,13 @@ defmodule Amanogawa.Ingestion.Wikidata.Templates do
 
   @root_pattern "?e wdt:P31/wdt:P279* wd:Q1190554 ."
 
+  # The MINUS in the P580 fallback branch sits AFTER the P580 triple of its
+  # group, never first: SPARQL 1.1 (18.2.2.6) evaluates MINUS against the
+  # solutions accumulated so far in the group, so a leading MINUS would
+  # subtract from an empty domain and change nothing (the fallback would
+  # then also fire for events that do have a P585). The single-token BIND
+  # keeps (time, precision, calendar) welded together across the later
+  # SAMPLE (see moduledoc).
   @date_pattern """
   {
       ?e p:P585/psv:P585 ?beginNode585 .
@@ -94,20 +112,22 @@ defmodule Amanogawa.Ingestion.Wikidata.Templates do
     }
     UNION
     {
-      MINUS { ?e p:P585/psv:P585 ?anyBeginNode585 }
       ?e p:P580/psv:P580 ?beginNode580 .
       ?beginNode580 wikibase:timeValue ?beginTimeRaw ;
                      wikibase:timePrecision ?beginPrecisionRaw ;
                      wikibase:timeCalendarModel ?beginCalendarRaw .
-    }\
+      MINUS { ?e p:P585/psv:P585 ?anyBeginNode585 }
+    }
+    BIND(CONCAT(STR(?beginTimeRaw), "|", STR(?beginPrecisionRaw), "|", STR(?beginCalendarRaw)) AS ?beginTokenV)\
   """
 
   @end_pattern """
   OPTIONAL {
       ?e p:P582/psv:P582 ?endNode .
-      ?endNode wikibase:timeValue ?endTimeV ;
-               wikibase:timePrecision ?endPrecisionV ;
-               wikibase:timeCalendarModel ?endCalendarV .
+      ?endNode wikibase:timeValue ?endTimeRaw ;
+               wikibase:timePrecision ?endPrecisionRaw ;
+               wikibase:timeCalendarModel ?endCalendarRaw .
+      BIND(CONCAT(STR(?endTimeRaw), "|", STR(?endPrecisionRaw), "|", STR(?endCalendarRaw)) AS ?endTokenV)
     }\
   """
 
@@ -186,7 +206,7 @@ defmodule Amanogawa.Ingestion.Wikidata.Templates do
 
   @doc """
   Renders a query counting the events a slice `[lower, upper)` would yield,
-  without paginating: used to calibrate slice sizes (`.claude/rules/
+  without paginating: used to calibrate slice sizes (`.claude/skills/
   wikidata-query` skill: aim for a few thousand bindings per page) before
   committing to a pagination plan.
 
@@ -223,7 +243,7 @@ defmodule Amanogawa.Ingestion.Wikidata.Templates do
   targeted spot checks) rather than a numeric slice.
 
   Raises `ArgumentError` when `qids` is empty or any entry does not match
-  `~r/^Q\\d+$/`.
+  `~r/\\AQ\\d+\\z/`.
 
   ## Examples
 
@@ -290,7 +310,10 @@ defmodule Amanogawa.Ingestion.Wikidata.Templates do
         link_property_patterns(),
         @link_target_root_pattern
       ],
-      "ORDER BY ?source\nLIMIT #{limit}\nOFFSET #{offset}"
+      # A total order: paging on ?source alone is not stable when a source
+      # carries more rows than fit in one page (ties are returned in an
+      # endpoint-chosen order, so consecutive pages can overlap or skip).
+      "ORDER BY ?source ?property ?target\nLIMIT #{limit}\nOFFSET #{offset}"
     )
   end
 

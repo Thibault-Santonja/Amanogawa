@@ -95,7 +95,7 @@ defmodule Amanogawa.Ingestion.Wikidata.Blocklist do
       iex> qids = Amanogawa.Ingestion.Wikidata.Blocklist.qids()
       iex> qids != []
       true
-      iex> Enum.all?(qids, &Regex.match?(~r/^Q\\d+$/, &1))
+      iex> Enum.all?(qids, &Regex.match?(~r/\\AQ\\d+\\z/, &1))
       true
 
   """

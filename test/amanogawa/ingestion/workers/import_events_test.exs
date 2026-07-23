@@ -76,10 +76,9 @@ defmodule Amanogawa.Ingestion.Workers.ImportEventsTest do
       assert Atlas.count_events() == 2
       second_event = Atlas.get_event_by_qid("Q1")
 
-      assert second_event.qid == first_event.qid
-      assert second_event.begin_year == first_event.begin_year
-      assert second_event.geom == first_event.geom
-      assert second_event.location_source == first_event.location_source
+      # The full struct must survive the replay unchanged; only updated_at
+      # (touched by the upsert) may differ.
+      assert comparable(second_event) == comparable(first_event)
     end
   end
 
@@ -267,10 +266,57 @@ defmodule Amanogawa.Ingestion.Workers.ImportEventsTest do
     end
   end
 
+  describe "defensive: an exception escaping the job" do
+    test "an exception on a non-final attempt leaves the run running (Oban will retry)" do
+      {:ok, sync_run} = Ingestion.start_events_import()
+
+      expect_query(fn _sparql -> raise "endpoint exploded" end)
+
+      assert_raise RuntimeError, "endpoint exploded", fn ->
+        perform_job(ImportEvents, job_args(sync_run.id), attempt: 1)
+      end
+
+      assert Ingestion.get_sync_run(sync_run.id).status == :running
+    end
+
+    test "an exception on the final attempt closes the run :failed with last_error before re-raising" do
+      {:ok, sync_run} = Ingestion.start_events_import()
+
+      expect_query(fn _sparql -> raise "endpoint exploded" end)
+
+      assert_raise RuntimeError, "endpoint exploded", fn ->
+        perform_job(ImportEvents, job_args(sync_run.id), attempt: 5)
+      end
+
+      failed = Ingestion.get_sync_run(sync_run.id)
+      assert failed.status == :failed
+      assert failed.last_error =~ "endpoint exploded"
+      assert failed.finished_at != nil
+    end
+
+    test "an exception for a job whose run does not exist re-raises without a secondary crash" do
+      missing_id = Ecto.UUID.generate()
+
+      # Repo.get! raises (run missing); the guard must find nothing to
+      # close and let the original exception through untouched.
+      assert_raise Ecto.NoResultsError, fn ->
+        perform_job(ImportEvents, job_args(missing_id), attempt: 5)
+      end
+    end
+  end
+
   # --- helpers ---------------------------------------------------------
 
   defp expect_query(fun) do
     expect(SparqlClientMock, :query, fn sparql, _opts -> fun.(sparql) end)
+  end
+
+  # An Event struct stripped of everything a legitimate replay may touch:
+  # only updated_at changes on an idempotent upsert.
+  defp comparable(event) do
+    event
+    |> Map.from_struct()
+    |> Map.drop([:__meta__, :updated_at])
   end
 
   defp job_args(sync_run_id, opts \\ []) do
@@ -315,9 +361,7 @@ defmodule Amanogawa.Ingestion.Workers.ImportEventsTest do
   defp valid_binding(qid) do
     %{
       "e" => uri("http://www.wikidata.org/entity/#{qid}"),
-      "beginTime" => literal("1900-01-01T00:00:00Z"),
-      "beginPrecision" => literal("9"),
-      "beginCalendar" => uri("http://www.wikidata.org/entity/Q1985727"),
+      "beginToken" => literal("1900-01-01T00:00:00Z|9|http://www.wikidata.org/entity/Q1985727"),
       "coordDirect" => literal("POINT(2.35 48.85)")
     }
   end

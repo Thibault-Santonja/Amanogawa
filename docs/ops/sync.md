@@ -92,7 +92,7 @@ Amanogawa.Ingestion.get_sync_run("<uuid>")
 
 Un run `failed` n'est jamais repris automatiquement. Le message affiché par la mix task en cas d'échec contient la commande de reprise exacte (identifiant du run inclus).
 
-- `events` et `links` conservent un curseur de pagination explicite (position dans l'espace des QID) : la reprise continue exactement où le run interrompu s'est arrêté, sans retraiter ce qui a déjà été importé.
+- `events` et `links` conservent un curseur de pagination explicite (position dans l'espace des QID) : la reprise continue exactement où le run interrompu s'est arrêté, sans retraiter ce qui a déjà été importé. Les options de départ (`--limit`, `--dry-run`) sont persistées avec le run (colonne `options` de `ingestion.sync_runs`) et rejouées telles quelles à la reprise : un dry-run repris reste un dry-run.
 
   ```elixir
   sync_run = Amanogawa.Ingestion.get_sync_run("<uuid>")
@@ -142,4 +142,15 @@ Une erreur réseau (timeout, connexion refusée) fait échouer la page ou le lot
 
 ### Un run reste `running` indéfiniment
 
-Un run ne devrait jamais rester `running` sans qu'un job Oban lui soit associé : vérifier la table `oban_jobs` (ou l'historique Oban) pour confirmer qu'un job existe bien pour ce `sync_run_id`. Si aucun job n'existe (cas anormal, par exemple après un arrêt brutal du nœud pendant l'insertion), clôturer manuellement le run en base (`status = 'failed'`, `last_error` renseigné) avant de le reprendre.
+Les workers clôturent eux-mêmes leur run en `failed` (avec `last_error` renseigné) quand la dernière tentative Oban échoue, y compris sur une exception inattendue : une erreur logicielle ne laisse donc pas de run orphelin en `running`. Le seul scénario restant est l'arrêt brutal du nœud (kill, panne) pendant l'exécution : le job Oban est alors remis en file et retenté au redémarrage, et le run reprend son cours. Si un run reste `running` alors qu'aucun job n'existe plus pour ce `sync_run_id` dans `oban_jobs` (cas très anormal, par exemple une purge manuelle de la table des jobs), clôturer manuellement le run en base (`status = 'failed'`, `last_error` renseigné) avant de le reprendre.
+
+### La pagination s'arrête avant la fin de l'espace des QID (`max_qid`)
+
+Les imports `events` et `links` parcourent l'espace numérique des QID `[0, max_qid)` par tranches. La borne `max_qid` vaut 130 000 000 par défaut (`Amanogawa.Ingestion.Workers.PagedImport`), au-dessus du plus grand QID observé sur Wikidata à l'écriture de la feature 002. Wikidata croissant en continu, cette borne finira par être dépassée : les événements dont le QID est supérieur ou égal à `max_qid` ne seraient alors jamais importés. Pour la relever, configurer la valeur par worker dans `config/config.exs` puis redéployer :
+
+```elixir
+config :amanogawa, Amanogawa.Ingestion.Workers.ImportEvents, max_qid: 150_000_000
+config :amanogawa, Amanogawa.Ingestion.Workers.ImportLinks, max_qid: 150_000_000
+```
+
+Vérifier de temps en temps le QID le plus récent de Wikidata (par exemple via `Special:ListDatatypes` ou une entité fraîchement créée) et garder une marge confortable : une borne trop haute ne coûte que quelques tranches vides en fin de parcours.

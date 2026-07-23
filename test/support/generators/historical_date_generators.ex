@@ -34,13 +34,25 @@ defmodule Amanogawa.HistoricalDateGenerators do
 
   defp month_and_day(precision) when precision <= 9, do: constant({nil, nil})
 
+  # Precisions 10 and 11 legitimately occur with missing month/day (a
+  # Wikidata statement can promise day precision while only the year is
+  # recorded); the generators cover those partial shapes so formatting and
+  # round-trip properties exercise them.
   defp month_and_day(10) do
+    one_of([constant({nil, nil}), month_only()])
+  end
+
+  defp month_and_day(11) do
+    one_of([constant({nil, nil}), month_only(), month_and_day()])
+  end
+
+  defp month_only do
     gen all month <- integer(1..12) do
       {month, nil}
     end
   end
 
-  defp month_and_day(11) do
+  defp month_and_day do
     gen all month <- integer(1..12), day <- integer(1..28) do
       {month, day}
     end

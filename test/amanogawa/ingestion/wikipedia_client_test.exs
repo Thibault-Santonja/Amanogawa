@@ -25,6 +25,17 @@ defmodule Amanogawa.Ingestion.WikipediaClientTest do
   end
 
   describe "title_from_wiki_url/1 edge cases" do
+    test "preserves a title containing a slash (full /wiki/ path, not the last segment)" do
+      assert WikipediaClient.title_from_wiki_url(
+               "https://fr.wikipedia.org/wiki/Naissance/F%C3%AAtes"
+             ) == "Naissance/Fêtes"
+    end
+
+    test "a URL without a /wiki/ path falls back to the last path segment" do
+      assert WikipediaClient.title_from_wiki_url("https://fr.wikipedia.org/w/Special:Random") ==
+               "Special:Random"
+    end
+
     test "decodes accented characters" do
       assert WikipediaClient.title_from_wiki_url(
                "https://fr.wikipedia.org/wiki/D%C3%A9fenestration_de_Prague"
@@ -84,6 +95,31 @@ defmodule Amanogawa.Ingestion.WikipediaClientTest do
                  WikipediaFixtures.raw_wikipedia_fixture("summary_en_no_thumbnail.json"),
                  :en
                )
+    end
+
+    test "a thumbnail outside the Wikimedia https whitelist is dropped, never the summary" do
+      base = %{
+        "title" => "T",
+        "extract" => "E",
+        "content_urls" => %{"desktop" => %{"page" => "https://fr.wikipedia.org/wiki/T"}}
+      }
+
+      hostile = Map.put(base, "thumbnail", %{"source" => "https://evil.example.com/thumb.jpg"})
+      http = Map.put(base, "thumbnail", %{"source" => "http://upload.wikimedia.org/thumb.jpg"})
+
+      assert {:ok, %Summary{thumbnail_url: nil}} = Summary.decode(hostile, :fr)
+      assert {:ok, %Summary{thumbnail_url: nil}} = Summary.decode(http, :fr)
+    end
+
+    test "an extract beyond 8192 characters is truncated to the documented bound" do
+      decoded = %{
+        "title" => "T",
+        "extract" => String.duplicate("a", 10_000),
+        "content_urls" => %{"desktop" => %{"page" => "https://fr.wikipedia.org/wiki/T"}}
+      }
+
+      assert {:ok, %Summary{extract: extract}} = Summary.decode(decoded, :fr)
+      assert String.length(extract) == 8192
     end
   end
 

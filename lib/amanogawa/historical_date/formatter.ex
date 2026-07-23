@@ -52,11 +52,28 @@ defmodule Amanogawa.HistoricalDate.Formatter do
   @doc """
   Formats `date` for `locale` (`:fr` by default). Never raises for a valid
   `%HistoricalDate{}`.
+
+  A date whose precision promises more than its fields deliver (a valid
+  state: Wikidata carries day-precision statements whose month/day are
+  unknown, and `Amanogawa.HistoricalDate` accepts precision 10 or 11 with
+  `nil` month/day) degrades gracefully to the finest level its data
+  actually supports: month level without a day, year level without a
+  month. Honest formatting, never an invented "January 1".
   """
   @spec format(HistoricalDate.t(), locale()) :: String.t()
   def format(date, locale \\ :fr)
 
+  def format(%HistoricalDate{precision: 11, month: nil} = date, locale),
+    do: format_year(date, locale)
+
+  def format(%HistoricalDate{precision: 11, day: nil} = date, locale),
+    do: format_month(date, locale)
+
   def format(%HistoricalDate{precision: 11} = date, locale), do: format_day(date, locale)
+
+  def format(%HistoricalDate{precision: 10, month: nil} = date, locale),
+    do: format_year(date, locale)
+
   def format(%HistoricalDate{precision: 10} = date, locale), do: format_month(date, locale)
   def format(%HistoricalDate{precision: 9} = date, locale), do: format_year(date, locale)
   def format(%HistoricalDate{precision: 8} = date, locale), do: format_decade(date, locale)

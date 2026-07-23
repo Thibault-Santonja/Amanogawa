@@ -9,7 +9,7 @@ defmodule Amanogawa.Ingestion.Wikidata.EventDecoderTest do
   alias Amanogawa.Ingestion.Wikidata.EventDecoder
   alias Amanogawa.SparqlFixtures
 
-  @gregorian_uri "http://www.wikidata.org/entity/Q1985727"
+  @gregorian_calendar_uri "http://www.wikidata.org/entity/Q1985727"
 
   describe "decode/1 happy path" do
     test "decodes a real nominal page into ExtractedEvent structs with correct provenance and sitelinks" do
@@ -19,7 +19,7 @@ defmodule Amanogawa.Ingestion.Wikidata.EventDecoderTest do
 
       assert rejected == 0
       assert length(events) == length(result.bindings)
-      assert Enum.all?(events, &Regex.match?(~r/^Q\d+$/, &1.qid))
+      assert Enum.all?(events, &Regex.match?(~r/\AQ\d+\z/, &1.qid))
 
       mohacs = Enum.find(events, &(&1.qid == "Q178510"))
       assert mohacs.location_source == :direct
@@ -52,6 +52,30 @@ defmodule Amanogawa.Ingestion.Wikidata.EventDecoderTest do
     end
   end
 
+  describe "decode/1 regression: coherent (time, precision, calendar) triplet on multi-statement events" do
+    test "an event with two P585 statements of different precisions decodes one coherent triplet, never a mix" do
+      # See test/support/fixtures/sparql/README.md, mixed_precision_begin:
+      # the sampled token is entirely the year-precision statement
+      # (-0490, precision 9, Gregorian). Under independent per-field
+      # sampling, this event could decode as the incoherent
+      # "-0490 at precision 11, Julian" (one statement's time with the
+      # other's precision and calendar).
+      {:ok, result} = SparqlFixtures.sparql_fixture("mixed_precision_begin.json")
+
+      {[event], 0} = EventDecoder.decode(result)
+
+      assert event.qid == "Q31900"
+
+      assert event.begin == %HistoricalDate{
+               year: -490,
+               month: nil,
+               day: nil,
+               precision: 9,
+               calendar: :gregorian
+             }
+    end
+  end
+
   describe "decode/1 edge cases" do
     test "an event with only inherited (place) coordinates gets location_source: :place" do
       {:ok, result} = SparqlFixtures.sparql_fixture("events_page.json")
@@ -80,19 +104,10 @@ defmodule Amanogawa.Ingestion.Wikidata.EventDecoderTest do
     end
 
     test "a class (kind) URI that is not a plain QID is dropped without rejecting the event" do
-      result = %Result{
-        variables: ["e", "beginTime", "beginPrecision", "beginCalendar", "coordDirect", "kind"],
-        bindings: [
-          %{
-            "e" => uri("Q900026"),
-            "beginTime" => literal("1900-01-01T00:00:00Z"),
-            "beginPrecision" => literal("9"),
-            "beginCalendar" => uri(@gregorian_uri),
-            "coordDirect" => literal("POINT(10 20)"),
-            "kind" => uri("http://www.wikidata.org/entity/statement/Q1-not-a-class")
-          }
-        ]
-      }
+      result =
+        single_binding_result(%{
+          "kind" => uri("http://www.wikidata.org/entity/statement/Q1-not-a-class")
+        })
 
       {[event], 0} = EventDecoder.decode(result)
 
@@ -100,18 +115,7 @@ defmodule Amanogawa.Ingestion.Wikidata.EventDecoderTest do
     end
 
     test "precision 7 (century) truncates month and day" do
-      result = %Result{
-        variables: ["e", "beginTime", "beginPrecision", "beginCalendar", "coordDirect"],
-        bindings: [
-          %{
-            "e" => uri("Q900020"),
-            "beginTime" => literal("-0700-01-01T00:00:00Z"),
-            "beginPrecision" => literal("7"),
-            "beginCalendar" => uri(@gregorian_uri),
-            "coordDirect" => literal("POINT(12.5 41.9)")
-          }
-        ]
-      }
+      result = single_binding_result(%{"beginToken" => begin_token("-0700-01-01T00:00:00Z", 7)})
 
       {[event], 0} = EventDecoder.decode(result)
 
@@ -121,54 +125,62 @@ defmodule Amanogawa.Ingestion.Wikidata.EventDecoderTest do
     end
 
     test "WKT coordinates without decimals parse through the integer fallback" do
-      result = %Result{
-        variables: ["e", "beginTime", "beginPrecision", "beginCalendar", "coordDirect"],
-        bindings: [
-          %{
-            "e" => uri("Q900022"),
-            "beginTime" => literal("1900-01-01T00:00:00Z"),
-            "beginPrecision" => literal("9"),
-            "beginCalendar" => uri(@gregorian_uri),
-            "coordDirect" => literal("POINT(10 20)")
-          }
-        ]
-      }
+      result = single_binding_result(%{"coordDirect" => literal("POINT(10 20)")})
 
       {[event], 0} = EventDecoder.decode(result)
 
       assert event.geom.coordinates == {10.0, 20.0}
     end
 
+    test "a lowercase Point(...) WKT literal is accepted (case-insensitive match)" do
+      result = single_binding_result(%{"coordDirect" => literal("Point(2.35 48.85)")})
+
+      {[event], 0} = EventDecoder.decode(result)
+
+      assert event.geom.coordinates == {2.35, 48.85}
+    end
+
+    test "exponential notation within WGS84 bounds parses" do
+      result = single_binding_result(%{"coordDirect" => literal("POINT(1.5e2 -4.5E1)")})
+
+      {[event], 0} = EventDecoder.decode(result)
+
+      assert event.geom.coordinates == {150.0, -45.0}
+    end
+
     test "a malformed sitelink count defaults to 0 instead of rejecting the event" do
-      result = %Result{
-        variables: [
-          "e",
-          "beginTime",
-          "beginPrecision",
-          "beginCalendar",
-          "coordDirect",
-          "sitelinkCount"
-        ],
-        bindings: [
-          %{
-            "e" => uri("Q900023"),
-            "beginTime" => literal("1900-01-01T00:00:00Z"),
-            "beginPrecision" => literal("9"),
-            "beginCalendar" => uri(@gregorian_uri),
-            "coordDirect" => literal("POINT(10 20)"),
-            "sitelinkCount" => literal("not-a-number")
-          }
-        ]
-      }
+      result = single_binding_result(%{"sitelinkCount" => literal("not-a-number")})
 
       {[event], 0} = EventDecoder.decode(result)
 
       assert event.sitelink_count == 0
     end
+
+    test "an absurd sitelink count is clamped into 0..1_000_000" do
+      huge = single_binding_result(%{"sitelinkCount" => literal("999999999999")})
+      negative = single_binding_result(%{"sitelinkCount" => literal("-5")})
+
+      {[huge_event], 0} = EventDecoder.decode(huge)
+      {[negative_event], 0} = EventDecoder.decode(negative)
+
+      assert huge_event.sitelink_count == 1_000_000
+      assert negative_event.sitelink_count == 0
+    end
+
+    test "labels and descriptions longer than 512 characters are truncated, not rejected" do
+      long = String.duplicate("é", 700)
+
+      result = single_binding_result(%{"labelFr" => literal(long), "descEn" => literal(long)})
+
+      {[event], 0} = EventDecoder.decode(result)
+
+      assert String.length(event.label_fr) == 512
+      assert String.length(event.description_en) == 512
+    end
   end
 
   describe "decode/1 error cases" do
-    test "hostile bindings (missing precision, malformed WKT, non-entity URI, unparsable time) are all rejected, none crash" do
+    test "hostile bindings (token missing precision, malformed WKT, non-entity URI, unparsable time) are all rejected, none crash" do
       {:ok, result} = SparqlFixtures.sparql_fixture("hostile_bindings.json")
 
       {events, rejected} = EventDecoder.decode(result)
@@ -177,37 +189,62 @@ defmodule Amanogawa.Ingestion.Wikidata.EventDecoderTest do
       assert rejected == length(result.bindings)
     end
 
+    test "a begin token with the wrong arity is rejected" do
+      result = single_binding_result(%{"beginToken" => literal("1900-01-01T00:00:00Z|9")})
+
+      assert EventDecoder.decode(result) == {[], 1}
+    end
+
     test "a non-string coordinate value (defensive: never produced by real JSON decoding) is rejected" do
-      result = %Result{
-        variables: ["e", "beginTime", "beginPrecision", "beginCalendar", "coordDirect"],
-        bindings: [
-          %{
-            "e" => uri("Q900024"),
-            "beginTime" => literal("1900-01-01T00:00:00Z"),
-            "beginPrecision" => literal("9"),
-            "beginCalendar" => uri(@gregorian_uri),
-            "coordDirect" => %{value: 123, type: :literal, datatype: nil, lang: nil}
-          }
-        ]
-      }
+      result =
+        single_binding_result(%{
+          "coordDirect" => %{value: 123, type: :literal, datatype: nil, lang: nil}
+        })
 
       assert EventDecoder.decode(result) == {[], 1}
     end
 
     test "an event with neither a direct nor an inherited coordinate is rejected" do
-      result = %Result{
-        variables: ["e", "beginTime", "beginPrecision", "beginCalendar"],
-        bindings: [
-          %{
-            "e" => uri("Q900025"),
-            "beginTime" => literal("1900-01-01T00:00:00Z"),
-            "beginPrecision" => literal("9"),
-            "beginCalendar" => uri(@gregorian_uri)
-          }
-        ]
-      }
+      result = single_binding_result(%{"coordDirect" => :drop})
 
       assert EventDecoder.decode(result) == {[], 1}
+    end
+
+    test "WKT coordinates outside the WGS84 domain are rejected" do
+      out_of_range = single_binding_result(%{"coordDirect" => literal("POINT(200 10)")})
+      huge_exponent = single_binding_result(%{"coordDirect" => literal("POINT(1e99 0)")})
+
+      too_many_digits =
+        single_binding_result(%{"coordDirect" => literal("POINT(123456789012345 0)")})
+
+      assert EventDecoder.decode(out_of_range) == {[], 1}
+      assert EventDecoder.decode(huge_exponent) == {[], 1}
+      assert EventDecoder.decode(too_many_digits) == {[], 1}
+    end
+
+    test "a wiki article URL that is not https on a Wikimedia host rejects the binding" do
+      http = single_binding_result(%{"articleFr" => uri("http://fr.wikipedia.org/wiki/X")})
+
+      hostile = single_binding_result(%{"articleEn" => uri("https://evil.example.com/wiki/X")})
+
+      too_long =
+        single_binding_result(%{
+          "articleFr" => uri("https://fr.wikipedia.org/wiki/" <> String.duplicate("a", 3000))
+        })
+
+      assert EventDecoder.decode(http) == {[], 1}
+      assert EventDecoder.decode(hostile) == {[], 1}
+      assert EventDecoder.decode(too_long) == {[], 1}
+    end
+
+    test "a begin year outside [-13_800_000_000, 3000] is rejected, never a crash" do
+      too_deep =
+        single_binding_result(%{"beginToken" => begin_token("-99999999999-01-01T00:00:00Z", 0)})
+
+      too_far = single_binding_result(%{"beginToken" => begin_token("5000-01-01T00:00:00Z", 9)})
+
+      assert EventDecoder.decode(too_deep) == {[], 1}
+      assert EventDecoder.decode(too_far) == {[], 1}
     end
   end
 
@@ -240,7 +277,7 @@ defmodule Amanogawa.Ingestion.Wikidata.EventDecoderTest do
         assert length(events) + rejected == length(bindings)
 
         for event <- events do
-          assert Regex.match?(~r/^Q\d+$/, event.qid)
+          assert Regex.match?(~r/\AQ\d+\z/, event.qid)
           assert event.geom.srid == 4326
 
           if event.begin.precision <= 9 do
@@ -259,18 +296,8 @@ defmodule Amanogawa.Ingestion.Wikidata.EventDecoderTest do
         lon_str = :erlang.float_to_binary(lon, decimals: 6)
         lat_str = :erlang.float_to_binary(lat, decimals: 6)
 
-        result = %Result{
-          variables: ["e", "beginTime", "beginPrecision", "beginCalendar", "coordDirect"],
-          bindings: [
-            %{
-              "e" => uri("Q900021"),
-              "beginTime" => literal("1900-01-01T00:00:00Z"),
-              "beginPrecision" => literal("9"),
-              "beginCalendar" => uri(@gregorian_uri),
-              "coordDirect" => literal("POINT(#{lon_str} #{lat_str})")
-            }
-          ]
-        }
+        result =
+          single_binding_result(%{"coordDirect" => literal("POINT(#{lon_str} #{lat_str})")})
 
         {[event], 0} = EventDecoder.decode(result)
         {decoded_lon, decoded_lat} = event.geom.coordinates
@@ -279,6 +306,30 @@ defmodule Amanogawa.Ingestion.Wikidata.EventDecoderTest do
         assert_in_delta decoded_lat, lat, 1.0e-5
       end
     end
+  end
+
+  # --- helpers ---------------------------------------------------------
+
+  # A valid single-binding page; `overrides` replaces or (with :drop as the
+  # value) removes keys from the base binding.
+  defp single_binding_result(overrides) do
+    base = %{
+      "e" => uri("Q900020"),
+      "beginToken" => begin_token("1900-01-01T00:00:00Z", 9),
+      "coordDirect" => literal("POINT(10 20)")
+    }
+
+    binding =
+      Enum.reduce(overrides, base, fn
+        {key, :drop}, acc -> Map.delete(acc, key)
+        {key, value}, acc -> Map.put(acc, key, value)
+      end)
+
+    %Result{variables: Map.keys(binding), bindings: [binding]}
+  end
+
+  defp begin_token(time, precision) do
+    literal("#{time}|#{precision}|#{@gregorian_calendar_uri}")
   end
 
   defp synthetic_binding do
@@ -291,9 +342,10 @@ defmodule Amanogawa.Ingestion.Wikidata.EventDecoderTest do
             coord_key <- member_of(["coordDirect", "coordPlace"]) do
       %{
         "e" => uri("Q#{qid_num}"),
-        "beginTime" => literal(synthetic_time_string(year, month, day)),
-        "beginPrecision" => literal(Integer.to_string(precision)),
-        "beginCalendar" => uri(@gregorian_uri),
+        "beginToken" =>
+          literal(
+            "#{synthetic_time_string(year, month, day)}|#{precision}|#{@gregorian_calendar_uri}"
+          ),
         coord_key =>
           literal(
             "POINT(#{:erlang.float_to_binary(lon, decimals: 6)} #{:erlang.float_to_binary(lat, decimals: 6)})"

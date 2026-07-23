@@ -289,6 +289,22 @@ defmodule Amanogawa.Ingestion.Workers.ImportLinksTest do
     end
   end
 
+  describe "defensive: an exception escaping the job" do
+    test "an exception on the final attempt closes the run :failed with last_error before re-raising" do
+      {:ok, sync_run} = Ingestion.start_links_import()
+
+      expect_query(fn _sparql -> raise "endpoint exploded" end)
+
+      assert_raise RuntimeError, "endpoint exploded", fn ->
+        perform_job(ImportLinks, job_args(sync_run.id), attempt: 5)
+      end
+
+      failed = Ingestion.get_sync_run(sync_run.id)
+      assert failed.status == :failed
+      assert failed.last_error =~ "endpoint exploded"
+    end
+  end
+
   # --- helpers ---------------------------------------------------------
 
   defp expect_query(fun) do

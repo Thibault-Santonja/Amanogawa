@@ -11,7 +11,7 @@ defmodule Amanogawa.Ingestion.Wikidata.BlocklistTest do
     end
 
     test "every entry matches the Wikidata QID format" do
-      assert Enum.all?(Blocklist.qids(), &Regex.match?(~r/^Q\d+$/, &1))
+      assert Enum.all?(Blocklist.qids(), &Regex.match?(~r/\AQ\d+\z/, &1))
     end
 
     test "has no duplicate" do

@@ -198,13 +198,57 @@ defmodule Amanogawa.Atlas.EventTest do
   end
 
   describe "changeset/2 limit cases" do
-    test "very long labels and extracts are accepted (text columns)" do
+    test "very long labels, URLs and extracts actually INSERT (text columns, no varchar limit)" do
       long_text = String.duplicate("a", 10_000)
-      attrs = Map.merge(@valid_attrs, %{label_fr: long_text, extract_fr: long_text})
+      long_url = "https://fr.wikipedia.org/wiki/" <> String.duplicate("b", 1_500)
 
+      attrs =
+        Map.merge(@valid_attrs, %{
+          label_fr: long_text,
+          label_en: long_text,
+          extract_fr: long_text,
+          wiki_url_fr: long_url,
+          wiki_url_en: long_url,
+          thumbnail_url: long_url,
+          kind: String.duplicate("Q", 1) <> String.duplicate("9", 400)
+        })
+
+      inserted =
+        %Event{}
+        |> Event.changeset(attrs)
+        |> Repo.insert!()
+
+      reloaded = Repo.get!(Event, inserted.id)
+      assert reloaded.label_fr == long_text
+      assert reloaded.wiki_url_fr == long_url
+      assert reloaded.thumbnail_url == long_url
+    end
+
+    test "a deeply prehistoric begin_year within the bigint domain actually INSERTS" do
+      attrs = %{@valid_attrs | begin_year: -13_000_000_000, begin_precision: 0}
+
+      inserted =
+        %Event{}
+        |> Event.changeset(attrs)
+        |> Repo.insert!()
+
+      assert Repo.get!(Event, inserted.id).begin_year == -13_000_000_000
+    end
+
+    test "a begin_year below -13_800_000_000 is rejected by validation" do
+      attrs = %{@valid_attrs | begin_year: -14_000_000_000, begin_precision: 0}
       changeset = Event.changeset(%Event{}, attrs)
 
-      assert changeset.valid?
+      refute changeset.valid?
+      assert errors_on(changeset).begin_year != []
+    end
+
+    test "an end_year above 3000 is rejected by validation" do
+      attrs = Map.merge(@valid_attrs, %{end_year: 5000, end_precision: 9})
+      changeset = Event.changeset(%Event{}, attrs)
+
+      refute changeset.valid?
+      assert errors_on(changeset).end_year != []
     end
 
     test "sitelink_count 0 is accepted" do

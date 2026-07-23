@@ -51,7 +51,7 @@ defmodule Amanogawa.Ingestion.Wikidata.LinkDecoder do
   alias Amanogawa.Ingestion.SparqlClient.Result
   alias Amanogawa.Ingestion.Wikidata.ExtractedLink
 
-  @qid_uri_regex ~r{^http://www\.wikidata\.org/entity/(Q\d+)$}
+  @qid_uri_regex ~r{\Ahttp://www\.wikidata\.org/entity/(Q\d+)\z}
 
   @doc """
   Decodes every binding of `result` into a deduplicated list of
