@@ -1,0 +1,37 @@
+## "msgid"s in this file come from POT (.pot) files.
+###
+### Do not add, change, or remove "msgid"s manually here as
+### they're tied to the ones in the corresponding POT file
+### (with the same domain).
+###
+### Use "mix gettext.extract --merge" or "mix gettext.merge"
+### to merge POT files into PO files.
+msgid ""
+msgstr ""
+"Language: fr\n"
+"Plural-Forms: nplurals=2; plural=(n>1);\n"
+
+#: lib/amanogawa_web/timeline_i18n.ex:36
+#, elixir-autogen, elixir-format
+msgid "%{century}e s."
+msgstr "%{century}e s."
+
+#: lib/amanogawa_web/timeline_i18n.ex:35
+#, elixir-autogen, elixir-format
+msgid "%{ka} ka BP"
+msgstr "%{ka} ka BP"
+
+#: lib/amanogawa_web/timeline_i18n.ex:37
+#, elixir-autogen, elixir-format
+msgid "%{text} av. J.-C."
+msgstr "%{text} av. J.-C."
+
+#: lib/amanogawa_web/timeline_i18n.ex:43
+#, elixir-autogen, elixir-format
+msgid "Début de la fenêtre"
+msgstr "Début de la fenêtre"
+
+#: lib/amanogawa_web/timeline_i18n.ex:47
+#, elixir-autogen, elixir-format
+msgid "Fin de la fenêtre"
+msgstr "Fin de la fenêtre"

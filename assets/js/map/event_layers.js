@@ -50,24 +50,59 @@ export const VISIBLE_OPACITY = 1
 // Builds the `events-circles` layer: marker size by importance and zoom,
 // color from design tokens (`.claude/rules/tailwind.md`: no hardcoded hex
 // when a token exists), invisible until the hook raises the opacity after
-// the first data load.
-export function eventsCircleLayer({accentColor, haloColor, reducedMotion}) {
+// the first data load. `circleColor` is either a plain accent color (no
+// time window known yet, issue #022's transient pre-window state) or a
+// `mapLibreColorExpression` result (the temporal gradient, once a window
+// is known): both are valid MapLibre `circle-color` values, so the caller
+// (`assets/js/hooks/map_hook.js`) picks which one to pass without this
+// factory needing to know the difference.
+export function eventsCircleLayer({accentColor, haloColor, reducedMotion, circleColor}) {
   const paint = withTransition(
-    {
-      "circle-radius": circleRadiusExpression(),
-      "circle-color": accentColor,
-      // A selected event (issue #018: `event_selected`/`event_deselected`
-      // pushed by the LiveView, applied through `setFeatureState`) draws a
-      // thicker halo than the rest.
-      "circle-stroke-width": ["case", ["boolean", ["feature-state", "selected"], false], 3, 1],
-      "circle-stroke-color": haloColor,
-      "circle-opacity": HIDDEN_OPACITY
-    },
-    "circle-opacity",
+    withTransition(
+      {
+        "circle-radius": circleRadiusExpression(),
+        "circle-color": circleColor ?? accentColor,
+        // A selected event (issue #018: `event_selected`/`event_deselected`
+        // pushed by the LiveView, applied through `setFeatureState`) draws a
+        // thicker halo than the rest.
+        "circle-stroke-width": ["case", ["boolean", ["feature-state", "selected"], false], 3, 1],
+        "circle-stroke-color": haloColor,
+        "circle-opacity": HIDDEN_OPACITY
+      },
+      "circle-opacity",
+      reducedMotion
+    ),
+    "circle-color",
     reducedMotion
   )
 
   return {id: EVENTS_CIRCLE_LAYER_ID, type: "circle", source: EVENTS_SOURCE_ID, paint}
+}
+
+// Opacity a marker whose event falls outside the current window fades to:
+// not `HIDDEN_OPACITY`'s plain `0` reused verbatim, so a future reader can
+// tell "not loaded yet" (`HIDDEN_OPACITY`) apart from "loaded, but its
+// event now falls outside the selected window" (this constant) even
+// though they currently share the same value. This is the transient state
+// a timeline drag produces before its 150ms debounce triggers a refetch
+// (`.claude/rules/liveview.md`): the still-loaded, now out-of-window
+// markers fade out immediately rather than keep their gradient color, so
+// the map's live preview matches what the eventual refetch will show.
+export const OUT_OF_WINDOW_OPACITY = HIDDEN_OPACITY
+
+// `circle-opacity` expression for the current window: `VISIBLE_OPACITY`
+// for a feature whose `year` falls inside `[from, to]`, `OUT_OF_WINDOW_
+// OPACITY` otherwise. Only meaningful once the layer's opacity has already
+// been raised past `HIDDEN_OPACITY` by the hook's first-load fade-in
+// (`assets/js/hooks/map_hook.js`'s `eventsLoadedOnce` guard): applying it
+// any earlier would fight that fade-in.
+export function windowedOpacityExpression(from, to) {
+  return [
+    "case",
+    ["all", [">=", ["get", "year"], from], ["<=", ["get", "year"], to]],
+    VISIBLE_OPACITY,
+    OUT_OF_WINDOW_OPACITY
+  ]
 }
 
 // Label visibility combines a hard zoom floor (`minzoom`) with a step on

@@ -109,6 +109,7 @@ defmodule Amanogawa.Atlas.EventQueries do
 
   alias Amanogawa.Atlas.Event
   alias Amanogawa.Atlas.EventLink
+  alias Amanogawa.Atlas.TimeScale
   alias Amanogawa.Repo
 
   @type envelope :: %{min_lon: float(), min_lat: float(), max_lon: float(), max_lat: float()}
@@ -206,6 +207,129 @@ defmodule Amanogawa.Atlas.EventQueries do
       |> Enum.map(&Map.put(&1, :direction, :incoming))
 
     outgoing ++ incoming
+  end
+
+  @type histogram_opts :: %{
+          from: integer(),
+          to: integer(),
+          buckets: pos_integer(),
+          scale: TimeScale.t()
+        }
+
+  @doc """
+  The exact integer bucket edges of the histogram for `opts` (issue #020,
+  F04 quality finding m5): `opts.buckets + 1` strictly ordered years,
+  `opts.from` and `opts.to` exact at the extremes, interior edges computed
+  by `TimeScale.year/2` at positions equally spaced between
+  `position(opts.from)` and `position(opts.to)` and rounded to whole
+  years.
+
+  This is the single definition both sides of the histogram contract
+  consume: `Amanogawa.Atlas.event_histogram/1` announces these edges in
+  the endpoint's response, and `histogram_counts/1` below assigns events
+  to buckets in SQL against these SAME integer edges (never against a
+  recomputed floating-point position), so an event's bucket always matches
+  the integer bounds the response advertises.
+  """
+  @spec bucket_edges(histogram_opts()) :: [integer()]
+  def bucket_edges(%{from: from, to: to, buckets: buckets, scale: scale}) do
+    low = TimeScale.position(scale, from)
+    high = TimeScale.position(scale, to)
+
+    interior_edges =
+      Enum.map(1..(buckets - 1)//1, fn i ->
+        TimeScale.year(scale, low + i * (high - low) / buckets)
+      end)
+
+    [from] ++ interior_edges ++ [to]
+  end
+
+  @doc """
+  Counts events whose `begin_year` falls in `[opts.from, opts.to]`,
+  grouped by histogram bucket (issue #020): one SQL `width_bucket`
+  aggregation, no per-event Elixir loop.
+
+  Returns a sparse map `%{bucket_index => count}`, `bucket_index` 1-based
+  (PostgreSQL's `width_bucket` convention). `Amanogawa.Atlas.event_histogram/1`
+  turns this into the dense, zero-filled response the API contract
+  promises.
+
+  ## Bucket assignment semantics (F04 quality finding m5)
+
+  Events are assigned against the exact integer bucket edges the endpoint
+  announces (`bucket_edges/1`), through `width_bucket(begin_year,
+  thresholds_array)`: the interior edges are passed as a sorted array of
+  thresholds, and PostgreSQL returns the number of thresholds `<=`
+  `begin_year`, which is exactly `bucket - 1`. Bucket `k` therefore covers
+  `[edge(k-1), edge(k))`, half-open on the right, except the last bucket,
+  which is closed on both ends (`begin_year == opts.to` lands in it, since
+  the query's own `begin_year <= opts.to` filter already excludes anything
+  beyond). An event landing exactly on an interior integer edge belongs to
+  the bucket that *starts* at that edge.
+
+  The previous implementation recomputed each event's floating-point
+  symlog position in SQL and bucketed uniformly in position space: correct
+  in position space, but the response's integer edges are *rounded* years,
+  so an event lying between a rounded edge and the true position boundary
+  could be counted in one bucket while the announced integer bounds placed
+  it in the neighbor. Assigning against the announced integer edges makes
+  the SQL and the response contract agree by construction, at the bounded
+  cost of one array parameter of at most `opts.buckets - 1 <= 199`
+  bigints per query.
+  """
+  @spec histogram_counts(histogram_opts()) :: %{pos_integer() => non_neg_integer()}
+  def histogram_counts(%{from: from, to: to} = opts) do
+    interior_edges = opts |> bucket_edges() |> Enum.drop(1) |> Enum.drop(-1)
+
+    # Built as a map of per-field `dynamic/2` expressions, interpolated as
+    # a whole (`^selects`) rather than pinning the `bucket` fragment alone
+    # inside a literal select map: Ecto only allows a dynamic to appear as
+    # the *entire* select value (`select: ^fields`), not nested inside one
+    # (`select: %{field: ^dynamic(...)}`), per `Ecto.Query`'s "Dynamic
+    # queries" documentation. `count()` is SQL `count(*)`: rows are counted
+    # as such, no per-row column evaluation for a column that is `NOT NULL`
+    # by schema anyway.
+    selects = %{
+      bucket: histogram_bucket_expr(interior_edges),
+      count: dynamic([e], count())
+    }
+
+    # `begin_year` is required at the `Amanogawa.Atlas.Event` changeset
+    # boundary (`.claude/rules/elixir-idioms.md`: no defensive nil-check on
+    # data already validated past that boundary), unlike `geom`
+    # (`list_events/1` above), which is genuinely optional.
+    Event
+    |> where([e], e.begin_year >= ^from and e.begin_year <= ^to)
+    |> select(^selects)
+    |> group_by([e], selected_as(:bucket))
+    |> Repo.all()
+    |> Map.new(fn %{bucket: bucket, count: count} -> {bucket, count} end)
+  end
+
+  # The `width_bucket` expression shared by `select` (aliased `:bucket` via
+  # `selected_as/2`) and `group_by` (referencing that alias via
+  # `selected_as/1`) in `histogram_counts/1` above: PostgreSQL requires
+  # grouping by the same expression a computed `select` column comes from,
+  # and `selected_as/1` is what lets `group_by` reference the alias instead
+  # of repeating the SQL text a second time.
+  #
+  # `width_bucket(operand, thresholds)` with an array returns the count of
+  # thresholds `<= operand` (the array must be sorted ascending, which
+  # `bucket_edges/1` guarantees), so `+ 1` yields the 1-based bucket index.
+  # `buckets == 1` degenerates to an empty threshold array; PostgreSQL
+  # rejects an empty array there, so that case is the constant bucket `1`.
+  defp histogram_bucket_expr([]) do
+    dynamic(selected_as(fragment("1"), :bucket))
+  end
+
+  defp histogram_bucket_expr(interior_edges) do
+    dynamic(
+      [e],
+      selected_as(
+        fragment("width_bucket(?, ?::bigint[]) + 1", e.begin_year, ^interior_edges),
+        :bucket
+      )
+    )
   end
 
   defp outgoing_links_query(event_id) do

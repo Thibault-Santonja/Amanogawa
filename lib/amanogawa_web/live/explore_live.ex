@@ -20,13 +20,29 @@ defmodule AmanogawaWeb.ExploreLive do
   card and the relation lines traced on the map (issue #017) are owned
   entirely by the JS hook, driven by the `event_selected`/
   `event_deselected` events pushed below.
+
+  ## Time-window domain and rendering model (F04 decisions D1/D2)
+
+  D1: the time window lives on ONE domain, `Amanogawa.Atlas.TimeScale.
+  default/0`'s `[-300_000, current UTC year]`, shared by the URL parsing
+  and validation (`AmanogawaWeb.Params.ExploreParams`), the histogram
+  bounds (`AmanogawaWeb.Params.HistogramQuery`), and the client hooks:
+  this LiveView renders it as `data-domain-min`/`data-domain-max` on the
+  timeline hook element, the only channel through which JS learns the
+  bounds. D2: the timeline itself is a static full-domain frise (axis
+  ticks and histogram cover the whole domain, fetched once); the window
+  assigns here only drive the brush highlight and the map's temporal
+  filter, never an axis or histogram reload.
   """
   use AmanogawaWeb, :live_view
 
   alias Amanogawa.Atlas
+  alias Amanogawa.Atlas.TimeScale
   alias AmanogawaWeb.Components.EventPanel
+  alias AmanogawaWeb.Components.TimeLegend
   alias AmanogawaWeb.Params.ExploreParams
   alias AmanogawaWeb.RateLimit
+  alias AmanogawaWeb.TimelineI18n
 
   # Generous, dedicated quota for `select_event` (issue security-review
   # #6: it is the only `handle_event` here that ends up loading from the
@@ -43,10 +59,20 @@ defmodule AmanogawaWeb.ExploreLive do
 
   @impl true
   def mount(_params, _session, socket) do
+    # The single server-side time-window domain (F04 design decision D1,
+    # `Amanogawa.Atlas.TimeScale.default/0`), transmitted to the client
+    # hooks through `data-domain-min`/`data-domain-max` below: the JS side
+    # never hardcodes these bounds, it reads them off the DOM. Pure
+    # arithmetic, no database access (LiveView iron law).
+    %TimeScale{min_year: domain_min, max_year: domain_max} = TimeScale.default()
+
     {:ok,
      socket
      |> assign(:page_title, gettext("Carte du monde"))
      |> assign(:peer_ip, peer_ip(socket))
+     |> assign(:domain_min, domain_min)
+     |> assign(:domain_max, domain_max)
+     |> assign(:axis_templates, TimelineI18n.axis_templates())
      |> assign(:from, nil)
      |> assign(:to, nil)
      |> assign(:z, nil)
@@ -201,15 +227,26 @@ defmodule AmanogawaWeb.ExploreLive do
 
   def handle_event("map_moved", _params, socket), do: {:noreply, socket}
 
-  def handle_event("set_time_window", %{"from" => from, "to" => to}, socket) do
+  # Client -> server intent (issue #021), pushed by `TimelineHook` after
+  # its 150ms drag debounce (`assets/js/hooks/timeline.js`'s `pushWindow`).
+  # Deliberately named differently from `set_time_window`, the server ->
+  # client push consumed by both hooks (`maybe_push_time_window/3` below):
+  # the two directions used to share one name, which is exactly the
+  # ambiguity `.claude/rules/liveview.md`'s "explicit verb" convention
+  # exists to prevent. `replace: true` (mirroring `map_moved`'s own patch
+  # below): a drag debounces at 150ms but can still patch several times
+  # per gesture, and a `push_patch` per tick would otherwise flood the
+  # browser history with intermediate windows nobody would ever want to
+  # navigate back through individually.
+  def handle_event("select_time_window", %{"from" => from, "to" => to}, socket) do
     if ExploreParams.valid_window?(from, to) do
-      {:noreply, push_patch(socket, to: patch_path(socket, from: from, to: to))}
+      {:noreply, push_patch(socket, to: patch_path(socket, from: from, to: to), replace: true)}
     else
       {:noreply, socket}
     end
   end
 
-  def handle_event("set_time_window", _params, socket), do: {:noreply, socket}
+  def handle_event("select_time_window", _params, socket), do: {:noreply, socket}
 
   @impl true
   def render(assigns) do
@@ -228,6 +265,41 @@ defmodule AmanogawaWeb.ExploreLive do
       >
       </div>
       <EventPanel.event_panel :if={@selected_event} event={@selected_event} />
+      <:timeline>
+        <%!-- phx-update="ignore": LiveView never touches this subtree, d3
+        owns it entirely (`.claude/rules/liveview.md`). `data-from`/
+        `data-to` seed the hook's initial window; `set_time_window`
+        (pushed by `push_view_state/3` below, the same event the map hook
+        already consumes) keeps it in sync with the LiveView-owned state
+        afterwards. `data-domain-min`/`data-domain-max` carry the single
+        server-side time-window domain (F04 decision D1,
+        `Amanogawa.Atlas.TimeScale.default/0`); the `data-i18n-*`
+        attributes carry the translated axis-label templates and handle
+        ARIA labels (`AmanogawaWeb.TimelineI18n`, same pattern as the
+        hover card's labels on #map above). --%>
+        <div class="relative h-full w-full">
+          <div
+            id="timeline-hook"
+            phx-hook="TimelineHook"
+            phx-update="ignore"
+            class="h-full w-full"
+            data-from={@from}
+            data-to={@to}
+            data-domain-min={@domain_min}
+            data-domain-max={@domain_max}
+            data-i18n-ka-bp={@axis_templates.ka_bp}
+            data-i18n-century={@axis_templates.century}
+            data-i18n-bce={@axis_templates.bce}
+            data-i18n-window-start={TimelineI18n.window_start_label()}
+            data-i18n-window-end={TimelineI18n.window_end_label()}
+          >
+          </div>
+          <%!-- Outside the hook's `phx-update="ignore"` subtree (issue #022):
+          LiveView re-renders this on every `from`/`to` assign change, unlike
+          the hook's own SVG, which d3 owns entirely. --%>
+          <TimeLegend.time_legend from={@from} to={@to} />
+        </div>
+      </:timeline>
     </Layouts.app>
     """
   end

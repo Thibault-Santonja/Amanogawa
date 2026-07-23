@@ -30,6 +30,7 @@ defmodule AmanogawaWeb.Router do
     pipe_through :api
 
     get "/events", EventController, :index
+    get "/events/histogram", EventController, :histogram
     get "/events/:qid/summary", EventController, :summary
     get "/events/:qid/links", EventController, :links
   end

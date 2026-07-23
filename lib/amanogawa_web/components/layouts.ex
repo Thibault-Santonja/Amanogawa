@@ -18,10 +18,20 @@ defmodule AmanogawaWeb.Layouts do
   taking all remaining space (the inner block renders there), and a
   fixed-height strip at the bottom reserved for the timeline.
 
+  The `:timeline` slot (issue #020) renders inside the fixed-height
+  `footer#timeline` strip, reserved chrome (border, aria-label) that stays
+  in the layout since it wraps every page; the slot content itself is the
+  `TimelineHook` container, owned by whichever LiveView renders it
+  (`AmanogawaWeb.ExploreLive`), so the layout never hardcodes a second
+  `id="timeline"` element.
+
   ## Examples
 
       <Layouts.app flash={@flash}>
         <div id="map"></div>
+        <:timeline>
+          <div id="timeline-hook" phx-hook="TimelineHook" phx-update="ignore"></div>
+        </:timeline>
       </Layouts.app>
 
   """
@@ -32,6 +42,7 @@ defmodule AmanogawaWeb.Layouts do
     doc: "the current [scope](https://phoenix.hexdocs.pm/scopes.html)"
 
   slot :inner_block, required: true
+  slot :timeline, doc: "the TimelineHook container (issue #020), rendered inside footer#timeline"
 
   def app(assigns) do
     ~H"""
@@ -57,7 +68,7 @@ defmodule AmanogawaWeb.Layouts do
         class="h-28 shrink-0 border-t border-border bg-surface"
         aria-label={gettext("Frise chronologique")}
       >
-        <%!-- Reserved for the timeline hook (F04). --%>
+        {render_slot(@timeline)}
       </footer>
     </div>
 

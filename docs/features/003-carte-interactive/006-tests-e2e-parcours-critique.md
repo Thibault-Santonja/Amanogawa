@@ -37,6 +37,7 @@ Le risque couvert par les E2E est précisément celui que les tests unitaires et
 - [ ] **E2E** : parcours critique complet décrit ci-dessus (le livrable principal de cette issue).
 - [ ] **E2E** : navigation entre deux sélections successives sans désélection intermédiaire (lignes de relations remplacées, pas cumulées).
 - [ ] **E2E** : dark mode (émulation `prefers-color-scheme`) : la carte bascule de style et les événements restent affichés.
+- [ ] **E2E (frise, ajouté à la revue de F04)** : chargement de `/` : l'histogramme est non vide et l'axe couvre le domaine complet ; drag de la fenêtre (corps et poignées, y compris jusqu'au bord droit) : l'URL est patchée et carte/frise/légende restent synchronisées ; fenêtre étroite (1789-1815) : le surlignage est étroit mais l'axe reste plein domaine. Les revues de F04 ont montré que ces scénarios auraient détecté les trois findings majeurs (422 de l'histogramme au chargement, rejet silencieux au bord droit, entassement des graduations).
 
 ### Autres catégories
 

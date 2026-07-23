@@ -7,11 +7,14 @@ import {
   EVENTS_SOURCE_ID,
   HIDDEN_OPACITY,
   LABEL_MIN_ZOOM,
+  OUT_OF_WINDOW_OPACITY,
+  VISIBLE_OPACITY,
   emptyFeatureCollection,
   eventsCircleLayer,
   eventsLabelLayer,
   eventsSource,
-  textOpacityExpression
+  textOpacityExpression,
+  windowedOpacityExpression
 } from "./event_layers.js"
 
 const tokens = {
@@ -73,6 +76,35 @@ test("edge case: reducedMotion variant declares no transition at all", () => {
   const layer = eventsCircleLayer({...tokens, reducedMotion: true})
 
   assert.equal("circle-opacity-transition" in layer.paint, false)
+  assert.equal("circle-color-transition" in layer.paint, false)
+})
+
+test("happy path: circle layer uses circleColor over accentColor when both are given (issue #022)", () => {
+  const gradientExpression = ["interpolate", ["linear"], ["get", "year"], 0, "rgb(0, 0, 255)"]
+  const layer = eventsCircleLayer({...tokens, reducedMotion: false, circleColor: gradientExpression})
+
+  assert.deepEqual(layer.paint["circle-color"], gradientExpression)
+})
+
+test("happy path: circle layer falls back to accentColor when circleColor is not given", () => {
+  const layer = eventsCircleLayer({...tokens, reducedMotion: false})
+
+  assert.equal(layer.paint["circle-color"], tokens.accentColor)
+})
+
+test("happy path: circle layer declares a circle-color transition when motion is allowed", () => {
+  const layer = eventsCircleLayer({...tokens, reducedMotion: false})
+
+  assert.deepEqual(layer.paint["circle-color-transition"], {duration: 300, delay: 0})
+})
+
+test("happy path: windowedOpacityExpression is visible inside the window, faded outside it", () => {
+  const expression = windowedOpacityExpression(-500, 500)
+
+  assert.equal(expression[0], "case")
+  assert.deepEqual(expression[1], ["all", [">=", ["get", "year"], -500], ["<=", ["get", "year"], 500]])
+  assert.equal(expression[2], VISIBLE_OPACITY)
+  assert.equal(expression[3], OUT_OF_WINDOW_OPACITY)
 })
 
 test("happy path: label layer is gated by minzoom and the label field reads properties.label", () => {
