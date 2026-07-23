@@ -83,11 +83,15 @@ defmodule Amanogawa.Logging.JSONFormatter do
 
   @reserved_keys [:request_id]
 
+  # Depth bound for `sanitize/2` (see its comment below): defined before
+  # its first use in `put_extra_metadata/2`.
+  @max_depth 6
+
   defp put_extra_metadata(entry, metadata) do
     extra =
       metadata
       |> Keyword.drop(@reserved_keys)
-      |> Map.new(fn {key, value} -> {key, sanitize(value)} end)
+      |> Map.new(fn {key, value} -> sanitize_pair(key, value, @max_depth) end)
 
     if map_size(extra) == 0, do: entry, else: Map.put(entry, :metadata, extra)
   end
@@ -110,8 +114,6 @@ defmodule Amanogawa.Logging.JSONFormatter do
   # binary) becomes its `inspect/1` text. Depth-bounded so a maliciously
   # or accidentally deeply nested term cannot blow the stack (mirrors the
   # ingestion pipeline's own hostile-input posture).
-  @max_depth 6
-
   defp sanitize(term), do: sanitize(term, @max_depth)
 
   # Only containers are truncated at depth 0: a scalar (string, number,
@@ -121,19 +123,25 @@ defmodule Amanogawa.Logging.JSONFormatter do
   defp sanitize(term, 0) when (is_map(term) and not is_struct(term)) or is_list(term), do: "…"
 
   defp sanitize(term, depth) when is_map(term) and not is_struct(term) do
-    Map.new(term, fn {key, value} -> {sanitize_key(key), sanitize(value, depth - 1)} end)
+    Map.new(term, fn {key, value} -> sanitize_pair(key, value, depth - 1) end)
   end
 
   defp sanitize(term, depth) when is_list(term) do
-    if Keyword.keyword?(term) do
-      Map.new(term, fn {key, value} -> {sanitize_key(key), sanitize(value, depth - 1)} end)
-    else
-      Enum.map(term, &sanitize(&1, depth - 1))
+    cond do
+      # A printable charlist (Erlang libraries and drivers still log them)
+      # reads as its string, never as a JSON array of code points.
+      term != [] and :io_lib.printable_unicode_list(term) ->
+        List.to_string(term)
+
+      Keyword.keyword?(term) ->
+        Map.new(term, fn {key, value} -> sanitize_pair(key, value, depth - 1) end)
+
+      true ->
+        Enum.map(term, &sanitize(&1, depth - 1))
     end
   rescue
-    # A charlist is a list of integers: `Keyword.keyword?/1` above is safe
-    # on it, but a list mixing non-atom keys can still reach code paths
-    # that raise; inspect it instead of ever letting that surface.
+    # A list mixing non-atom keys can still reach code paths that raise;
+    # inspect it instead of ever letting that surface.
     _exception -> inspect(term)
   end
 
@@ -141,6 +149,28 @@ defmodule Amanogawa.Logging.JSONFormatter do
   defp sanitize(term, _depth) when is_number(term) or is_boolean(term) or is_nil(term), do: term
   defp sanitize(term, _depth) when is_atom(term), do: Atom.to_string(term)
   defp sanitize(term, _depth), do: inspect(term)
+
+  # Key/value pairs go through the redaction filter before the value is
+  # even sanitized: a production log line must never carry a credential
+  # (`.claude/rules/security.md`), whatever process put it in its metadata.
+  defp sanitize_pair(key, value, depth) do
+    key = sanitize_key(key)
+
+    if sensitive_key?(key) do
+      {key, "[REDACTED]"}
+    else
+      {key, sanitize(value, depth)}
+    end
+  end
+
+  @sensitive_fragments ["password", "secret", "token", "authorization"]
+
+  defp sensitive_key?(key) do
+    downcased = String.downcase(key)
+
+    String.contains?(downcased, @sensitive_fragments) or
+      downcased == "key" or String.ends_with?(downcased, "_key")
+  end
 
   defp sanitize_key(key) when is_binary(key), do: sanitize_string(key)
   defp sanitize_key(key) when is_atom(key), do: Atom.to_string(key)

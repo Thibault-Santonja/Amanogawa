@@ -55,6 +55,17 @@ defmodule AmanogawaWeb.HealthControllerTest do
       assert json_response(conn, 503) == %{"status" => "unavailable"}
     end
 
+    test "error case: a check that exits (stopped Repo) responds 503, never 500", %{conn: conn} do
+      # `DBConnection` exits (rather than raises) when its pool is down,
+      # exactly what a stopped Repo looks like: the health endpoint must
+      # degrade to 503, not crash the request process into a 500.
+      expect(HealthCheckMock, :check, fn -> exit(:noproc) end)
+
+      conn = get(conn, ~p"/health")
+
+      assert json_response(conn, 503) == %{"status" => "unavailable"}
+    end
+
     test "limit case: a hanging check responds 503 within the configured timeout", %{conn: conn} do
       expect(HealthCheckMock, :check, fn ->
         Process.sleep(:infinity)

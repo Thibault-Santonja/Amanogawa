@@ -50,6 +50,12 @@ defmodule Amanogawa.HealthCheck do
     end
   rescue
     _exception -> :error
+  catch
+    # A stopped Repo (or any dependency that exits instead of raising,
+    # `DBConnection` does on a missing pool) must degrade to a plain 503,
+    # never crash the linked caller into a 500: `Task.async/1` links this
+    # process to the endpoint's request process.
+    :exit, _reason -> :error
   end
 
   defp impl, do: Application.get_env(:amanogawa, :health_check, Amanogawa.HealthCheck.Repo)

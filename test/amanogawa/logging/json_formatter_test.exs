@@ -57,11 +57,18 @@ defmodule Amanogawa.Logging.JSONFormatterTest do
       assert decoded["metadata"]["range"] == "1..3"
     end
 
-    test "a charlist is rendered without crashing" do
+    test "a printable charlist is rendered as its string" do
       decoded =
         JSONFormatter.format(:info, "with charlist", @timestamp, chars: ~c"abc") |> decode()
 
-      assert decoded["metadata"]["chars"]
+      assert decoded["metadata"]["chars"] == "abc"
+    end
+
+    test "a non-printable integer list stays a JSON array" do
+      decoded =
+        JSONFormatter.format(:info, "with ints", @timestamp, codes: [1, 2, 3]) |> decode()
+
+      assert decoded["metadata"]["codes"] == [1, 2, 3]
     end
 
     test "an atom value is rendered as a plain string" do
@@ -83,6 +90,67 @@ defmodule Amanogawa.Logging.JSONFormatterTest do
         JSONFormatter.format(:info, "with tuple", @timestamp, pair: {:ok, 1}) |> decode()
 
       assert decoded["metadata"]["pair"] == "{:ok, 1}"
+    end
+  end
+
+  describe "security: sensitive metadata keys are redacted" do
+    test "password, secret, token, authorization and key variants are redacted" do
+      decoded =
+        JSONFormatter.format(:info, "redacted", @timestamp,
+          password: "hunter2",
+          db_secret: "s3cret",
+          auth_token: "tok",
+          authorization: "Bearer abc",
+          api_key: "k-123",
+          secret_key_base: "skb"
+        )
+        |> decode()
+
+      for key <- ~w(password db_secret auth_token authorization api_key secret_key_base) do
+        assert decoded["metadata"][key] == "[REDACTED]"
+      end
+    end
+
+    test "redaction applies inside nested maps and keyword values" do
+      decoded =
+        JSONFormatter.format(:info, "nested", @timestamp,
+          opts: %{password: "x", host: "db.internal"},
+          conn: [token: "t", port: 5432]
+        )
+        |> decode()
+
+      assert decoded["metadata"]["opts"]["password"] == "[REDACTED]"
+      assert decoded["metadata"]["opts"]["host"] == "db.internal"
+      assert decoded["metadata"]["conn"]["token"] == "[REDACTED]"
+      assert decoded["metadata"]["conn"]["port"] == 5432
+    end
+
+    test "ordinary keys are never redacted" do
+      decoded =
+        JSONFormatter.format(:info, "plain", @timestamp,
+          module: Foo,
+          request_path: "/health",
+          monkey: "still here"
+        )
+        |> decode()
+
+      assert decoded["metadata"]["module"] == "Elixir.Foo"
+      assert decoded["metadata"]["request_path"] == "/health"
+      assert decoded["metadata"]["monkey"] == "still here"
+    end
+  end
+
+  describe "single line invariant" do
+    test "a message containing newlines still yields exactly one JSON line" do
+      line =
+        JSONFormatter.format(:error, "line1\nline2\nline3", @timestamp, [])
+        |> IO.iodata_to_binary()
+
+      assert String.ends_with?(line, "\n")
+
+      body = String.trim_trailing(line, "\n")
+      refute body =~ "\n"
+      assert Jason.decode!(body)["message"] == "line1\nline2\nline3"
     end
   end
 

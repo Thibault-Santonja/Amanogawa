@@ -14,7 +14,8 @@ Aucune valeur de ce dépôt n'a été déployée sur un serveur réel au moment 
 | `config/deploy.yml` | `env.clear.PHX_HOST: amanogawa.example` | Le même nom de domaine que `proxy.host` |
 | `config/deploy.yml` | `registry.username: PLACEHOLDER_GITHUB_USER` | Le compte propriétaire de l'image |
 | `config/deploy.yml` | `accessories.db.host: PLACEHOLDER_VPS_HOST_OR_IP` | Le même VPS que `servers.web` (accessory colocalisé) |
-| `.kamal/secrets` (à créer, jamais commité) | toutes les valeurs | Voir `.kamal/secrets.example` |
+| `config/deploy.yml` | `env.clear.TRUSTED_PROXIES: "172.18.0.0/16"` | Le sous-réseau du réseau Docker privé Kamal sur le VPS (`docker network inspect kamal` après `kamal setup`) : seules les requêtes relayées par kamal-proxy depuis ce sous-réseau sont autorisées à poser `X-Forwarded-For` |
+| `.kamal/secrets` (à créer, jamais commité) | toutes les valeurs | Voir `.kamal/secrets.example` (registre, `SECRET_KEY_BASE`, `DATABASE_URL`, `POSTGRES_PASSWORD`, `RELEASE_COOKIE`) |
 | DNS | - | Un enregistrement A/AAAA pointant `proxy.host` vers le VPS |
 
 ## Prérequis
@@ -40,6 +41,31 @@ kamal setup
 ```
 
 `kamal setup` construit l'image, la pousse sur le registre, démarre l'accessory `db` puis le service `amanogawa` ; les migrations tournent automatiquement au démarrage du conteneur (`rel/overlays/bin/docker-entrypoint`, voir "Migrations" plus bas).
+
+## Rôle PostgreSQL dédié (non superuser)
+
+L'application ne se connecte jamais avec le superuser `postgres` de l'accessory : `DATABASE_URL` utilise un rôle dédié, propriétaire de sa seule base. À créer une fois, après le premier `kamal accessory boot db` (ou pendant `kamal setup`, avant le premier démarrage de l'application) :
+
+```sh
+kamal accessory exec db --interactive "psql -U postgres"
+```
+
+```sql
+-- Rôle applicatif : LOGIN seulement, ni SUPERUSER, ni CREATEDB, ni CREATEROLE.
+CREATE ROLE amanogawa LOGIN PASSWORD '<mot de passe du rôle, distinct de POSTGRES_PASSWORD>';
+
+-- Propriétaire de sa base uniquement : les migrations créent les schémas
+-- atlas/ingestion et leurs tables, ce qui exige la propriété de la base
+-- (ou GRANT CREATE), rien de plus. La propriété couvre aussi le schéma
+-- public (pg_database_owner), où vivent les tables Oban.
+ALTER DATABASE amanogawa_prod OWNER TO amanogawa;
+```
+
+Notes :
+
+- L'extension PostGIS est déjà installée dans `amanogawa_prod` par les scripts d'initialisation de l'image `postgis/postgis` : le `CREATE EXTENSION IF NOT EXISTS postgis` de la première migration est alors un no-op qui ne réclame aucun privilège superuser.
+- `POSTGRES_PASSWORD` (superuser) ne sert plus qu'à l'administration : création de ce rôle, `psql` d'exploitation, sauvegardes (`docs/ops/restore.md`).
+- `DATABASE_URL` devient `ecto://amanogawa:<mot de passe du rôle>@amanogawa-db:5432/amanogawa_prod` (voir `.kamal/secrets.example`).
 
 ## Déploiement courant
 
@@ -105,6 +131,16 @@ kamal app logs | jq 'select(.request_id == "<id>")'
 }
 ```
 
+Alternative sans toucher au daemon (utile sur un VPS mutualisé où `/etc/docker/daemon.json` affecterait les autres projets) : Kamal sait déclarer la même rotation au niveau du conteneur, dans `config/deploy.yml` :
+
+```yaml
+logging:
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: 5
+```
+
 ## Console distante
 
 ```sh
@@ -115,7 +151,8 @@ Ouvre une console IEx connectée au nœud en production. À utiliser avec pruden
 
 ## Gestion des secrets
 
-- `.kamal/secrets` (jamais commité, voir `.gitignore`) contient `KAMAL_REGISTRY_PASSWORD`, `SECRET_KEY_BASE`, `DATABASE_URL`, `POSTGRES_PASSWORD`. `.kamal/secrets.example` documente chaque variable sans valeur réelle.
+- `.kamal/secrets` (jamais commité, voir `.gitignore` : `/.kamal/secrets*` couvre aussi les fichiers par destination comme `secrets.production`) contient `KAMAL_REGISTRY_PASSWORD`, `SECRET_KEY_BASE`, `DATABASE_URL`, `POSTGRES_PASSWORD`, `RELEASE_COOKIE`. `.kamal/secrets.example` documente chaque variable sans valeur réelle.
+- `RELEASE_COOKIE` (cookie de distribution Erlang) est injecté à l'exécution plutôt que figé dans l'image au `mix release` : l'image publiée sur le registre ne contient ainsi jamais de cookie utilisable. Il est requis par la console distante (`bin/amanogawa remote` ci-dessus) ; le générer une fois avec `openssl rand -hex 32` et le conserver stable entre déploiements.
 - Kamal injecte chaque secret comme variable d'environnement du conteneur correspondant (`env.secret` dans `config/deploy.yml`) ; `config/runtime.exs` les lit exactement comme dans n'importe quel déploiement Docker classique.
 - Aucun secret n'est jamais présent dans `config/deploy.yml`, le Dockerfile, ou l'image construite.
 
@@ -135,11 +172,12 @@ Variables d'environnement optionnelles (`config/runtime.exs`), sans service tier
 
 ## Checklist de smoke test post-déploiement
 
-- [ ] `curl -sI https://<domaine>/health` répond `200`, corps `{"status":"ok","version":"..."}`.
+- [ ] `curl -s https://<domaine>/health` répond le corps `{"status":"ok","version":"..."}` (un `-I`/HEAD ne montrerait pas le corps ; pour le seul code : `curl -s -o /dev/null -w '%{http_code}' https://<domaine>/health` répond `200`).
 - [ ] La page d'accueil (`https://<domaine>/`) s'affiche, la carte se charge.
 - [ ] Le certificat TLS est valide (émis par Let's Encrypt via kamal-proxy) : `curl -v https://<domaine>/ 2>&1 | grep -i "SSL certificate verify ok"` ou vérification navigateur.
 - [ ] `kamal deploy` d'une version N+1 ne produit aucune requête en erreur pendant la bascule (observer `kamal app logs -f` pendant le déploiement).
 - [ ] `/sources`, `/mentions-legales`, `/confidentialite` répondent `200`.
+- [ ] `TRUSTED_PROXIES` est effectif : depuis deux adresses IP clientes distinctes (par exemple une connexion fixe et une connexion mobile), épuiser le quota `/api/events` de l'une (`429` au-delà de `RATE_LIMIT_PER_MINUTE`) ne doit pas affecter l'autre. Si les deux partagent le même quota, la limitation par IP s'appuie sur l'adresse du proxy au lieu de celle du client : corriger le sous-réseau `TRUSTED_PROXIES` (`docker network inspect kamal`).
 - [ ] À J+1 : un dump valide est présent sur le stockage distant (`docs/ops/restore.md`, section sauvegardes).
 
 ## Vérification locale (menée pendant l'implémentation de cette issue)

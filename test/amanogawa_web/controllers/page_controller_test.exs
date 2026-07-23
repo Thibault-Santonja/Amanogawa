@@ -105,6 +105,26 @@ defmodule AmanogawaWeb.PageControllerTest do
     end
   end
 
+  describe "cookie contract on the home page" do
+    test "GET / sets exactly one cookie, the session cookie, and it is session-scoped", %{
+      conn: conn
+    } do
+      conn = get(conn, ~p"/")
+
+      # The privacy policy (/confidentialite) promises exactly one,
+      # strictly necessary session cookie on the LiveView home page:
+      # this test locks that promise. One Set-Cookie header, the session
+      # key only, and neither Expires nor Max-Age (a session cookie dies
+      # with the browser session, it is never persistent).
+      assert [set_cookie] = get_resp_header(conn, "set-cookie")
+      assert String.starts_with?(set_cookie, "_amanogawa_key=")
+
+      downcased = String.downcase(set_cookie)
+      refute downcased =~ "expires="
+      refute downcased =~ "max-age="
+    end
+  end
+
   describe "no session, no cookie for an anonymous visitor" do
     test "GET /sources sets no set-cookie header", %{conn: conn} do
       conn = get(conn, ~p"/sources")

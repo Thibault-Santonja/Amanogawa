@@ -17,7 +17,9 @@ Alternative écartée (**option B**, accessory Kamal dédié) : rejetée, coût 
 
 - **Locales, temporaires** : `/var/backups/amanogawa/` sur le VPS pendant la durée du transfert seulement ; `ops/backup/pg_backup.sh` supprime le fichier local après un envoi distant réussi. Le VPS n'est jamais le stockage de référence.
 - **Distantes, durables** : un stockage séparé du VPS (Hetzner Storage Box ou tout remote compatible `rclone`), configuré via `RCLONE_REMOTE` dans le fichier d'environnement du script (`/etc/amanogawa/backup.env`, permissions 600, jamais commité). Une panne ou une compromission du VPS n'emporte donc jamais les sauvegardes existantes. Recommandé : un jeton d'écriture pour le cron (pas de suppression), la rotation elle-même s'exécutant avec des identifiants distincts si le fournisseur le permet (`.claude/rules/pragmatic-developer.md`'s own "résister à une compromission").
-- **Nommage** : `amanogawa_YYYY-MM-DD.dump`, préfixe `amanogawa_` pour éviter toute collision avec les sauvegardes d'autres projets sur le même stockage mutualisé.
+- **Nommage** : `amanogawa_YYYY-MM-DD.dump`, préfixe `amanogawa_` pour éviter toute collision avec les sauvegardes d'autres projets sur le même stockage mutualisé. Un dump par jour UTC, nom déterministe : relancer le script le même jour **écrase** le dump du jour, en local comme sur le remote (`rclone copyto` remplace la destination). Comportement assumé : le cron quotidien est idempotent, et une relance manuelle après un échec répare la sauvegarde du jour au lieu d'empiler des variantes.
+- **Permissions** : le script pose `umask 077` et crée le répertoire local en `700` (`install -d -m 700`) ; le dump n'est jamais lisible au-delà de son propriétaire, même pendant le transfert.
+- **Chiffrement du remote** : le transport vers une Storage Box Hetzner passe par SFTP (backend `sftp` de rclone : identifiants et transfert chiffrés). Pour un chiffrement au repos indépendant du fournisseur, envelopper le remote dans un backend [`rclone crypt`](https://rclone.org/crypt/) (`rclone config`, type `crypt`, pointant le remote SFTP ; `RCLONE_REMOTE` référence alors le remote chiffré). Recommandé dès que le stockage distant est mutualisé ou géré par un tiers ; conserver la passphrase `crypt` hors du VPS (gestionnaire de mots de passe), sans elle les sauvegardes sont irrécupérables.
 
 ## Rotation
 
@@ -34,6 +36,10 @@ Un même fichier peut satisfaire plusieurs catégories à la fois (par exemple l
 ```sh
 POSTGRES_CONTAINER=amanogawa-db     # nom du conteneur accessory Kamal
 POSTGRES_DB=amanogawa_prod
+# Superuser du conteneur : pg_dump s'exécute DANS l'accessory via `docker
+# exec` sans mot de passe (auth locale), le superuser est le choix robuste
+# ici. Le rôle applicatif dédié `amanogawa` (docs/ops/deploy.md, "Rôle
+# PostgreSQL dédié"), propriétaire de la base, fonctionne aussi.
 POSTGRES_USER=postgres
 RCLONE_REMOTE=hetzner-storagebox:amanogawa/backups
 BACKUP_LOCAL_DIR=/var/backups/amanogawa   # optionnel, valeur par défaut
@@ -57,7 +63,7 @@ Heure creuse, après les fenêtres d'ingestion mensuelle (`config/config.exs`, `
 0 4 * * * root AMANOGAWA_BACKUP_ENV_FILE=/etc/amanogawa/backup.env /usr/local/bin/amanogawa_pg_backup.sh >> /var/log/amanogawa/pg_backup.log 2>&1
 ```
 
-Le script gère lui-même la remontée d'échec par mail (`notify_failure`, `ops/backup/pg_backup.sh`) : une sortie non nulle, quelle qu'en soit la cause (`set -euo pipefail` plus un `trap ... ERR`), déclenche un mail via le relais SMTP local (`msmtp`) avant de propager le code de sortie. Le fichier de log (`>> ... 2>&1`) reste la source de diagnostic détaillé ; le mail ne contient qu'un résumé (ligne et code de sortie).
+Le script gère lui-même la remontée d'échec par mail (`notify_failure`, `ops/backup/pg_backup.sh`) : toute sortie avec un code non nul, quelle qu'en soit la cause (`set -Eeuo pipefail` pour les commandes non vérifiées, chemins `die` explicites compris), passe par le `trap 'on_exit $?' EXIT`, qui supprime l'éventuel dump local partiel puis envoie un mail via le relais SMTP local (`msmtp`) avant de propager le code de sortie. Un `trap ERR` seul ne couvrirait pas les chemins `die` (un `exit 1` explicite ne déclenche pas ERR). Le fichier de log (`>> ... 2>&1`) reste la source de diagnostic détaillé ; le mail ne contient qu'un résumé (code de sortie).
 
 ## Vérification `--dry-run`
 
@@ -106,9 +112,21 @@ Le script gère lui-même la remontée d'échec par mail (`notify_failure`, `ops
 
    Attendu : les schémas `atlas`/`ingestion` présents, l'extension `postgis` installée, les cinq tables (`atlas.borders`, `atlas.event_links`, `atlas.events`, `atlas.polities`, `ingestion.sync_runs`), un nombre de lignes cohérent avec la volumétrie connue au moment du dump.
 
-6. **Rebrancher l'application** : pointer `DATABASE_URL` de l'application vers la base restaurée (sur un environnement jetable pour un exercice, sur l'accessory réel restauré pour un incident réel), redémarrer le conteneur applicatif.
+6. **Recréer le rôle applicatif dédié** (l'instance cible est vierge, le dump restauré avec `--no-owner` appartient à `postgres`) puis lui rendre la propriété de la base, comme au premier déploiement (`docs/ops/deploy.md`, "Rôle PostgreSQL dédié") :
 
-7. **Smoke test** : `GET /health` répond `200`, la page d'accueil et la carte se chargent, `GET /api/borders?year=<année>` répond `200`.
+   ```sh
+   docker exec amanogawa-restore-drill psql -U postgres \
+     -c "CREATE ROLE amanogawa LOGIN PASSWORD '<mot de passe du rôle>';" \
+     -c "ALTER DATABASE amanogawa_restored OWNER TO amanogawa;"
+   docker exec amanogawa-restore-drill psql -U postgres -d amanogawa_restored \
+     -c "ALTER SCHEMA atlas OWNER TO amanogawa;" \
+     -c "ALTER SCHEMA ingestion OWNER TO amanogawa;"
+   # Vérifier avec \dn+ que amanogawa possède bien atlas et ingestion.
+   ```
+
+7. **Rebrancher l'application** : pointer `DATABASE_URL` de l'application (avec le rôle `amanogawa`, jamais le superuser) vers la base restaurée (sur un environnement jetable pour un exercice, sur l'accessory réel restauré pour un incident réel), redémarrer le conteneur applicatif.
+
+8. **Smoke test** : `GET /health` répond `200`, la page d'accueil et la carte se chargent, `GET /api/borders?year=<année>` répond `200`.
 
 ## Exercice de restauration réel
 

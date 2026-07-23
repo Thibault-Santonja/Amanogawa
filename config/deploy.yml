@@ -33,6 +33,10 @@ proxy:
   # PLACEHOLDER: the public hostname this deployment serves. Must match
   # PHX_HOST below and the DNS record pointed at the VPS.
   host: amanogawa.example
+  # The container port kamal-proxy forwards traffic to: must match the
+  # PORT env below and the Dockerfile's EXPOSE. Declared explicitly rather
+  # than relying on kamal's default so the three stay visibly in sync.
+  app_port: 4000
   healthcheck:
     path: /health
     interval: 3
@@ -45,6 +49,12 @@ registry:
   password:
     - KAMAL_REGISTRY_PASSWORD
 
+# The target VPS is amd64 (Hetzner); the development machine building the
+# image may be Apple Silicon (arm64). Pinning the architecture makes
+# `kamal deploy` cross-build the right image regardless of the build host.
+builder:
+  arch: amd64
+
 # Plain, non-secret configuration (issue #026's own `clear`/`secret` split,
 # `.claude/rules/security.md`: "no secrets in the repo, ever"). Everything
 # here is read by `config/runtime.exs` exactly as in any other environment
@@ -54,9 +64,21 @@ env:
     PHX_HOST: amanogawa.example
     PORT: "4000"
     POOL_SIZE: "10"
+    # PLACEHOLDER: the subnet of Kamal's private Docker network on the VPS
+    # (`docker network inspect kamal` on the host, after `kamal setup`).
+    # Only requests forwarded from this subnet (kamal-proxy)
+    # are trusted to set X-Forwarded-For, so the per-IP rate limit
+    # (AmanogawaWeb.Plugs.RateLimit) keys on the real client address
+    # instead of the proxy's. Wrong subnet = every client shares the
+    # proxy's quota; too broad = clients can spoof their own IP.
+    TRUSTED_PROXIES: "172.18.0.0/16"
   secret:
     - SECRET_KEY_BASE
     - DATABASE_URL
+    # Erlang distribution cookie, injected at runtime so it is never baked
+    # into (or readable from) the published image: required for
+    # `kamal app exec -i "bin/amanogawa remote"` (docs/ops/deploy.md).
+    - RELEASE_COOKIE
 
 # PostGIS accessory (issue #026): same image family as docker-compose.yml
 # and the CI workflow, so the extension and PostgreSQL major version

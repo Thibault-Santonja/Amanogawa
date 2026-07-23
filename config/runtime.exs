@@ -110,16 +110,17 @@ if config_env() == :prod do
     secret_key_base: secret_key_base
 
   # Structured JSON logs (issue #028): production only, development keeps
-  # the human-readable template format unchanged (config/dev.exs). Every
-  # metadata key Logger holds is forwarded to the formatter
-  # (`Amanogawa.Logging.JSONFormatter` sanitizes anything it cannot
-  # serialize, never crashes), unlike the narrower `[:request_id]` list
-  # used by the default formatter elsewhere (config/config.exs): a
-  # production incident benefits from more context (module, function,
-  # line, crash_reason on exception logs), not less.
+  # the human-readable template format unchanged (config/dev.exs). An
+  # explicit, deliberate metadata list rather than `:all`: a production
+  # incident benefits from more context than the default `[:request_id]`
+  # (config/config.exs), but forwarding every key any process ever puts in
+  # its metadata would bloat each line with internals (Oban and Phoenix
+  # both set many) and widen the surface for accidental leakage.
+  # `Amanogawa.Logging.JSONFormatter` sanitizes anything it cannot
+  # serialize and never crashes.
   config :logger, :default_formatter,
     format: {Amanogawa.Logging.JSONFormatter, :format},
-    metadata: :all
+    metadata: [:request_id, :module, :function, :line, :pid, :crash_reason]
 
   # Alerting (issue #028, option A): sober thresholds, overridable without
   # a rebuild. No mail is ever sent unless ALERT_RECIPIENT_EMAIL is set:

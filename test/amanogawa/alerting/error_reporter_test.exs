@@ -120,6 +120,115 @@ defmodule Amanogawa.Alerting.ErrorReporterTest do
     end
   end
 
+  describe "resilience: supervisor restart" do
+    test "a killed reporter is restarted, attach stays idempotent, the handler keeps working" do
+      clock = start_clock()
+
+      {pid, name} =
+        start_reporter(clock_agent: clock, threshold: 2, window_ms: 60_000, silence_ms: 3_600_000)
+
+      # Kill the GenServer the way a real crash would: the supervisor
+      # restarts it, and `start_link/1` re-runs `attach/1` against a
+      # handler that is still registered from the first start. Before
+      # attach/1 was idempotent, that second attach returned
+      # {:error, {:already_exist, _}} and the `:ok = attach(name)` match
+      # turned every restart into a crash loop.
+      Process.exit(pid, :kill)
+      new_pid = await_restart(name, pid)
+      assert Process.alive?(new_pid)
+
+      # The handler registered before the crash points at the *name*, not
+      # the dead pid: it must keep counting against the restarted process.
+      expect(NotifierMock, :deliver, fn _subject, _body -> :ok end)
+      for _ <- 1..2, do: Logger.error("after restart")
+      sync(name)
+    end
+  end
+
+  defp await_restart(name, old_pid, attempts_left \\ 100)
+
+  defp await_restart(name, _old_pid, 0),
+    do: raise("#{inspect(name)} was not restarted by its supervisor")
+
+  defp await_restart(name, old_pid, attempts_left) do
+    case GenServer.whereis(name) do
+      pid when is_pid(pid) and pid != old_pid ->
+        pid
+
+      _not_yet ->
+        Process.sleep(10)
+        await_restart(name, old_pid, attempts_left - 1)
+    end
+  end
+
+  describe "limit case: bounded accumulation" do
+    test "an error storm during the silence period is counted, never accumulated as a list" do
+      clock = start_clock()
+
+      expect(NotifierMock, :deliver, fn _subject, _body -> :ok end)
+
+      {_pid, name} =
+        start_reporter(clock_agent: clock, threshold: 3, window_ms: 60_000, silence_ms: 10_000)
+
+      for _ <- 1..3, do: Logger.error("first burst")
+      sync(name)
+
+      # 50 more errors while silenced: the state must stay bounded (list
+      # capped at the threshold, the excess a plain integer), whatever the
+      # storm's size.
+      for _ <- 1..50, do: Logger.error("storm during silence")
+      state = sync(name)
+      assert length(state.timestamps) == 3
+      assert state.overflow == 47
+
+      # Once the silence period ends, the next error reports the full
+      # count: 3 tracked timestamps + 47 overflowed + this one.
+      advance(clock, 10_000)
+
+      expect(NotifierMock, :deliver, fn subject, _body ->
+        assert subject =~ "51"
+        :ok
+      end)
+
+      Logger.error("one more, after silence")
+      sync(name)
+    end
+  end
+
+  describe "error case: incomplete mail configuration" do
+    @tag :capture_log
+    test "the handler is not attached when the recipient is set without a sender" do
+      previous = Application.get_env(:amanogawa, Amanogawa.Alerting)
+
+      on_exit(fn ->
+        case previous do
+          nil -> Application.delete_env(:amanogawa, Amanogawa.Alerting)
+          config -> Application.put_env(:amanogawa, Amanogawa.Alerting, config)
+        end
+      end)
+
+      Application.put_env(:amanogawa, Amanogawa.Alerting,
+        recipient: "ops@example.test",
+        from: nil
+      )
+
+      name = :"error_reporter_#{System.unique_integer([:positive])}"
+
+      log =
+        ExUnit.CaptureLog.capture_log([level: :warning], fn ->
+          start_supervised!(
+            {ErrorReporter, name: name, notifier: Amanogawa.Alerting.Notifier.Mailer},
+            id: name
+          )
+        end)
+
+      assert log =~ "incomplete"
+
+      assert {:error, {:not_found, :amanogawa_error_reporter}} =
+               :logger.get_handler_config(:amanogawa_error_reporter)
+    end
+  end
+
   describe "limit case: silence period" do
     test "repeated bursts during the silence period send at most one mail, then reopen" do
       clock = start_clock()

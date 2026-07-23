@@ -42,10 +42,12 @@ npm-debug.log
 # Environment files (secrets stay out of the repo).
 .env
 
-# Kamal secrets (issue #026): the real file lives only on the machine that
-# runs `kamal deploy`, never in the repository. `.kamal/secrets.example`
-# (no real values) is the only file of this pair that is committed.
-/.kamal/secrets
+# Kamal secrets (issue #026): the real files live only on the machine that
+# runs `kamal deploy`, never in the repository. The glob also covers
+# per-destination files (`secrets.production`, `secrets.staging`, ...);
+# `.kamal/secrets.example` (no real values) is the only committed exception.
+/.kamal/secrets*
+!/.kamal/secrets.example
 
 # Local backup restore-drill scratch data (issue #028): dumps and
 # temporary restore targets used while exercising docs/ops/restore.md

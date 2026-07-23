@@ -29,5 +29,11 @@ config :amanogawa, AmanogawaWeb.Endpoint,
 # Do not print debug messages in production
 config :logger, level: :info
 
+# The JSON formatter labels every timestamp as UTC
+# (`Amanogawa.Logging.JSONFormatter.format_timestamp/1` appends `Z`): make
+# Logger hand it UTC wall clock times so that label stays truthful
+# regardless of the host's timezone.
+config :logger, utc_log: true
+
 # Runtime production configuration, including reading
 # of environment variables, is done on config/runtime.exs.

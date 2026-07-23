@@ -55,15 +55,17 @@ RUN mix deps.get --only $MIX_ENV
 COPY config/config.exs config/${MIX_ENV}.exs config/
 RUN mix deps.compile
 
-COPY priv priv
-COPY lib lib
-RUN mix compile
-
-# The npm lockfile lives under assets/, its own dependency layer.
+# Asset toolchain and npm packages before the application source: these
+# layers only invalidate when the npm lockfile (or mix config) changes,
+# never on an edit under lib/ or priv/.
 COPY assets/package.json assets/package-lock.json assets/
 RUN mix tailwind.install --if-missing \
   && mix esbuild.install --if-missing \
   && npm --prefix assets ci --no-fund --no-audit
+
+COPY priv priv
+COPY lib lib
+RUN mix compile
 
 COPY assets assets
 RUN mix assets.deploy
@@ -102,7 +104,29 @@ WORKDIR /app
 RUN groupadd --gid 10001 amanogawa \
   && useradd --uid 10001 --gid amanogawa --home-dir /app --shell /usr/sbin/nologin amanogawa
 
-COPY --from=builder --chown=amanogawa:amanogawa /app/_build/${MIX_ENV}/rel/amanogawa ./
+# The release is owned by root and only readable/executable by the runtime
+# user's group: the process cannot rewrite the code it runs (defense in
+# depth). The only writable path is /app/tmp, where the release scripts
+# write their runtime files (RELEASE_TMP below).
+COPY --from=builder --chown=root:amanogawa /app/_build/${MIX_ENV}/rel/amanogawa ./
+
+# g=u first: overlay scripts land as 700 from the builder, the group must
+# mirror the owner's read/execute bits before write is stripped from it.
+# /app itself was created by WORKDIR as root:root, before any --chown
+# applied: regroup it explicitly or the runtime user cannot traverse it.
+RUN chown root:amanogawa /app \
+  && chmod -R g=u /app \
+  && chmod -R g-w,o-rwx /app \
+  && mkdir -p /app/tmp \
+  && chown amanogawa:amanogawa /app/tmp \
+  && chmod 700 /app/tmp
+
+# RELEASE_COOKIE is not set here on purpose: the Erlang distribution
+# cookie is injected at runtime (config/deploy.yml `env.secret`,
+# `.kamal/secrets.example`) so the published image never carries a usable
+# cookie; the build-time `releases/COOKIE` file only serves throwaway
+# local `docker run` checks.
+ENV RELEASE_TMP=/app/tmp
 
 USER amanogawa
 

@@ -40,6 +40,7 @@ defmodule Amanogawa.Alerting.ErrorReporter do
     :notifier,
     :clock,
     timestamps: [],
+    overflow: 0,
     silenced_until_ms: nil
   ]
 
@@ -66,13 +67,57 @@ defmodule Amanogawa.Alerting.ErrorReporter do
 
     case GenServer.start_link(__MODULE__, opts, name: name) do
       {:ok, _pid} = ok ->
-        if Keyword.get(opts, :attach?, true), do: :ok = attach(name)
+        if Keyword.get(opts, :attach?, true) and attachable?(opts), do: :ok = attach(name)
         ok
 
       other ->
         other
     end
   end
+
+  # The default notifier (`Amanogawa.Alerting.Notifier.Mailer`) reads both
+  # addresses from config at delivery time with `Keyword.fetch!/2`: a
+  # half-configured deployment (recipient without sender, or the reverse)
+  # would make every alert delivery raise, be swallowed by `send_alert/2`'s
+  # rescue, and never reach anyone. Refuse to attach the handler instead:
+  # the failure mode becomes "no handler, one explicit warning at boot"
+  # rather than "handler attached, alerts silently lost". A custom notifier
+  # (tests, or any non-mail implementation) manages its own configuration.
+  defp attachable?(opts) do
+    case Keyword.get(opts, :notifier, Amanogawa.Alerting.Notifier.Mailer) do
+      Amanogawa.Alerting.Notifier.Mailer -> mail_config_complete?()
+      _custom_notifier -> true
+    end
+  end
+
+  defp mail_config_complete? do
+    config = Application.get_env(:amanogawa, Amanogawa.Alerting, [])
+    from = presence(Keyword.get(config, :from))
+    recipient = presence(Keyword.get(config, :recipient))
+
+    case {from, recipient} do
+      {nil, nil} ->
+        # Alerting simply not configured (ALERT_RECIPIENT_EMAIL unset):
+        # documented as "runs without alerting", not worth a warning.
+        false
+
+      {_from, _recipient} when is_nil(from) or is_nil(recipient) ->
+        Logger.warning(
+          "Amanogawa.Alerting.ErrorReporter: mail alerting configuration is incomplete " <>
+            "(ALERT_FROM_EMAIL and ALERT_RECIPIENT_EMAIL must both be set); " <>
+            "the error handler was not attached, no alert mail will be sent"
+        )
+
+        false
+
+      _both_present ->
+        true
+    end
+  end
+
+  defp presence(nil), do: nil
+  defp presence(""), do: nil
+  defp presence(value), do: value
 
   @doc "Registers this GenServer as a `:logger` handler for `:error` events."
   @spec attach(GenServer.server()) :: :ok | {:error, term()}
@@ -81,7 +126,21 @@ defmodule Amanogawa.Alerting.ErrorReporter do
     # (`:logger`'s own primary vs. handler level check): only `:error` and
     # above (there is nothing above `:error` in this codebase's usage)
     # reach this handler at all.
-    :logger.add_handler(@handler_id, __MODULE__, %{level: :error, config: server})
+    case :logger.add_handler(@handler_id, __MODULE__, %{level: :error, config: server}) do
+      :ok ->
+        :ok
+
+      # Idempotent: the handler's config points to the GenServer *name*,
+      # never a pid, so a handler left attached across a supervisor restart
+      # of the GenServer keeps working as-is. Treating "already attached"
+      # as an error here would turn every restart into a crash loop
+      # (`start_link/1` matches `:ok = attach(name)`).
+      {:error, {:already_exist, @handler_id}} ->
+        :ok
+
+      {:error, _reason} = error ->
+        error
+    end
   end
 
   @doc "Unregisters the handler installed by `attach/1`."
@@ -131,13 +190,31 @@ defmodule Amanogawa.Alerting.ErrorReporter do
   @impl true
   def handle_cast(:error_logged, state) do
     now = state.clock.now_ms()
-    timestamps = prune(state.timestamps, now, state.window_ms) ++ [now]
+    {timestamps, overflow} = record(state, now)
 
     if trigger?(timestamps, state, now) do
-      send_alert(length(timestamps), state)
-      {:noreply, %{state | timestamps: [], silenced_until_ms: now + state.silence_ms}}
+      send_alert(length(timestamps) + overflow, state)
+
+      {:noreply,
+       %{state | timestamps: [], overflow: 0, silenced_until_ms: now + state.silence_ms}}
     else
-      {:noreply, %{state | timestamps: timestamps}}
+      {:noreply, %{state | timestamps: timestamps, overflow: overflow}}
+    end
+  end
+
+  # Bounded accumulation: the timestamp list is capped at the threshold
+  # (nothing past it changes whether an alert fires), so an error storm
+  # during the silence period counts through a plain integer instead of
+  # growing an unbounded list in this GenServer's heap. The overflow
+  # counter resets as soon as the pruned window drops back below the cap:
+  # it only ever describes the current, saturated window.
+  defp record(state, now) do
+    timestamps = prune(state.timestamps, now, state.window_ms)
+
+    if length(timestamps) >= state.threshold do
+      {timestamps, state.overflow + 1}
+    else
+      {timestamps ++ [now], 0}
     end
   end
 

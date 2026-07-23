@@ -27,7 +27,13 @@ date_part() {
   printf '%s' "$filename"
 }
 
-mapfile -t files < <(rclone lsf "$REMOTE" | grep -E '^amanogawa_[0-9]{4}-[0-9]{2}-[0-9]{2}\.dump$' | sort -r)
+# Captured in a variable first, NOT piped straight into mapfile's process
+# substitution: `set -e` cannot see a failure inside `<(...)`, so a broken
+# remote (bad credentials, network down) would silently read as "nothing
+# to rotate". Assigning makes an `rclone lsf` failure fatal.
+listing="$(rclone lsf "$REMOTE")"
+
+mapfile -t files < <(printf '%s\n' "$listing" | grep -E '^amanogawa_[0-9]{4}-[0-9]{2}-[0-9]{2}\.dump$' | sort -r)
 
 if [[ ${#files[@]} -eq 0 ]]; then
   log "no backups found on $REMOTE, nothing to rotate"
