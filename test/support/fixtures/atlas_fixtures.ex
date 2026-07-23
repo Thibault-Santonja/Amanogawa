@@ -6,8 +6,10 @@ defmodule Amanogawa.AtlasFixtures do
   `event_link_fixture/1`.
   """
 
+  alias Amanogawa.Atlas.Border
   alias Amanogawa.Atlas.Event
   alias Amanogawa.Atlas.EventLink
+  alias Amanogawa.Atlas.Polity
   alias Amanogawa.Repo
 
   @doc """
@@ -50,6 +52,60 @@ defmodule Amanogawa.AtlasFixtures do
 
     %EventLink{}
     |> EventLink.changeset(Map.merge(default_attrs, attrs))
+    |> Repo.insert!()
+  end
+
+  # A small valid square, reused as the default `geom` below: real
+  # `Amanogawa.Atlas.Border` rows only ever come from `Amanogawa.Atlas.
+  # BorderQueries.insert_batch/3` (already-repaired PostGIS output), never
+  # from this changeset-based fixture directly, so a trivially valid
+  # MultiPolygon is all a schema-level fixture needs.
+  @default_square %Geo.MultiPolygon{
+    coordinates: [[[{0.0, 0.0}, {0.0, 1.0}, {1.0, 1.0}, {1.0, 0.0}, {0.0, 0.0}]]],
+    srid: 4326
+  }
+
+  @doc """
+  Inserts a valid polity (defaults to a Cliopatria-sourced "Roman Empire"),
+  overridable via `attrs`.
+  """
+  @spec polity_fixture(map() | keyword()) :: Polity.t()
+  def polity_fixture(attrs \\ %{}) do
+    default_attrs = %{name: "Roman Empire #{unique_qid()}", source: "cliopatria"}
+
+    %Polity{}
+    |> Polity.changeset(Map.merge(default_attrs, Map.new(attrs)))
+    |> Repo.insert!()
+  end
+
+  @doc """
+  Inserts a valid border (defaults to a unit square active -100..100 under
+  source "cliopatria"), overridable via `attrs`. `:polity_id` defaults to a
+  freshly built polity when not given.
+  """
+  @spec border_fixture(map() | keyword()) :: Border.t()
+  def border_fixture(attrs \\ %{}) do
+    attrs = Map.new(attrs)
+
+    {polity_id, attrs} =
+      case Map.pop(attrs, :polity_id) do
+        {nil, attrs} -> {polity_fixture().id, attrs}
+        {id, attrs} -> {id, attrs}
+      end
+
+    default_attrs = %{
+      polity_id: polity_id,
+      geom: @default_square,
+      geom_medium: @default_square,
+      geom_low: @default_square,
+      from_year: -100,
+      to_year: 100,
+      source: "cliopatria",
+      precision: nil
+    }
+
+    %Border{}
+    |> Border.changeset(Map.merge(default_attrs, attrs))
     |> Repo.insert!()
   end
 

@@ -466,6 +466,138 @@ defmodule Amanogawa.AtlasTest do
     end
   end
 
+  describe "upsert_polity/1" do
+    test "happy path: inserts a fresh polity" do
+      assert {:ok, polity} = Atlas.upsert_polity(%{name: "Roman Empire", source: "cliopatria"})
+      assert polity.name == "Roman Empire"
+      assert Atlas.count_polities() == 1
+    end
+
+    test "edge case: replaying the same (name, source) updates from_year/to_year, keeps the id" do
+      {:ok, first} = Atlas.upsert_polity(%{name: "Roman Empire", source: "cliopatria"})
+
+      {:ok, second} =
+        Atlas.upsert_polity(%{
+          name: "Roman Empire",
+          source: "cliopatria",
+          from_year: -27,
+          to_year: 476
+        })
+
+      assert second.id == first.id
+      assert second.from_year == -27
+      assert second.to_year == 476
+      assert Atlas.count_polities() == 1
+    end
+
+    test "edge case: the same name under a different source is a distinct row" do
+      {:ok, _} = Atlas.upsert_polity(%{name: "Roman Empire", source: "cliopatria"})
+      {:ok, _} = Atlas.upsert_polity(%{name: "Roman Empire", source: "historical_basemaps"})
+
+      assert Atlas.count_polities() == 2
+    end
+
+    test "error case: a missing name returns a changeset error" do
+      assert {:error, changeset} = Atlas.upsert_polity(%{source: "cliopatria"})
+      assert "can't be blank" in errors_on(changeset).name
+    end
+  end
+
+  describe "replace_borders/2" do
+    @square %{
+      "type" => "Polygon",
+      "coordinates" => [[[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]]]
+    }
+
+    defp border_row(polity_id, overrides \\ %{}) do
+      Map.merge(
+        %{
+          polity_id: polity_id,
+          geometry: @square,
+          from_year: -100,
+          to_year: 100,
+          source: "cliopatria",
+          precision: nil
+        },
+        overrides
+      )
+    end
+
+    test "happy path: purges the source and inserts the given rows" do
+      {:ok, polity} = Atlas.upsert_polity(%{name: "Roman Empire", source: "cliopatria"})
+      rows = [border_row(polity.id)]
+
+      assert {:ok, stats} = Atlas.replace_borders("cliopatria", rows)
+      assert stats.purged == 0
+      assert stats.inserted == 1
+      assert Atlas.count_borders() == 1
+    end
+
+    test "idempotence: replaying the same rows for the same source yields the same final state" do
+      {:ok, polity} = Atlas.upsert_polity(%{name: "Roman Empire", source: "cliopatria"})
+      rows = [border_row(polity.id), border_row(polity.id, %{from_year: 200, to_year: 300})]
+
+      assert {:ok, _stats} = Atlas.replace_borders("cliopatria", rows)
+      assert Atlas.count_borders() == 2
+
+      assert {:ok, stats} = Atlas.replace_borders("cliopatria", rows)
+      assert stats.purged == 2
+      assert stats.inserted == 2
+      assert Atlas.count_borders() == 2
+    end
+
+    test "edge case: rows of another source are never purged" do
+      {:ok, cliopatria_polity} = Atlas.upsert_polity(%{name: "Rome", source: "cliopatria"})
+      {:ok, hbm_polity} = Atlas.upsert_polity(%{name: "Rome", source: "historical_basemaps"})
+
+      {:ok, _} =
+        Atlas.replace_borders("historical_basemaps", [
+          border_row(hbm_polity.id, %{source: "historical_basemaps"})
+        ])
+
+      {:ok, _} = Atlas.replace_borders("cliopatria", [border_row(cliopatria_polity.id)])
+
+      assert Atlas.count_borders() == 2
+      assert {:ok, _} = Atlas.replace_borders("cliopatria", [])
+      assert Atlas.count_borders() == 1
+    end
+
+    test "edge case: an empty Enumerable purges and inserts nothing" do
+      assert {:ok, stats} = Atlas.replace_borders("cliopatria", [])
+      assert stats == %{purged: 0, total: 0, repaired: 0, inserted: 0, rejected_empty: 0}
+    end
+
+    test "edge case: accepts a lazy Stream, not just a list" do
+      {:ok, polity} = Atlas.upsert_polity(%{name: "Roman Empire", source: "cliopatria"})
+      rows = Stream.map([1], fn _ -> border_row(polity.id) end)
+
+      assert {:ok, stats} = Atlas.replace_borders("cliopatria", rows)
+      assert stats.inserted == 1
+    end
+
+    test "limit case: more rows than the internal batch size are all inserted (chunked)" do
+      {:ok, polity} = Atlas.upsert_polity(%{name: "Roman Empire", source: "cliopatria"})
+      rows = for i <- 1..450, do: border_row(polity.id, %{from_year: i, to_year: i})
+
+      assert {:ok, stats} = Atlas.replace_borders("cliopatria", rows)
+      assert stats.inserted == 450
+      assert Atlas.count_borders() == 450
+    end
+  end
+
+  describe "count_borders/0 and count_polities/0" do
+    test "count queries reflect the current row counts" do
+      assert Atlas.count_borders() == 0
+      assert Atlas.count_polities() == 0
+
+      {:ok, polity} = Atlas.upsert_polity(%{name: "Roman Empire", source: "cliopatria"})
+      {:ok, _} = Atlas.replace_borders("cliopatria", [border_row(polity.id)])
+
+      assert Atlas.count_polities() == 1
+      assert Atlas.count_borders() == 1
+    end
+  end
+
   describe "indexes and constraints" do
     test "qid has a unique constraint" do
       qid = hd(unique_qids(1))

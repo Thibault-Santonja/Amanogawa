@@ -301,4 +301,24 @@ defmodule Amanogawa.IngestionTest do
       |> then(fn second -> assert Ingestion.last_sync_run(:events).id == second.id end)
     end
   end
+
+  describe "import_cliopatria/1" do
+    @fixture Path.join([__DIR__, "..", "support", "fixtures", "cliopatria", "sample.geojson"])
+
+    test "delegates to Amanogawa.Ingestion.Cliopatria.Importer.import/1" do
+      assert {:ok, summary} = Ingestion.import_cliopatria(@fixture)
+      assert summary.inserted == 3
+      assert Amanogawa.Atlas.count_borders() == 3
+    end
+  end
+
+  describe "import_historical_basemaps/1" do
+    @fixture_dir Path.join([__DIR__, "..", "support", "fixtures", "historical_basemaps"])
+
+    test "delegates to Amanogawa.Ingestion.HistoricalBasemaps.Importer.import/1" do
+      assert {:ok, summary} = Ingestion.import_historical_basemaps(@fixture_dir)
+      assert summary.inserted == 3
+      assert Amanogawa.Atlas.count_borders() == 3
+    end
+  end
 end

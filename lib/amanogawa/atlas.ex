@@ -11,9 +11,12 @@ defmodule Amanogawa.Atlas do
   import Ecto.Changeset, only: [add_error: 3]
   import Ecto.Query
 
+  alias Amanogawa.Atlas.Border
+  alias Amanogawa.Atlas.BorderQueries
   alias Amanogawa.Atlas.Event
   alias Amanogawa.Atlas.EventLink
   alias Amanogawa.Atlas.EventQueries
+  alias Amanogawa.Atlas.Polity
   alias Amanogawa.Atlas.TimeScale
   alias Amanogawa.Repo
   alias Amanogawa.WikimediaUrl
@@ -22,6 +25,15 @@ defmodule Amanogawa.Atlas do
   # around twenty columns per event row, 500 rows per batch stays
   # comfortably under that limit.
   @max_batch_size 500
+
+  # `Amanogawa.Atlas.BorderQueries.insert_batch/3` binds 10 parameters total
+  # (7 arrays plus 3 scalars), each array holding one element per row: a
+  # far smaller per-row footprint than the parameter *count* limit that
+  # bounds `@max_batch_size` above, so this is sized instead for the
+  # geometry pipeline's per-batch SQL round trip (ST_MakeValid,
+  # ST_SimplifyPreserveTopology twice) to stay a reasonable single
+  # statement, not for a parameter ceiling.
+  @border_batch_size 200
 
   # Default `list_events_to_enrich/1` batch size, overridable per call.
   @default_enrich_batch_size 50
@@ -243,6 +255,83 @@ defmodule Amanogawa.Atlas do
   (Ingestion) never reach into Atlas internals.
   """
   defdelegate flatten_date(date, group), to: Event
+
+  @doc """
+  Upserts a `Amanogawa.Atlas.Polity` keyed by its natural key `(name,
+  source)` (issue #023): a fresh row is inserted, or an existing one has
+  its `from_year`/`to_year` replaced, so re-running an import updates a
+  polity's known existence span without duplicating the row or touching
+  its id (borders elsewhere reference that id by foreign key).
+
+  `attrs`: `:name`, `:source` (required), `:from_year`, `:to_year`
+  (optional, the entity's own attested existence span).
+  """
+  @spec upsert_polity(map()) :: {:ok, Polity.t()} | {:error, Ecto.Changeset.t()}
+  def upsert_polity(attrs) do
+    %Polity{}
+    |> Polity.changeset(attrs)
+    |> Repo.insert(
+      on_conflict: {:replace, [:from_year, :to_year, :updated_at]},
+      conflict_target: [:name, :source],
+      returning: true
+    )
+  end
+
+  @doc """
+  Replaces every `atlas.borders` row of `source` with `rows` (issue #023):
+  purges the source's existing rows, then runs the geometry pipeline
+  (`Amanogawa.Atlas.BorderQueries.insert_batch/3`, ST_MakeValid,
+  ST_CollectionExtract, ST_Multi, ST_SimplifyPreserveTopology) and inserts
+  every surviving row, batching `rows` (any `Enumerable`, typically a lazy
+  `Stream` from the ingestion parser so a 300MB source file never has to be
+  held in memory at once) into groups of #{@border_batch_size}.
+
+  Runs inside a single database transaction spanning the whole call (purge
+  and every insert batch): a crash partway through leaves the previous
+  state of `source` untouched rather than a half-replaced one, and
+  `:infinity` timeout since a full Cliopatria import can legitimately take
+  longer than Ecto's 15 second default query timeout.
+
+  Idempotent: replaying the same `rows` for the same `source` produces the
+  same final row count, regardless of what was there before under that
+  source. Borders of other sources are never touched (the purge is scoped
+  to `source`).
+
+  Returns `{:ok, stats}` with `:purged` (rows deleted before reinsertion),
+  `:total` (rows read from `rows`), `:repaired` (rows whose raw geometry
+  was invalid before `ST_MakeValid`), `:inserted` and `:rejected_empty`
+  (still empty after repair, logged by the caller, never raised).
+
+  `rows`: see `Amanogawa.Atlas.BorderQueries.raw_row/0` for the expected
+  shape (`:polity_id`, `:geometry` as a raw GeoJSON geometry map,
+  `:from_year`, `:to_year`, `:source`, `:precision`).
+  """
+  @spec replace_borders(String.t(), Enumerable.t()) :: {:ok, map()}
+  def replace_borders(source, rows) do
+    Repo.transaction(
+      fn ->
+        purged = BorderQueries.purge_source(source)
+
+        stats =
+          rows
+          |> Stream.chunk_every(@border_batch_size)
+          |> Enum.reduce(empty_border_stats(), fn batch, acc ->
+            batch |> BorderQueries.insert_batch() |> merge_border_stats(acc)
+          end)
+
+        Map.put(stats, :purged, purged)
+      end,
+      timeout: :infinity
+    )
+  end
+
+  @doc "Counts borders. Used by tests and import summaries."
+  @spec count_borders() :: non_neg_integer()
+  def count_borders, do: Repo.aggregate(Border, :count)
+
+  @doc "Counts polities. Used by tests and import summaries."
+  @spec count_polities() :: non_neg_integer()
+  def count_polities, do: Repo.aggregate(Polity, :count)
 
   @doc "Maps every given QID known locally to its internal id."
   @spec event_ids_by_qids([String.t()]) :: %{String.t() => Ecto.UUID.t()}
@@ -518,4 +607,10 @@ defmodule Amanogawa.Atlas do
   end
 
   defp utc_now, do: DateTime.truncate(DateTime.utc_now(), :second)
+
+  defp empty_border_stats, do: %{total: 0, repaired: 0, inserted: 0, rejected_empty: 0}
+
+  defp merge_border_stats(batch_stats, acc) do
+    Map.merge(acc, batch_stats, fn _key, a, b -> a + b end)
+  end
 end

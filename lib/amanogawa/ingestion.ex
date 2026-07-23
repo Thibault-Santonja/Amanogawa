@@ -12,6 +12,8 @@ defmodule Amanogawa.Ingestion do
 
   import Ecto.Query
 
+  alias Amanogawa.Ingestion.Cliopatria
+  alias Amanogawa.Ingestion.HistoricalBasemaps
   alias Amanogawa.Ingestion.SyncRun
   alias Amanogawa.Ingestion.Workers.EnrichSummaries
   alias Amanogawa.Ingestion.Workers.ImportEvents
@@ -171,6 +173,31 @@ defmodule Amanogawa.Ingestion do
     deadline = System.monotonic_time(:millisecond) + timeout_ms
     poll_until_closed(id, deadline, poll_interval_ms, on_progress)
   end
+
+  @doc """
+  Imports the Cliopatria borders GeoJSON file at `path` (issue #023): a
+  synchronous, one-shot operation (no `SyncRun`, no Oban job, unlike the
+  Wikidata/Wikipedia pipelines above), since it acts on a manually
+  downloaded local file rather than a remote API, run through
+  `mix amanogawa.import.cliopatria` (`Mix.Tasks.Amanogawa.Import.
+  Cliopatria`'s own `@moduledoc` documents the manual download step).
+
+  Delegates to `Amanogawa.Ingestion.Cliopatria.Importer.import/1`; see
+  `Amanogawa.Ingestion.Borders.Importer.summary/0` for the returned shape.
+  """
+  @spec import_cliopatria(Path.t()) :: {:ok, Amanogawa.Ingestion.Borders.Importer.summary()}
+  defdelegate import_cliopatria(path), to: Cliopatria.Importer, as: :import
+
+  @doc """
+  Imports the historical-basemaps tranche files under the directory `path`
+  (issue #024): same one-shot, synchronous shape as `import_cliopatria/1`,
+  run through `mix amanogawa.import.historical_basemaps`.
+
+  Delegates to `Amanogawa.Ingestion.HistoricalBasemaps.Importer.import/1`.
+  """
+  @spec import_historical_basemaps(Path.t()) ::
+          {:ok, Amanogawa.Ingestion.HistoricalBasemaps.Importer.summary()}
+  defdelegate import_historical_basemaps(path), to: HistoricalBasemaps.Importer, as: :import
 
   @doc "Fetches a sync run by id, or `nil` if unknown."
   @spec get_sync_run(Ecto.UUID.t()) :: SyncRun.t() | nil

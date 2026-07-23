@@ -123,7 +123,12 @@ defmodule Amanogawa.MixProject do
         "compile --warnings-as-errors",
         "format --check-formatted",
         "credo --strict",
-        "sobelow --exit",
+        # `--skip` honors inline `# sobelow_skip [...]` annotations (issue
+        # #023: `Amanogawa.Ingestion.Borders.GeojsonStream.features/2`
+        # reads an operator-supplied local mix task path, not web input;
+        # Sobelow's static Traversal.FileModule check cannot tell the two
+        # apart).
+        "sobelow --exit --skip",
         "assets.build",
         "cmd --cd assets npm test",
         "test"
