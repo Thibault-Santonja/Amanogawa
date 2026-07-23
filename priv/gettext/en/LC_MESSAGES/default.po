@@ -17,7 +17,7 @@ msgstr ""
 msgid "Attempting to reconnect"
 msgstr "Attempting to reconnect"
 
-#: lib/amanogawa_web/live/explore_live.ex:58
+#: lib/amanogawa_web/live/explore_live.ex:71
 #, elixir-autogen, elixir-format
 msgid "Carte du monde"
 msgstr "World map"
@@ -68,7 +68,12 @@ msgid "Lire sur Wikipédia"
 msgstr "Read on Wikipedia"
 
 #: lib/amanogawa_web/components/event_panel.ex:75
-#: lib/amanogawa_web/live/explore_live.ex:251
+#: lib/amanogawa_web/live/explore_live.ex:265
 #, elixir-autogen, elixir-format
 msgid "Texte"
 msgstr "Text"
+
+#: lib/amanogawa_web/live/explore_live.ex:267
+#, elixir-autogen, elixir-format
+msgid "Carte interactive indisponible : ce navigateur ne fournit pas WebGL."
+msgstr "Interactive map unavailable: this browser does not provide WebGL."

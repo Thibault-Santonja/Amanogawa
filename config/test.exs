@@ -14,12 +14,126 @@ config :amanogawa, Amanogawa.Repo,
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: System.schedulers_online() * 2
 
-# We don't run a server during test. If one is required,
-# you can enable the server option below.
+# A real HTTP listener is required for the E2E suite (issue #029): Chrome,
+# driven through Wallaby/chromedriver, is an actual browser process that
+# connects over the network, unlike `Phoenix.ConnTest`'s in-process conn.
+# Harmless for the rest of the suite (`Phoenix.LiveViewTest`/`ConnTest`
+# never dial out to it), and is the standard shape for a Phoenix app that
+# ships a Wallaby suite.
 config :amanogawa, AmanogawaWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: 4002],
   secret_key_base: "75KVMKPkb2FHWwQuCH71XEvNCy2jXAfyF2YeR4dOYKfM4c3nb0OnPL10ZD2bsHDO",
-  server: false
+  server: true
+
+# Mounts `Phoenix.Ecto.SQL.Sandbox` on the endpoint (`lib/amanogawa_web/
+# endpoint.ex`): the plug that lets a real browser's HTTP requests (E2E
+# suite, issue #029) reach the same sandboxed DB connection/transaction the
+# test process checked out, through a header the browser session carries.
+# Compile-time (`Application.compile_env/3`), not a runtime config read, so
+# the plug is simply absent from the pipeline the app compiles for `:dev`/
+# `:prod`.
+config :amanogawa, sql_sandbox: true
+
+# Renders `data-e2e-test-api="true"` on `#map` (`AmanogawaWeb.ExploreLive`)
+# so `assets/js/hooks/map_hook.js` wires `window.__amanogawaE2E__` (issue
+# #029's own "témoin de test minimal sur window, uniquement en
+# environnement test, documenté"): a way for the E2E suite to trigger the
+# exact `select_event`/`deselect_event` intent a real marker click sends,
+# without depending on WebGL canvas hit-testing under headless Chrome for
+# every scenario that only cares about the LiveView/URL/panel contract.
+# `false` by default (`AmanogawaWeb.ExploreLive`'s own fallback): only this
+# file ever flips it on, so the branch is dead code in `:dev`/`:prod`.
+config :amanogawa, :expose_e2e_test_api, true
+
+# Wallaby (issue #029): drives a real, headless Chrome through chromedriver
+# for the `:e2e`-tagged suite (`mix test.e2e`, excluded from plain `mix
+# test`, see `test/test_helper.exs`). `otp_app` is what lets `Wallaby.
+# Feature`'s own setup find `Amanogawa.Repo` (`config :amanogawa,
+# ecto_repos`) and check it out into the SQL sandbox per test.
+#
+# The `:wallaby` OTP application is never started as a side effect of
+# `mix test`/`mix precommit`: the dependency is declared `runtime: false`
+# in `mix.exs`, so it is compiled and available, but its own `start/2`
+# (which shells out to `chromedriver --version`/`chrome --version` to
+# validate the pair, `Wallaby.Chrome.validate/0`) only runs when
+# `test/support/feature_case.ex` explicitly starts it, which itself only
+# happens for the `:e2e`-tagged tests `mix test.e2e` opts into. A developer
+# who never runs `mix test.e2e` never needs Chrome or chromedriver
+# installed at all.
+# Optional machine-local overrides: on hosts where the PATH chromedriver
+# or system Chrome cannot run (for example macOS Gatekeeper rejecting the
+# homebrew cask binary), point these at a Chrome for Testing pair
+# downloaded directly (curl leaves no quarantine attribute). CI and normal
+# setups leave both unset.
+chromedriver_path = System.get_env("CHROMEDRIVER_PATH")
+chrome_binary = System.get_env("CHROME_BINARY")
+
+config :wallaby,
+  otp_app: :amanogawa,
+  screenshot_on_failure: true,
+  chromedriver: [
+    # `headless: true` would append Chrome's LEGACY `--headless` flag
+    # (wallaby appends the bare flag), whose rendering stack cannot create
+    # a software WebGL context. The modern mode is opted into explicitly
+    # through `--headless=new` in the args below instead.
+    headless: false,
+    capabilities: %{
+      javascriptEnabled: true,
+      loadImages: true,
+      version: "",
+      rotatable: false,
+      takesScreenshot: true,
+      cssSelectorsEnabled: true,
+      nativeEvents: false,
+      platform: "ANY",
+      unhandledPromptBehavior: "accept",
+      loggingPrefs: %{browser: "DEBUG"},
+      chromeOptions:
+        %{
+          args: [
+            # Modern headless mode: unlike the legacy `--headless` (which
+            # wallaby's `headless: true` would append), it shares the regular
+            # browser's rendering stack and supports software WebGL.
+            "--headless=new",
+            # `--no-sandbox`: chromedriver commonly runs as root in a CI
+            # container, where Chrome's own sandbox refuses to start at all.
+            "--no-sandbox",
+            # CI containers routinely mount a tiny `/dev/shm`; Chrome falls
+            # back to disk-backed shared memory instead of crashing on it.
+            "--disable-dev-shm-usage",
+            "--window-size=1400,1000",
+            # Software WebGL fallback: CI's runner has no GPU, and MapLibre
+            # GL JS (`assets/js/hooks/map_hook.js`) refuses to construct a
+            # `maplibregl.Map` at all without a working WebGL context.
+            # `--use-gl=swiftshader` forces Chrome's software rasterizer
+            # instead of leaving WebGL unavailable the way `--disable-gpu`
+            # alone can on a headless, GPU-less host (issue #029's own point
+            # d'attention: documented here since this is the one place this
+            # tradeoff is made, not a claim that it is guaranteed to work on
+            # every Chrome/chromedriver build CI happens to install).
+            # Chrome 129+ gates software WebGL behind an explicit opt in:
+            # angle routes gl calls to swiftshader, and the unsafe flag
+            # re-enables the software fallback that plain
+            # `--use-gl=swiftshader` no longer provides.
+            "--use-angle=swiftshader",
+            "--enable-unsafe-swiftshader",
+            "--enable-webgl",
+            "--ignore-gpu-blocklist"
+          ]
+        }
+        |> then(fn opts ->
+          if chrome_binary, do: Map.put(opts, :binary, chrome_binary), else: opts
+        end)
+    }
+  ]
+
+local_driver_overrides =
+  [path: chromedriver_path, binary: chrome_binary]
+  |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+
+if local_driver_overrides != [] do
+  config :wallaby, chromedriver: local_driver_overrides
+end
 
 # Print only warnings and errors during test
 config :logger, level: :warning

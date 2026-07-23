@@ -30,6 +30,7 @@ defmodule Amanogawa.MixProject do
     [
       preferred_envs: [
         precommit: :test,
+        "test.e2e": :test,
         coveralls: :test,
         "coveralls.detail": :test,
         "coveralls.html": :test,
@@ -80,7 +81,8 @@ defmodule Amanogawa.MixProject do
       {:excoveralls, "~> 0.18", only: :test},
       {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false},
       {:stream_data, "~> 1.1", only: [:dev, :test]},
-      {:mox, "~> 1.2", only: :test}
+      {:mox, "~> 1.2", only: :test},
+      {:wallaby, "~> 0.30", only: :test, runtime: false}
     ]
   end
 
@@ -96,6 +98,12 @@ defmodule Amanogawa.MixProject do
       "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"],
+      # The E2E suite (issue #029, `test/e2e/`): excluded from plain `mix
+      # test` (`test/test_helper.exs` excludes the `:e2e` tag by default),
+      # run only through this alias, `--only e2e` overriding that default
+      # exclusion. Requires Chrome + chromedriver locally; CI runs this as
+      # its own step (`.github/workflows/ci.yml`).
+      "test.e2e": ["ecto.create --quiet", "ecto.migrate --quiet", "test --only e2e"],
       "assets.setup": [
         "tailwind.install --if-missing",
         "esbuild.install --if-missing",

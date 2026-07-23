@@ -41,7 +41,12 @@ import {
   linksLineLayer,
   linksSource
 } from "../map/link_layers.js"
-import {TIME_WINDOW_PREVIEW_EVENT, mapLibreColorExpression, readGradientTokens} from "../lib/time_gradient.js"
+import {
+  TIME_WINDOW_PREVIEW_EVENT,
+  mapLibreColorExpression,
+  parseCssColor,
+  readGradientTokens
+} from "../lib/time_gradient.js"
 import darkStyle from "../../vendor/map-styles/dark.json"
 import lightStyle from "../../vendor/map-styles/light.json"
 
@@ -78,21 +83,37 @@ const HOVER_DELAY_MS = 150
 // `readGradientTokens` (`assets/js/lib/time_gradient.js`), the same
 // function `TimelineHook` and `AmanogawaWeb.Components.TimeLegend`'s CSS
 // ultimately derive from: never re-parsed or hardcoded here.
+// Every color token handed to MapLibre goes through `maplibreColor`:
+// MapLibre validates paint colors with its own parser (csscolorparser
+// lineage), which predates modern CSS color spaces, so an `oklch()` token
+// read verbatim off `getComputedStyle` is rejected as "color expected" and
+// the WHOLE layer silently refused at `addLayer` (fired as a map `error`
+// event, not thrown). Resolving each token to a plain `rgb()` string
+// through the shared `parseCssColor` (`assets/js/lib/time_gradient.js`,
+// the exact converter the temporal gradient already uses) keeps the CSS
+// custom properties as the single source of truth while feeding MapLibre
+// a syntax it can parse.
+function maplibreColor(value) {
+  const {r, g, b} = parseCssColor(value)
+  return `rgb(${r}, ${g}, ${b})`
+}
+
 function readDesignTokens() {
   const rootStyle = getComputedStyle(document.documentElement)
+  const token = name => maplibreColor(rootStyle.getPropertyValue(name).trim())
 
   return {
-    accentColor: rootStyle.getPropertyValue("--palette-accent").trim(),
-    haloColor: rootStyle.getPropertyValue("--palette-surface").trim(),
-    textColor: rootStyle.getPropertyValue("--palette-text").trim(),
+    accentColor: token("--palette-accent"),
+    haloColor: token("--palette-surface"),
+    textColor: token("--palette-text"),
     gradientTokens: readGradientTokens(document.documentElement),
     linkColors: {
-      part_of: rootStyle.getPropertyValue("--palette-link-part-of").trim(),
-      follows: rootStyle.getPropertyValue("--palette-link-follows").trim(),
-      cause: rootStyle.getPropertyValue("--palette-link-cause").trim(),
-      effect: rootStyle.getPropertyValue("--palette-link-effect").trim(),
-      significant: rootStyle.getPropertyValue("--palette-link-significant").trim(),
-      default: rootStyle.getPropertyValue("--palette-link-default").trim()
+      part_of: token("--palette-link-part-of"),
+      follows: token("--palette-link-follows"),
+      cause: token("--palette-link-cause"),
+      effect: token("--palette-link-effect"),
+      significant: token("--palette-link-significant"),
+      default: token("--palette-link-default")
     }
   }
 }
@@ -115,6 +136,13 @@ const MapHook = {
     this.previewWindow = {from: null, to: null}
     this.abortController = null
     this.eventsLoadedOnce = false
+    // Monotonic counter of successful `setEventsData` calls, rendered as
+    // `data-events-fetch-count` (issue #029): unlike the `data-events-
+    // loaded` flag below, a count lets the E2E dark-mode scenario detect
+    // that a *new* fetch landed after a theme change (`onStyleLoad`
+    // re-running `fetchEvents`) rather than merely that the flag was
+    // already `"true"` from the very first load.
+    this.eventsFetchCount = 0
     this.selectedQid = null
     // Marks a camera move triggered by `setView` (server-pushed), so the
     // `moveend` it causes is not mistaken for a user-driven move and
@@ -145,16 +173,40 @@ const MapHook = {
     this.linksAbortController = null
     this.linksOpacityFrame = null
 
-    this.map = new maplibregl.Map({
-      container: this.el,
-      style: this.darkScheme.matches ? darkStyle : lightStyle,
-      center: INITIAL_CENTER,
-      zoom: INITIAL_ZOOM,
-      attributionControl: {compact: true},
-      // MapLibre already skips camera easing when the user prefers reduced
-      // motion; also disable symbol fade-in so labels appear instantly.
-      fadeDuration: this.reducedMotion ? 0 : 300
+    // MapLibre throws when no WebGL context can be created (no GPU, old
+    // browser, headless without a software rasterizer). Degrade to a
+    // localized message instead of leaving an uncaught error that also
+    // takes down every other hook on the page.
+    try {
+      this.map = new maplibregl.Map({
+        container: this.el,
+        style: this.darkScheme.matches ? darkStyle : lightStyle,
+        center: INITIAL_CENTER,
+        zoom: INITIAL_ZOOM,
+        attributionControl: {compact: true},
+        // MapLibre already skips camera easing when the user prefers reduced
+        // motion; also disable symbol fade-in so labels appear instantly.
+        fadeDuration: this.reducedMotion ? 0 : 300
+      })
+    } catch (_error) {
+      this.map = null
+      this.renderWebglFallback()
+      return
+    }
+
+    // MapLibre's own `trackResize` observer deliberately ignores the
+    // initial `ResizeObserver` delivery, so a container resize happening
+    // between `Map` construction and that first delivery is swallowed
+    // entirely: the transform keeps the stale size and every pointer
+    // hit-test misses markers by the delta. That gap is real, not
+    // theoretical: the layout's `h-dvh` settles right after load (the
+    // dynamic viewport), shrinking `#map` before MapLibre's observer ever
+    // reports. This hook therefore owns its container's sizing: `resize()`
+    // is cheap and a no-op re-render when nothing changed.
+    this.mapResizeObserver = new ResizeObserver(() => {
+      if (this.map) this.map.resize()
     })
+    this.mapResizeObserver.observe(this.el)
 
     this.debouncedFetchEvents = debounce(() => this.fetchEvents(), FETCH_DEBOUNCE_MS)
     this.debouncedPushMapMoved = debounce(() => this.pushMapMoved(), MAP_MOVED_DEBOUNCE_MS)
@@ -168,6 +220,13 @@ const MapHook = {
       this.setupEventsLayer()
       this.setupLinksLayer()
       this.eventsLoadedOnce = false
+      // Cleared while the style reloads (theme change) and re-set by
+      // `setEventsData` once the refetch lands: the one DOM signal the E2E
+      // suite (issue #029) synchronizes on before asserting anything about
+      // rendered markers, since the WebGL canvas itself is not assertable.
+      // Harmless in every environment, not gated like `data-e2e-test-api`
+      // below: it carries no information beyond "events are up to date".
+      this.el.removeAttribute("data-events-loaded")
       this.fetchEvents()
     }
     this.map.on("style.load", this.onStyleLoad)
@@ -336,6 +395,31 @@ const MapHook = {
       this.highlightEvent(null)
       this.clearEventLinks()
     })
+
+    // Test-only witness (issue #029): `data-e2e-test-api="true"` is only
+    // ever rendered by `AmanogawaWeb.ExploreLive` when `config :amanogawa,
+    // :expose_e2e_test_api` is `true`, itself only set in `config/
+    // test.exs`, so `window.__amanogawaE2E__` never exists outside the E2E
+    // suite. It sends the exact same intent a real marker click does
+    // (`onMarkerClick`/`onMapClick` above), without depending on WebGL
+    // canvas hit-testing under headless Chrome for scenarios that only
+    // care about the LiveView/URL/panel contract (the hover and relation
+    // lines scenarios still drive the canvas directly, since that IS what
+    // they cover).
+    if (this.el.dataset.e2eTestApi === "true") {
+      window.__amanogawaE2E__ = {
+        selectEvent: qid => this.pushEvent("select_event", {qid}),
+        deselectEvent: () => this.pushEvent("deselect_event", {}),
+        // `data-events-loaded` proves the events reached the source
+        // (`setEventsData`), but MapLibre still processes and renders the
+        // GeoJSON tiles a few frames later: until then a real mouse event
+        // over a marker hit-tests against nothing. `Map#loaded()` is the
+        // engine's own "fully processed and rendered" signal, polled by
+        // `AmanogawaWeb.E2EHelpers.wait_for_map_rendered/1` before any
+        // scenario drives the canvas with a real pointer.
+        mapLoaded: () => this.map.loaded()
+      }
+    }
   },
 
   setupEventsLayer() {
@@ -500,6 +584,10 @@ const MapHook = {
       this.map.setPaintProperty(EVENTS_CIRCLE_LAYER_ID, "circle-opacity", this.circleOpacityExpression())
       this.map.setPaintProperty(EVENTS_LABEL_LAYER_ID, "text-opacity", textOpacityExpression())
     }
+
+    this.eventsFetchCount += 1
+    this.el.setAttribute("data-events-loaded", "true")
+    this.el.setAttribute("data-events-fetch-count", String(this.eventsFetchCount))
   },
 
   // Whether `z`/`lat`/`lng` already match the current camera, within a
@@ -658,6 +746,14 @@ const MapHook = {
       this.linksOpacityFrame = null
       this.map.setPaintProperty(LINKS_LAYER_ID, "line-opacity", LINKS_VISIBLE_OPACITY)
     })
+
+    // The line layer is a WebGL source, not assertable directly (issue
+    // #029's own point d'attention): `data-links-count` is the DOM proxy
+    // the E2E suite reads to confirm the relation lines for the CURRENT
+    // selection were drawn, and (selecting a second event without an
+    // intermediate deselection) that they were *replaced*, not summed
+    // with the previous selection's.
+    this.el.setAttribute("data-links-count", String(featureCollection.features.length))
   },
 
   // Cancels any in-flight links fetch and empties the source (issue #017
@@ -674,6 +770,7 @@ const MapHook = {
 
     this.map.setPaintProperty(LINKS_LAYER_ID, "line-opacity", LINKS_HIDDEN_OPACITY)
     source.setData(emptyLinksFeatureCollection())
+    this.el.setAttribute("data-links-count", "0")
   },
 
   pushMapMoved() {
@@ -685,7 +782,31 @@ const MapHook = {
     )
   },
 
+  // WebGL unavailable: replace the map area with a localized message
+  // (translated server-side, `data-i18n-webgl-fallback`) and a marker
+  // attribute so tests and support can tell degraded mode apart from a
+  // blank map. The hook stays mounted but inert: `mounted()` returned
+  // before registering any listener or handler, and `destroyed()` guards
+  // on `this.map`.
+  renderWebglFallback() {
+    this.el.dataset.mapDegraded = "true"
+
+    const message = document.createElement("p")
+    message.className =
+      "flex h-full items-center justify-center px-6 text-center text-sm text-text-muted"
+    message.textContent =
+      this.el.dataset.i18nWebglFallback ||
+      "Interactive map unavailable: this browser does not provide WebGL."
+    this.el.replaceChildren(message)
+  },
+
   destroyed() {
+    if (!this.map) {
+      this.hoverCard.destroy()
+      return
+    }
+
+    this.mapResizeObserver.disconnect()
     this.debouncedFetchEvents.cancel()
     this.debouncedPushMapMoved.cancel()
     if (this.abortController) this.abortController.abort()
@@ -709,6 +830,8 @@ const MapHook = {
     this.darkScheme.removeEventListener("change", this.onSchemeChange)
     this.motionQuery.removeEventListener("change", this.onMotionChange)
     window.removeEventListener(TIME_WINDOW_PREVIEW_EVENT, this.onWindowPreview)
+
+    if (this.el.dataset.e2eTestApi === "true") delete window.__amanogawaE2E__
 
     this.map.remove()
   }

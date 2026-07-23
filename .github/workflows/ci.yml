@@ -87,3 +87,96 @@ jobs:
 
       - name: Audit dependencies for vulnerabilities
         run: mix deps.audit
+
+  e2e:
+    # The browser-driven E2E suite (issue #029, `test/e2e/`): a separate
+    # job, not a step of `test` above, since it needs its own Chrome/
+    # chromedriver install and is allowed to take longer without slowing
+    # down the fast quality gate every push/PR waits on. Mandatory here
+    # (unlike locally, where `mix test` excludes it by default,
+    # `test/test_helper.exs`): this job's failure fails the workflow like
+    # any other.
+    runs-on: ubuntu-latest
+    env:
+      MIX_ENV: test
+    services:
+      db:
+        # Kept in sync with the `test` job's own service (and
+        # docker-compose.yml) by hand: GitHub Actions services are
+        # job-scoped, there is no way to share one definition between jobs
+        # short of a reusable workflow, which would be more machinery than
+        # two short `services:` blocks justify.
+        image: postgis/postgis:18-3.6
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Erlang and Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - name: Cache Mix dependencies and build
+        uses: actions/cache@v6
+        with:
+          path: |
+            deps
+            _build
+          key: mix-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            mix-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Cache npm packages
+        uses: actions/cache@v6
+        with:
+          path: assets/node_modules
+          key: npm-${{ runner.os }}-${{ hashFiles('assets/package-lock.json') }}
+
+      - name: Install asset toolchain
+        run: |
+          mix tailwind.install --if-missing
+          mix esbuild.install --if-missing
+
+      - name: Install npm packages
+        run: npm ci --no-fund --no-audit
+        working-directory: assets
+
+      - name: Build assets
+        # `mix test.e2e` (unlike `mix test`) drives a real browser against
+        # the running app: it needs the built JS/CSS in `priv/static`, not
+        # just compiled `.ex`/`.exs`.
+        run: mix assets.build
+
+      - name: Install matching chromedriver
+        # ubuntu-latest ships google-chrome-stable preinstalled: this only
+        # resolves and installs the chromedriver build matching that
+        # already-present Chrome version (`Wallaby.Chrome.validate/0`
+        # refuses to start a session at all on a major/minor/build
+        # mismatch).
+        uses: nanasess/setup-chromedriver@v2
+
+      - name: Run the E2E suite
+        run: mix test.e2e
+
+      # Wallaby writes a screenshot per failing scenario; without this the
+      # only diagnostic left in CI is the assertion text.
+      - name: Upload failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-screenshots
+          path: screenshots/
+          if-no-files-found: ignore

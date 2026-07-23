@@ -79,7 +79,8 @@ defmodule AmanogawaWeb.ExploreLive do
      |> assign(:lat, nil)
      |> assign(:lng, nil)
      |> assign(:selected_qid, nil)
-     |> assign(:selected_event, nil)}
+     |> assign(:selected_event, nil)
+     |> assign(:expose_e2e_test_api, Application.get_env(:amanogawa, :expose_e2e_test_api, false))}
   end
 
   # Captured once at mount, not re-read on every event: `get_connect_info/2`
@@ -256,12 +257,21 @@ defmodule AmanogawaWeb.ExploreLive do
       (`assets/js/map/hover_card.js`) renders into its DOM, translated
       server-side (security review, i18n finding): the hook reads them off
       this container instead of hardcoding French text in JS. --%>
+      <%!-- Sized with h-full/w-full rather than absolute/inset-0: MapLibre's
+      own stylesheet (imported unlayered) sets `position: relative` on
+      `.maplibregl-map`, and unlayered rules always beat Tailwind's
+      `@layer utilities`, which silently collapsed the absolute box to a
+      zero height (caught by the e2e suite, issue #029). --%>
       <div
         id="map"
         phx-hook="MapHook"
         phx-update="ignore"
-        class="absolute inset-0"
+        class="h-full w-full"
         data-i18n-text-label={gettext("Texte")}
+        data-i18n-webgl-fallback={
+          gettext("Carte interactive indisponible : ce navigateur ne fournit pas WebGL.")
+        }
+        data-e2e-test-api={@expose_e2e_test_api && "true"}
       >
       </div>
       <EventPanel.event_panel :if={@selected_event} event={@selected_event} />

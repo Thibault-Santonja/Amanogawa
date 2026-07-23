@@ -53,6 +53,30 @@ defmodule Amanogawa.AtlasFixtures do
     |> Repo.insert!()
   end
 
+  @doc """
+  Returns `n` QIDs unique to this call: no other `unique_qids/1` or
+  `unique_qid/0` call, concurrent or not, ever produces an overlapping
+  value, so tests across different (async) files never race to insert
+  the same `qid` and deadlock on the unique index.
+
+  Built from `System.unique_integer([:positive, :monotonic])` spaced
+  widely apart (`* 1_000_000`) so the `n` values handed out by one call
+  never reach into the range reserved for another call, then
+  zero-padded to a common width so the list sorts identically whether
+  compared lexicographically (as strings) or numerically (as the
+  integer each QID encodes) - tests asserting a "qid ascending"
+  tie-break rely on that.
+  """
+  @spec unique_qids(pos_integer()) :: [String.t()]
+  def unique_qids(n) when is_integer(n) and n > 0 do
+    base = System.unique_integer([:positive, :monotonic]) * 1_000_000
+    width = (base + n) |> Integer.to_string() |> String.length()
+
+    for i <- 1..n do
+      "Q" <> String.pad_leading(Integer.to_string(base + i), width, "0")
+    end
+  end
+
   defp pop_endpoint_id(attrs, key) do
     case Map.pop(attrs, key) do
       {nil, attrs} -> {event_fixture().id, attrs}

@@ -12,11 +12,13 @@ defmodule Amanogawa.Atlas.EventQueriesTest do
 
   describe "list_events_geojson/1 integration" do
     test "an event on each side of the antimeridian is found by a bbox crossing it" do
+      [east_qid, west_qid] = unique_qids(2)
+
       east =
-        event_fixture(qid: "Q1", geom: %Geo.Point{coordinates: {179.0, 10.0}, srid: 4326})
+        event_fixture(qid: east_qid, geom: %Geo.Point{coordinates: {179.0, 10.0}, srid: 4326})
 
       west =
-        event_fixture(qid: "Q2", geom: %Geo.Point{coordinates: {-179.0, 10.0}, srid: 4326})
+        event_fixture(qid: west_qid, geom: %Geo.Point{coordinates: {-179.0, 10.0}, srid: 4326})
 
       opts = full_range_opts(envelopes: antimeridian_envelopes())
 
@@ -27,7 +29,7 @@ defmodule Amanogawa.Atlas.EventQueriesTest do
     end
 
     test "an event outside the bbox is excluded" do
-      event_fixture(qid: "Q1", geom: %Geo.Point{coordinates: {0.0, 0.0}, srid: 4326})
+      event_fixture(geom: %Geo.Point{coordinates: {0.0, 0.0}, srid: 4326})
 
       far_away_bbox = [%{min_lon: 100.0, min_lat: 80.0, max_lon: 110.0, max_lat: 85.0}]
       result = Atlas.list_events_geojson(full_range_opts(envelopes: far_away_bbox))
@@ -36,7 +38,7 @@ defmodule Amanogawa.Atlas.EventQueriesTest do
     end
 
     test "an event without geom is excluded" do
-      event_fixture(qid: "Q1", geom: nil)
+      event_fixture(geom: nil)
 
       result = Atlas.list_events_geojson(full_range_opts())
 
@@ -44,7 +46,7 @@ defmodule Amanogawa.Atlas.EventQueriesTest do
     end
 
     test "label falls back to English when French is absent" do
-      event_fixture(qid: "Q1", label_fr: nil, label_en: "English only")
+      event_fixture(label_fr: nil, label_en: "English only")
 
       result = Atlas.list_events_geojson(full_range_opts())
 
@@ -52,7 +54,7 @@ defmodule Amanogawa.Atlas.EventQueriesTest do
     end
 
     test "an event outside the time window is excluded" do
-      event_fixture(qid: "Q1", begin_year: -1000)
+      event_fixture(begin_year: -1000)
 
       result = Atlas.list_events_geojson(full_range_opts(from: 0, to: 100))
 
@@ -60,21 +62,22 @@ defmodule Amanogawa.Atlas.EventQueriesTest do
     end
 
     test "an ongoing event (end_year set) is found by a window overlapping its span" do
-      event_fixture(qid: "Q1", begin_year: -100, end_year: 100, end_precision: 9)
+      event = event_fixture(begin_year: -100, end_year: 100, end_precision: 9)
 
       result = Atlas.list_events_geojson(full_range_opts(from: 50, to: 60))
 
-      assert [%{"properties" => %{"qid" => "Q1"}}] = result["features"]
+      assert [%{"properties" => %{"qid" => qid}}] = result["features"]
+      assert qid == event.qid
     end
 
     test "features expose exactly qid, label, year, precision and importance" do
-      event_fixture(
-        qid: "Q1",
-        label_fr: "Nom francais",
-        begin_year: 1789,
-        begin_precision: 9,
-        sitelink_count: 12
-      )
+      event =
+        event_fixture(
+          label_fr: "Nom francais",
+          begin_year: 1789,
+          begin_precision: 9,
+          sitelink_count: 12
+        )
 
       result = Atlas.list_events_geojson(full_range_opts())
 
@@ -85,7 +88,7 @@ defmodule Amanogawa.Atlas.EventQueriesTest do
                ~w(importance label precision qid year)
 
       assert feature["properties"] == %{
-               "qid" => "Q1",
+               "qid" => event.qid,
                "label" => "Nom francais",
                "year" => 1789,
                "precision" => 9,
@@ -94,18 +97,20 @@ defmodule Amanogawa.Atlas.EventQueriesTest do
     end
 
     test "results are ranked by importance descending, tied by qid ascending" do
-      event_fixture(qid: "Q3", sitelink_count: 5)
-      event_fixture(qid: "Q1", sitelink_count: 10)
-      event_fixture(qid: "Q2", sitelink_count: 10)
+      [lower_qid, higher_qid, low_importance_qid] = unique_qids(3)
+
+      event_fixture(qid: low_importance_qid, sitelink_count: 5)
+      event_fixture(qid: lower_qid, sitelink_count: 10)
+      event_fixture(qid: higher_qid, sitelink_count: 10)
 
       result = Atlas.list_events_geojson(full_range_opts())
       qids = Enum.map(result["features"], & &1["properties"]["qid"])
 
-      assert qids == ["Q1", "Q2", "Q3"]
+      assert qids == [lower_qid, higher_qid, low_importance_qid]
     end
 
     test "limit caps the number of features returned" do
-      for i <- 1..5, do: event_fixture(qid: "Q#{i}")
+      for qid <- unique_qids(5), do: event_fixture(qid: qid)
 
       result = Atlas.list_events_geojson(full_range_opts(limit: 2))
 
@@ -215,37 +220,45 @@ defmodule Amanogawa.Atlas.EventQueriesTest do
 
   describe "list_links/1 limit and order" do
     test "outgoing relations beyond the per-direction cap are dropped, keeping the most important by target sitelink_count, then qid" do
-      center = event_fixture(qid: "Q1", geom: %Geo.Point{coordinates: {0.0, 0.0}, srid: 4326})
+      [center_qid | target_qids] = unique_qids(206)
 
-      for i <- 1..205 do
-        target =
-          event_fixture(
-            qid: "Q#{1000 + i}",
-            geom: %Geo.Point{coordinates: {0.0, 0.0}, srid: 4326},
-            sitelink_count: i
-          )
+      center =
+        event_fixture(qid: center_qid, geom: %Geo.Point{coordinates: {0.0, 0.0}, srid: 4326})
 
-        event_link_fixture(source_id: center.id, target_id: target.id, type: :part_of)
-      end
+      qid_by_sitelink =
+        for {qid, i} <- Enum.zip(target_qids, 1..205), into: %{} do
+          target =
+            event_fixture(
+              qid: qid,
+              geom: %Geo.Point{coordinates: {0.0, 0.0}, srid: 4326},
+              sitelink_count: i
+            )
 
-      assert {:ok, %{"features" => features}} = Atlas.list_event_links_geojson("Q1")
+          event_link_fixture(source_id: center.id, target_id: target.id, type: :part_of)
+          {i, qid}
+        end
+
+      assert {:ok, %{"features" => features}} = Atlas.list_event_links_geojson(center_qid)
       assert length(features) == 200
 
-      target_qids = Enum.map(features, & &1["properties"]["target_qid"])
+      result_qids = Enum.map(features, & &1["properties"]["target_qid"])
       # The 5 least important targets (sitelink_count 1..5) are dropped;
       # the rest come back ranked by sitelink_count descending.
-      expected_qids = for i <- 205..6//-1, do: "Q#{1000 + i}"
+      expected_qids = for i <- 205..6//-1, do: Map.fetch!(qid_by_sitelink, i)
 
-      assert target_qids == expected_qids
+      assert result_qids == expected_qids
     end
 
     test "incoming relations are capped independently of outgoing ones" do
-      center = event_fixture(qid: "Q1", geom: %Geo.Point{coordinates: {0.0, 0.0}, srid: 4326})
+      [center_qid | source_qids] = unique_qids(206)
 
-      for i <- 1..205 do
+      center =
+        event_fixture(qid: center_qid, geom: %Geo.Point{coordinates: {0.0, 0.0}, srid: 4326})
+
+      for {qid, i} <- Enum.zip(source_qids, 1..205) do
         source =
           event_fixture(
-            qid: "Q#{2000 + i}",
+            qid: qid,
             geom: %Geo.Point{coordinates: {0.0, 0.0}, srid: 4326},
             sitelink_count: i
           )
@@ -253,24 +266,27 @@ defmodule Amanogawa.Atlas.EventQueriesTest do
         event_link_fixture(source_id: source.id, target_id: center.id, type: :follows)
       end
 
-      assert {:ok, %{"features" => features}} = Atlas.list_event_links_geojson("Q1")
+      assert {:ok, %{"features" => features}} = Atlas.list_event_links_geojson(center_qid)
       assert length(features) == 200
       assert Enum.all?(features, &(&1["properties"]["direction"] == "incoming"))
     end
 
     test "targets tied on sitelink_count are tie-broken by qid ascending" do
-      center = event_fixture(qid: "Q1", geom: %Geo.Point{coordinates: {0.0, 0.0}, srid: 4326})
+      [center_qid, lower_target_qid, higher_target_qid] = unique_qids(3)
+
+      center =
+        event_fixture(qid: center_qid, geom: %Geo.Point{coordinates: {0.0, 0.0}, srid: 4326})
 
       higher_qid =
         event_fixture(
-          qid: "Q30",
+          qid: higher_target_qid,
           geom: %Geo.Point{coordinates: {0.0, 0.0}, srid: 4326},
           sitelink_count: 10
         )
 
       lower_qid =
         event_fixture(
-          qid: "Q20",
+          qid: lower_target_qid,
           geom: %Geo.Point{coordinates: {0.0, 0.0}, srid: 4326},
           sitelink_count: 10
         )
@@ -278,8 +294,12 @@ defmodule Amanogawa.Atlas.EventQueriesTest do
       event_link_fixture(source_id: center.id, target_id: higher_qid.id, type: :part_of)
       event_link_fixture(source_id: center.id, target_id: lower_qid.id, type: :part_of)
 
-      assert {:ok, %{"features" => features}} = Atlas.list_event_links_geojson("Q1")
-      assert Enum.map(features, & &1["properties"]["target_qid"]) == ["Q20", "Q30"]
+      assert {:ok, %{"features" => features}} = Atlas.list_event_links_geojson(center_qid)
+
+      assert Enum.map(features, & &1["properties"]["target_qid"]) == [
+               lower_qid.qid,
+               higher_qid.qid
+             ]
     end
   end
 
