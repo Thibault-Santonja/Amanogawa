@@ -33,5 +33,6 @@ defmodule AmanogawaWeb.Router do
     get "/events/histogram", EventController, :histogram
     get "/events/:qid/summary", EventController, :summary
     get "/events/:qid/links", EventController, :links
+    get "/borders", BorderController, :index
   end
 end

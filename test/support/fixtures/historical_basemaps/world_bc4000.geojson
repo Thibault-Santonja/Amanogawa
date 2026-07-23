@@ -1,0 +1,39 @@
+{
+  "type": "FeatureCollection",
+  "name": "world_bc4000",
+  "crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" } },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "NAME": "Dapenkeng culture",
+        "ABBREVN": "Dapenkeng",
+        "type": "culture",
+        "weblnks": "https://en.wikipedia.org/wiki/Dapenkeng_culture",
+        "SUBJECTO": "Dapenkeng culture",
+        "BORDERPRECISION": 1,
+        "PARTOF": "Dapenkeng culture"
+      },
+      "geometry": {
+        "type": "MultiPolygon",
+        "coordinates": [[[[120.0, 22.0], [120.0, 24.0], [122.0, 24.0], [122.0, 22.0], [120.0, 22.0]]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "NAME": "Bowtie Culture",
+        "ABBREVN": "Bowtie",
+        "type": "culture",
+        "weblnks": null,
+        "SUBJECTO": "Bowtie Culture",
+        "BORDERPRECISION": 2,
+        "PARTOF": "Bowtie Culture"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[0.0, 0.0], [1.0, 1.0], [1.0, 0.0], [0.0, 1.0], [0.0, 0.0]]]
+      }
+    }
+  ]
+}
