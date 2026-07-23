@@ -115,6 +115,13 @@ const MapHook = {
     this.previewWindow = {from: null, to: null}
     this.abortController = null
     this.eventsLoadedOnce = false
+    // Monotonic counter of successful `setEventsData` calls, rendered as
+    // `data-events-fetch-count` (issue #029): unlike the `data-events-
+    // loaded` flag below, a count lets the E2E dark-mode scenario detect
+    // that a *new* fetch landed after a theme change (`onStyleLoad`
+    // re-running `fetchEvents`) rather than merely that the flag was
+    // already `"true"` from the very first load.
+    this.eventsFetchCount = 0
     this.selectedQid = null
     // Marks a camera move triggered by `setView` (server-pushed), so the
     // `moveend` it causes is not mistaken for a user-driven move and
@@ -168,6 +175,13 @@ const MapHook = {
       this.setupEventsLayer()
       this.setupLinksLayer()
       this.eventsLoadedOnce = false
+      // Cleared while the style reloads (theme change) and re-set by
+      // `setEventsData` once the refetch lands: the one DOM signal the E2E
+      // suite (issue #029) synchronizes on before asserting anything about
+      // rendered markers, since the WebGL canvas itself is not assertable.
+      // Harmless in every environment, not gated like `data-e2e-test-api`
+      // below: it carries no information beyond "events are up to date".
+      this.el.removeAttribute("data-events-loaded")
       this.fetchEvents()
     }
     this.map.on("style.load", this.onStyleLoad)
@@ -336,6 +350,23 @@ const MapHook = {
       this.highlightEvent(null)
       this.clearEventLinks()
     })
+
+    // Test-only witness (issue #029): `data-e2e-test-api="true"` is only
+    // ever rendered by `AmanogawaWeb.ExploreLive` when `config :amanogawa,
+    // :expose_e2e_test_api` is `true`, itself only set in `config/
+    // test.exs`, so `window.__amanogawaE2E__` never exists outside the E2E
+    // suite. It sends the exact same intent a real marker click does
+    // (`onMarkerClick`/`onMapClick` above), without depending on WebGL
+    // canvas hit-testing under headless Chrome for scenarios that only
+    // care about the LiveView/URL/panel contract (the hover and relation
+    // lines scenarios still drive the canvas directly, since that IS what
+    // they cover).
+    if (this.el.dataset.e2eTestApi === "true") {
+      window.__amanogawaE2E__ = {
+        selectEvent: qid => this.pushEvent("select_event", {qid}),
+        deselectEvent: () => this.pushEvent("deselect_event", {})
+      }
+    }
   },
 
   setupEventsLayer() {
@@ -500,6 +531,10 @@ const MapHook = {
       this.map.setPaintProperty(EVENTS_CIRCLE_LAYER_ID, "circle-opacity", this.circleOpacityExpression())
       this.map.setPaintProperty(EVENTS_LABEL_LAYER_ID, "text-opacity", textOpacityExpression())
     }
+
+    this.eventsFetchCount += 1
+    this.el.setAttribute("data-events-loaded", "true")
+    this.el.setAttribute("data-events-fetch-count", String(this.eventsFetchCount))
   },
 
   // Whether `z`/`lat`/`lng` already match the current camera, within a
@@ -658,6 +693,14 @@ const MapHook = {
       this.linksOpacityFrame = null
       this.map.setPaintProperty(LINKS_LAYER_ID, "line-opacity", LINKS_VISIBLE_OPACITY)
     })
+
+    // The line layer is a WebGL source, not assertable directly (issue
+    // #029's own point d'attention): `data-links-count` is the DOM proxy
+    // the E2E suite reads to confirm the relation lines for the CURRENT
+    // selection were drawn, and (selecting a second event without an
+    // intermediate deselection) that they were *replaced*, not summed
+    // with the previous selection's.
+    this.el.setAttribute("data-links-count", String(featureCollection.features.length))
   },
 
   // Cancels any in-flight links fetch and empties the source (issue #017
@@ -674,6 +717,7 @@ const MapHook = {
 
     this.map.setPaintProperty(LINKS_LAYER_ID, "line-opacity", LINKS_HIDDEN_OPACITY)
     source.setData(emptyLinksFeatureCollection())
+    this.el.setAttribute("data-links-count", "0")
   },
 
   pushMapMoved() {
@@ -709,6 +753,8 @@ const MapHook = {
     this.darkScheme.removeEventListener("change", this.onSchemeChange)
     this.motionQuery.removeEventListener("change", this.onMotionChange)
     window.removeEventListener(TIME_WINDOW_PREVIEW_EVENT, this.onWindowPreview)
+
+    if (this.el.dataset.e2eTestApi === "true") delete window.__amanogawaE2E__
 
     this.map.remove()
   }

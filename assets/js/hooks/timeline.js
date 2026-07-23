@@ -792,6 +792,11 @@ const TimelineHook = {
 
       this.histogram = await response.json()
       this.render()
+      // The one DOM signal the E2E suite (issue #029) synchronizes on
+      // before asserting on histogram bars: harmless in every environment,
+      // carries no information beyond "the histogram fetched at least
+      // once".
+      this.el.setAttribute("data-histogram-loaded", "true")
     } catch (error) {
       if (error.name === "AbortError") return
 

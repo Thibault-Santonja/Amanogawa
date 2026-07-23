@@ -70,6 +70,18 @@ defmodule AmanogawaWeb.Endpoint do
   plug Plug.MethodOverride
   plug Plug.Head
   plug Plug.Session, @session_options
+
+  # Lets the E2E suite's real Chrome (issue #029, `test/support/
+  # feature_case.ex`) share the test process's sandboxed DB
+  # connection/transaction: the browser carries a header
+  # `Phoenix.Ecto.SQL.Sandbox.metadata_for/2` encodes, this plug reads it
+  # back and checks the connection out for the request. `config :amanogawa,
+  # sql_sandbox` is only ever `true` in `config/test.exs`, so this plug is
+  # compiled out of `:dev`/`:prod` entirely.
+  if Application.compile_env(:amanogawa, :sql_sandbox) do
+    plug Phoenix.Ecto.SQL.Sandbox
+  end
+
   plug AmanogawaWeb.Router
 
   @doc """
