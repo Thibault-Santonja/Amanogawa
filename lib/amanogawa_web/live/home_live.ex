@@ -9,7 +9,7 @@ defmodule AmanogawaWeb.HomeLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, assign(socket, :page_title, "Carte du monde")}
+    {:ok, assign(socket, :page_title, gettext("Carte du monde"))}
   end
 
   @impl true

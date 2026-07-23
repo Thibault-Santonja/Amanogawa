@@ -34,6 +34,7 @@
   --palette-text: oklch(25% 0.01 262);
   --palette-text-muted: oklch(45% 0.015 262);
   --palette-accent: oklch(48% 0.16 262);
+  --palette-danger: oklch(55% 0.22 27);
 }
 
 /* Dark mode: the system decides (no toggle, no dark class). */
@@ -49,6 +50,7 @@
     --palette-text: oklch(92% 0.005 262);
     --palette-text-muted: oklch(70% 0.01 262);
     --palette-accent: oklch(72% 0.13 262);
+    --palette-danger: oklch(72% 0.19 25);
   }
 }
 
@@ -72,6 +74,7 @@
   --color-text: var(--palette-text);
   --color-text-muted: var(--palette-text-muted);
   --color-accent: var(--palette-accent);
+  --color-danger: var(--palette-danger);
   --color-time-start: var(--time-start-color);
   --color-time-end: var(--time-end-color);
 }

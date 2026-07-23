@@ -34,6 +34,8 @@ defmodule AmanogawaWeb.Plugs.ContentSecurityPolicyTest do
       assert parsed["font-src"] == ["'self'"]
       assert parsed["worker-src"] == ["blob:"]
       assert parsed["child-src"] == ["blob:"]
+      assert parsed["object-src"] == ["'none'"]
+      assert parsed["manifest-src"] == ["'self'"]
       assert parsed["frame-ancestors"] == ["'none'"]
       assert parsed["base-uri"] == ["'self'"]
       assert parsed["form-action"] == ["'self'"]

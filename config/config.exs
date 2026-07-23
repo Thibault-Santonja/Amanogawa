@@ -14,6 +14,9 @@ config :amanogawa,
 # Use the custom Postgrex type module so PostGIS geometries map to Geo structs
 config :amanogawa, Amanogawa.Repo, types: Amanogawa.PostgresTypes
 
+# French is the source and default locale of the user-facing text.
+config :amanogawa, AmanogawaWeb.Gettext, default_locale: "fr"
+
 # Configure the endpoint
 config :amanogawa, AmanogawaWeb.Endpoint,
   url: [host: "localhost"],

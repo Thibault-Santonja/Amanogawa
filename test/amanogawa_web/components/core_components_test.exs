@@ -113,7 +113,7 @@ defmodule AmanogawaWeb.CoreComponentsTest do
         """)
 
       assert html =~ "oh no!"
-      assert html =~ "border-red-600"
+      assert html =~ "border-danger"
     end
 
     test "renders a hidden input" do

@@ -43,8 +43,8 @@ defmodule AmanogawaWeb.Layouts do
         <a href="/" class="text-topbar font-topbar tracking-wide text-text">Amanogawa</a>
         <nav class="flex items-center gap-4 text-topbar text-text-muted">
           <%!-- Placeholders: Sources and About pages arrive in a later feature. --%>
-          <span>Sources</span>
-          <span>À propos</span>
+          <span>{gettext("Sources")}</span>
+          <span>{gettext("À propos")}</span>
         </nav>
       </header>
 
@@ -55,7 +55,7 @@ defmodule AmanogawaWeb.Layouts do
       <footer
         id="timeline"
         class="h-28 shrink-0 border-t border-border bg-surface"
-        aria-label="Frise chronologique"
+        aria-label={gettext("Frise chronologique")}
       >
         <%!-- Reserved for the timeline hook (F04). --%>
       </footer>

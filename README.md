@@ -52,7 +52,7 @@ La barre de qualité est appliquée en local et en CI par la même commande :
 mix precommit
 ```
 
-Elle enchaîne, dans cet ordre : compilation avec warnings bloquants (`compile --warnings-as-errors`), vérification du formatage (`format --check-formatted`), analyse statique ([Credo](https://hexdocs.pm/credo/) en mode strict), analyse de sécurité ([Sobelow](https://hexdocs.pm/sobelow/)), puis les tests. Elle doit passer avant chaque commit.
+Elle enchaîne, dans cet ordre : compilation avec warnings bloquants (`compile --warnings-as-errors`), vérification du formatage (`format --check-formatted`), analyse statique ([Credo](https://hexdocs.pm/credo/) en mode strict), analyse de sécurité ([Sobelow](https://hexdocs.pm/sobelow/)), build des assets (`assets.build`), puis les tests. Elle doit passer avant chaque commit.
 
 Commandes complémentaires :
 

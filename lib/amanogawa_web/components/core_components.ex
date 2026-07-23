@@ -62,7 +62,7 @@ defmodule AmanogawaWeb.CoreComponents do
       <div class={[
         "flex w-80 items-start gap-3 rounded-md border bg-surface p-4 text-sm text-text shadow-lg sm:w-96",
         @kind == :info && "border-border",
-        @kind == :error && "border-red-600 dark:border-red-400"
+        @kind == :error && "border-danger"
       ]}>
         <.icon
           :if={@kind == :info}
@@ -72,7 +72,7 @@ defmodule AmanogawaWeb.CoreComponents do
         <.icon
           :if={@kind == :error}
           name="hero-exclamation-circle"
-          class="size-5 shrink-0 text-red-600 dark:text-red-400"
+          class="size-5 shrink-0 text-danger"
         />
         <div class="flex-1">
           <p :if={@title} class="font-semibold">{@title}</p>
@@ -197,7 +197,7 @@ defmodule AmanogawaWeb.CoreComponents do
           class={[
             @class ||
               "w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-muted focus:outline-2 focus:outline-accent",
-            @errors != [] && (@error_class || "border-red-600 dark:border-red-400")
+            @errors != [] && (@error_class || "border-danger")
           ]}
           {@rest}
         />
@@ -210,7 +210,7 @@ defmodule AmanogawaWeb.CoreComponents do
   # Helper used by inputs to generate form errors
   defp error(assigns) do
     ~H"""
-    <p class="mt-1.5 flex items-center gap-2 text-sm text-red-600 dark:text-red-400">
+    <p class="mt-1.5 flex items-center gap-2 text-sm text-danger">
       <.icon name="hero-exclamation-circle" class="size-5" />
       {render_slot(@inner_block)}
     </p>

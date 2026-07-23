@@ -43,6 +43,8 @@ defmodule AmanogawaWeb.Plugs.ContentSecurityPolicy do
         "connect-src 'self' #{websocket_origin(endpoint)} #{@tiles_origin}",
         "worker-src blob:",
         "child-src blob:",
+        "object-src 'none'",
+        "manifest-src 'self'",
         "frame-ancestors 'none'",
         "base-uri 'self'",
         "form-action 'self'"
