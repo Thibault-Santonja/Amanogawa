@@ -9,7 +9,7 @@ defmodule AmanogawaWeb.Controllers.Api.EventControllerTest do
 
   describe "GET /api/events" do
     test "valid params return 200, JSON content-type and a FeatureCollection", %{conn: conn} do
-      event_fixture(qid: "Q1")
+      event = event_fixture()
 
       conn =
         conn
@@ -24,15 +24,17 @@ defmodule AmanogawaWeb.Controllers.Api.EventControllerTest do
 
       body = json_response(conn, 200)
       assert body["type"] == "FeatureCollection"
-      assert [%{"properties" => %{"qid" => "Q1"}}] = body["features"]
+      assert [%{"properties" => %{"qid" => qid}}] = body["features"]
+      assert qid == event.qid
     end
 
     test "no params defaults to the whole world and full time range", %{conn: conn} do
-      event_fixture(qid: "Q1")
+      event = event_fixture()
 
       conn = conn |> unique_conn() |> get(~p"/api/events")
 
-      assert %{"features" => [%{"properties" => %{"qid" => "Q1"}}]} = json_response(conn, 200)
+      assert %{"features" => [%{"properties" => %{"qid" => qid}}]} = json_response(conn, 200)
+      assert qid == event.qid
     end
 
     test "invalid bbox returns 400 with structured errors", %{conn: conn} do
@@ -116,14 +118,14 @@ defmodule AmanogawaWeb.Controllers.Api.EventControllerTest do
 
   describe "GET /api/events/:qid/links" do
     test "an event with relations returns 200 and the expected FeatureCollection", %{conn: conn} do
-      center = event_fixture(qid: "Q1", geom: %Geo.Point{coordinates: {2.35, 48.85}, srid: 4326})
+      center = event_fixture(geom: %Geo.Point{coordinates: {2.35, 48.85}, srid: 4326})
 
       target =
-        event_fixture(qid: "Q2", geom: %Geo.Point{coordinates: {12.5, 41.9}, srid: 4326})
+        event_fixture(geom: %Geo.Point{coordinates: {12.5, 41.9}, srid: 4326})
 
       event_link_fixture(source_id: center.id, target_id: target.id, type: :cause)
 
-      conn = conn |> unique_conn() |> get(~p"/api/events/Q1/links")
+      conn = conn |> unique_conn() |> get(~p"/api/events/#{center.qid}/links")
 
       assert [content_type] = get_resp_header(conn, "content-type")
       assert content_type =~ "application/json"
@@ -133,15 +135,15 @@ defmodule AmanogawaWeb.Controllers.Api.EventControllerTest do
       assert [feature] = body["features"]
       assert feature["geometry"]["type"] == "LineString"
       assert feature["properties"]["link_type"] == "cause"
-      assert feature["properties"]["target_qid"] == "Q2"
+      assert feature["properties"]["target_qid"] == target.qid
     end
 
     test "an event without any relation returns 200 with an empty FeatureCollection", %{
       conn: conn
     } do
-      event_fixture(qid: "Q1")
+      event = event_fixture()
 
-      conn = conn |> unique_conn() |> get(~p"/api/events/Q1/links")
+      conn = conn |> unique_conn() |> get(~p"/api/events/#{event.qid}/links")
 
       assert %{"type" => "FeatureCollection", "features" => []} = json_response(conn, 200)
     end

@@ -160,23 +160,12 @@ jobs:
         # just compiled `.ex`/`.exs`.
         run: mix assets.build
 
-      - name: Install Google Chrome
-        # Explicit rather than relying on whatever the runner image
-        # happens to preinstall (`ubuntu-latest` has historically shipped
-        # Chrome, but that is not a contract): idempotent, and this is the
-        # one place chromedriver-version matching (below) depends on
-        # knowing exactly what was installed.
-        run: |
-          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg
-          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
-          sudo apt-get update
-          sudo apt-get install -y google-chrome-stable
-
       - name: Install matching chromedriver
-        # Resolves and installs the chromedriver build matching the Chrome
-        # version just installed (`Wallaby.Chrome.validate/0` refuses to
-        # start a session at all on a major/minor/build mismatch), so this
-        # step must run after "Install Google Chrome" above, not before.
+        # ubuntu-latest ships google-chrome-stable preinstalled: this only
+        # resolves and installs the chromedriver build matching that
+        # already-present Chrome version (`Wallaby.Chrome.validate/0`
+        # refuses to start a session at all on a major/minor/build
+        # mismatch).
         uses: nanasess/setup-chromedriver@v2
 
       - name: Run the E2E suite

@@ -11,7 +11,7 @@ defmodule Amanogawa.AtlasTest do
 
   describe "upsert_events/1" do
     test "inserting a batch and replaying it leaves row count and columns unchanged (idempotence)" do
-      events = [event_attrs(qid: "Q1"), event_attrs(qid: "Q2")]
+      events = unique_qids(2) |> Enum.map(&event_attrs(qid: &1))
 
       assert {:ok, %{upserted: 2}} = Atlas.upsert_events(events)
       assert Atlas.count_events() == 2
@@ -27,63 +27,71 @@ defmodule Amanogawa.AtlasTest do
     end
 
     test "a batch repeating the same QID is deduplicated instead of crashing the statement" do
+      [qid_1, qid_2] = unique_qids(2)
+
       events = [
-        event_attrs(qid: "Q1", label_fr: "Premier"),
-        event_attrs(qid: "Q1", label_fr: "Doublon"),
-        event_attrs(qid: "Q2")
+        event_attrs(qid: qid_1, label_fr: "Premier"),
+        event_attrs(qid: qid_1, label_fr: "Doublon"),
+        event_attrs(qid: qid_2)
       ]
 
       assert {:ok, %{upserted: 2}} = Atlas.upsert_events(events)
       assert Atlas.count_events() == 2
       # First occurrence wins.
-      assert Atlas.get_event_by_qid("Q1").label_fr == "Premier"
+      assert Atlas.get_event_by_qid(qid_1).label_fr == "Premier"
     end
 
     test "a modified label updates the existing row instead of duplicating it" do
-      {:ok, _} = Atlas.upsert_events([event_attrs(qid: "Q1", label_fr: "Ancien nom")])
-      {:ok, _} = Atlas.upsert_events([event_attrs(qid: "Q1", label_fr: "Nouveau nom")])
+      qid = hd(unique_qids(1))
+
+      {:ok, _} = Atlas.upsert_events([event_attrs(qid: qid, label_fr: "Ancien nom")])
+      {:ok, _} = Atlas.upsert_events([event_attrs(qid: qid, label_fr: "Nouveau nom")])
 
       assert Atlas.count_events() == 1
-      assert Atlas.get_event_by_qid("Q1").label_fr == "Nouveau nom"
+      assert Atlas.get_event_by_qid(qid).label_fr == "Nouveau nom"
     end
 
     test "a Wikidata upsert does not overwrite an existing extract_fr" do
-      {:ok, _} = Atlas.upsert_events([event_attrs(qid: "Q1")])
+      qid = hd(unique_qids(1))
 
-      Atlas.get_event_by_qid("Q1")
+      {:ok, _} = Atlas.upsert_events([event_attrs(qid: qid)])
+
+      Atlas.get_event_by_qid(qid)
       |> Ecto.Changeset.change(extract_fr: "Resume Wikipedia")
       |> Repo.update!()
 
-      {:ok, _} = Atlas.upsert_events([event_attrs(qid: "Q1", label_fr: "Nom mis a jour")])
+      {:ok, _} = Atlas.upsert_events([event_attrs(qid: qid, label_fr: "Nom mis a jour")])
 
-      updated = Atlas.get_event_by_qid("Q1")
+      updated = Atlas.get_event_by_qid(qid)
       assert updated.label_fr == "Nom mis a jour"
       assert updated.extract_fr == "Resume Wikipedia"
     end
 
     test "a batch of more than 500 elements is accepted (chunked insert_all)" do
-      events = for i <- 1..600, do: event_attrs(qid: "Q#{i}")
+      events = unique_qids(600) |> Enum.map(&event_attrs(qid: &1))
 
       assert {:ok, %{upserted: 600}} = Atlas.upsert_events(events)
       assert Atlas.count_events() == 600
     end
 
     test "accepts string-keyed rows, as normalized data may come with either key type" do
-      row = event_attrs(qid: "Q1") |> Map.new(fn {k, v} -> {Atom.to_string(k), v} end)
+      qid = hd(unique_qids(1))
+      row = event_attrs(qid: qid) |> Map.new(fn {k, v} -> {Atom.to_string(k), v} end)
 
       assert {:ok, %{upserted: 1}} = Atlas.upsert_events([row])
-      assert Atlas.get_event_by_qid("Q1")
+      assert Atlas.get_event_by_qid(qid)
     end
   end
 
   describe "upsert_event_links/1" do
     test "creates links for pairs whose QIDs both exist locally, skips the rest" do
-      event_fixture(qid: "Q1")
-      event_fixture(qid: "Q2")
+      [qid_1, qid_2, never_inserted_qid] = unique_qids(3)
+      event_fixture(qid: qid_1)
+      event_fixture(qid: qid_2)
 
       links = [
-        %{source_qid: "Q1", target_qid: "Q2", type: :part_of},
-        %{source_qid: "Q1", target_qid: "Q999", type: :follows}
+        %{source_qid: qid_1, target_qid: qid_2, type: :part_of},
+        %{source_qid: qid_1, target_qid: never_inserted_qid, type: :follows}
       ]
 
       assert {:ok, %{created: 1, skipped_missing: 1}} = Atlas.upsert_event_links(links)
@@ -91,10 +99,11 @@ defmodule Amanogawa.AtlasTest do
     end
 
     test "replaying the same batch creates no duplicate (unique constraint + on_conflict: :nothing)" do
-      event_fixture(qid: "Q1")
-      event_fixture(qid: "Q2")
+      [qid_1, qid_2] = unique_qids(2)
+      event_fixture(qid: qid_1)
+      event_fixture(qid: qid_2)
 
-      links = [%{source_qid: "Q1", target_qid: "Q2", type: :part_of}]
+      links = [%{source_qid: qid_1, target_qid: qid_2, type: :part_of}]
 
       assert {:ok, %{created: 1, skipped_missing: 0}} = Atlas.upsert_event_links(links)
       assert {:ok, %{created: 0, skipped_missing: 0}} = Atlas.upsert_event_links(links)
@@ -102,12 +111,13 @@ defmodule Amanogawa.AtlasTest do
     end
 
     test "a batch repeating the same pair is deduplicated within the batch (exact created count)" do
-      event_fixture(qid: "Q1")
-      event_fixture(qid: "Q2")
+      [qid_1, qid_2] = unique_qids(2)
+      event_fixture(qid: qid_1)
+      event_fixture(qid: qid_2)
 
       links = [
-        %{source_qid: "Q1", target_qid: "Q2", type: :part_of},
-        %{source_qid: "Q1", target_qid: "Q2", type: :part_of}
+        %{source_qid: qid_1, target_qid: qid_2, type: :part_of},
+        %{source_qid: qid_1, target_qid: qid_2, type: :part_of}
       ]
 
       assert {:ok, %{created: 1, skipped_missing: 0}} = Atlas.upsert_event_links(links)
@@ -117,17 +127,20 @@ defmodule Amanogawa.AtlasTest do
 
   describe "get_event_by_qid/1 and event_ids_by_qids/1" do
     test "returns nil / omits unknown QIDs" do
-      event_fixture(qid: "Q1")
+      [qid, never_inserted_qid] = unique_qids(2)
+      event_fixture(qid: qid)
 
-      assert Atlas.get_event_by_qid("Q999") == nil
-      assert Atlas.event_ids_by_qids(["Q1", "Q999"]) |> Map.keys() == ["Q1"]
+      assert Atlas.get_event_by_qid(never_inserted_qid) == nil
+      assert Atlas.event_ids_by_qids([qid, never_inserted_qid]) |> Map.keys() == [qid]
     end
   end
 
   describe "get_event_summary/1" do
     test "happy path: full summary with fr extract and thumbnail" do
+      qid = hd(unique_qids(1))
+
       event_fixture(
-        qid: "Q1",
+        qid: qid,
         label_fr: "Bataille de Marathon",
         label_en: "Battle of Marathon",
         extract_fr: "Resume francais",
@@ -138,10 +151,10 @@ defmodule Amanogawa.AtlasTest do
         extract_fetched_at: ~U[2026-01-01 00:00:00Z]
       )
 
-      assert {:ok, summary} = Atlas.get_event_summary("Q1")
+      assert {:ok, summary} = Atlas.get_event_summary(qid)
 
       assert summary == %{
-               qid: "Q1",
+               qid: qid,
                label: "Bataille de Marathon",
                extract: "Resume francais",
                thumbnail_url: "https://upload.wikimedia.org/wikipedia/commons/a/ab/Marathon.jpg",
@@ -152,8 +165,10 @@ defmodule Amanogawa.AtlasTest do
     end
 
     test "edge case: falls back to English label, extract and wiki_url when French is absent" do
+      qid = hd(unique_qids(1))
+
       event_fixture(
-        qid: "Q1",
+        qid: qid,
         label_fr: nil,
         label_en: "Battle of Marathon",
         extract_fr: nil,
@@ -162,7 +177,7 @@ defmodule Amanogawa.AtlasTest do
         wiki_url_en: "https://en.wikipedia.org/wiki/Battle_of_Marathon"
       )
 
-      assert {:ok, summary} = Atlas.get_event_summary("Q1")
+      assert {:ok, summary} = Atlas.get_event_summary(qid)
 
       assert summary.label == "Battle of Marathon"
       assert summary.extract == "English summary"
@@ -171,18 +186,20 @@ defmodule Amanogawa.AtlasTest do
     end
 
     test "edge case: an event without an extract yet returns extract and extract_language as nil" do
-      event_fixture(qid: "Q1", extract_fr: nil, extract_en: nil)
+      qid = hd(unique_qids(1))
+      event_fixture(qid: qid, extract_fr: nil, extract_en: nil)
 
-      assert {:ok, summary} = Atlas.get_event_summary("Q1")
+      assert {:ok, summary} = Atlas.get_event_summary(qid)
 
       assert summary.extract == nil
       assert summary.extract_language == nil
     end
 
     test "edge case: an event without a thumbnail returns thumbnail_url as nil" do
-      event_fixture(qid: "Q1", thumbnail_url: nil)
+      qid = hd(unique_qids(1))
+      event_fixture(qid: qid, thumbnail_url: nil)
 
-      assert {:ok, summary} = Atlas.get_event_summary("Q1")
+      assert {:ok, summary} = Atlas.get_event_summary(qid)
 
       assert summary.thumbnail_url == nil
     end
@@ -194,12 +211,14 @@ defmodule Amanogawa.AtlasTest do
 
   describe "list_event_links_geojson/1" do
     test "happy path: a mix of outgoing and incoming relations, correctly oriented" do
+      [center_qid, target_qid, source_qid] = unique_qids(3)
+
       center =
-        event_fixture(qid: "Q1", geom: %Geo.Point{coordinates: {2.35, 48.85}, srid: 4326})
+        event_fixture(qid: center_qid, geom: %Geo.Point{coordinates: {2.35, 48.85}, srid: 4326})
 
       target =
         event_fixture(
-          qid: "Q2",
+          qid: target_qid,
           label_fr: "Cible",
           begin_year: 500,
           geom: %Geo.Point{coordinates: {12.5, 41.9}, srid: 4326}
@@ -207,7 +226,7 @@ defmodule Amanogawa.AtlasTest do
 
       source =
         event_fixture(
-          qid: "Q3",
+          qid: source_qid,
           label_fr: "Source",
           begin_year: -100,
           geom: %Geo.Point{coordinates: {-3.7, 40.4}, srid: 4326}
@@ -217,7 +236,7 @@ defmodule Amanogawa.AtlasTest do
       event_link_fixture(source_id: source.id, target_id: center.id, type: :follows)
 
       assert {:ok, %{"type" => "FeatureCollection", "features" => features}} =
-               Atlas.list_event_links_geojson("Q1")
+               Atlas.list_event_links_geojson(center_qid)
 
       assert length(features) == 2
 
@@ -235,7 +254,7 @@ defmodule Amanogawa.AtlasTest do
       assert outgoing["properties"] == %{
                "link_type" => "cause",
                "direction" => "outgoing",
-               "target_qid" => "Q2",
+               "target_qid" => target_qid,
                "target_label" => "Cible",
                "target_year" => 500
              }
@@ -248,68 +267,74 @@ defmodule Amanogawa.AtlasTest do
       assert incoming["properties"] == %{
                "link_type" => "follows",
                "direction" => "incoming",
-               "target_qid" => "Q3",
+               "target_qid" => source_qid,
                "target_label" => "Source",
                "target_year" => -100
              }
     end
 
     test "edge case: a relation whose target has no geometry is excluded without error" do
-      center = event_fixture(qid: "Q1")
-      target = event_fixture(qid: "Q2", geom: nil)
+      [center_qid, target_qid] = unique_qids(2)
+      center = event_fixture(qid: center_qid)
+      target = event_fixture(qid: target_qid, geom: nil)
 
       event_link_fixture(source_id: center.id, target_id: target.id, type: :part_of)
 
-      assert {:ok, %{"features" => []}} = Atlas.list_event_links_geojson("Q1")
+      assert {:ok, %{"features" => []}} = Atlas.list_event_links_geojson(center_qid)
     end
 
     test "edge case: an event without any relation returns an empty FeatureCollection" do
-      event_fixture(qid: "Q1")
+      qid = hd(unique_qids(1))
+      event_fixture(qid: qid)
 
       assert {:ok, %{"type" => "FeatureCollection", "features" => []}} =
-               Atlas.list_event_links_geojson("Q1")
+               Atlas.list_event_links_geojson(qid)
     end
 
     test "edge case: the target label falls back to English when French is absent" do
-      center = event_fixture(qid: "Q1")
-      target = event_fixture(qid: "Q2", label_fr: nil, label_en: "English only")
+      [center_qid, target_qid] = unique_qids(2)
+      center = event_fixture(qid: center_qid)
+      target = event_fixture(qid: target_qid, label_fr: nil, label_en: "English only")
 
       event_link_fixture(source_id: center.id, target_id: target.id, type: :significant)
 
-      assert {:ok, %{"features" => [feature]}} = Atlas.list_event_links_geojson("Q1")
+      assert {:ok, %{"features" => [feature]}} = Atlas.list_event_links_geojson(center_qid)
       assert feature["properties"]["target_label"] == "English only"
     end
 
     test "edge case: the selected event itself has no geometry: empty collection, no error" do
-      center = event_fixture(qid: "Q1", geom: nil)
-      target = event_fixture(qid: "Q2")
+      [center_qid, target_qid] = unique_qids(2)
+      center = event_fixture(qid: center_qid, geom: nil)
+      target = event_fixture(qid: target_qid)
 
       event_link_fixture(source_id: center.id, target_id: target.id, type: :part_of)
 
-      assert {:ok, %{"features" => []}} = Atlas.list_event_links_geojson("Q1")
+      assert {:ok, %{"features" => []}} = Atlas.list_event_links_geojson(center_qid)
     end
 
     test "limit case: a highly connected event returns every well-formed relation" do
-      center = event_fixture(qid: "Q1")
+      [center_qid | target_qids] = unique_qids(41)
+      center = event_fixture(qid: center_qid)
 
-      for i <- 1..40 do
-        target = event_fixture(qid: "Q#{i + 1}")
+      for target_qid <- target_qids do
+        target = event_fixture(qid: target_qid)
         event_link_fixture(source_id: center.id, target_id: target.id, type: :part_of)
       end
 
-      assert {:ok, %{"features" => features}} = Atlas.list_event_links_geojson("Q1")
+      assert {:ok, %{"features" => features}} = Atlas.list_event_links_geojson(center_qid)
       assert length(features) == 40
       assert Enum.all?(features, &(&1["geometry"]["type"] == "LineString"))
     end
 
     test "limit case: two endpoints at the same point are kept as a degenerate LineString" do
+      [center_qid, target_qid] = unique_qids(2)
       point = %Geo.Point{coordinates: {2.35, 48.85}, srid: 4326}
-      center = event_fixture(qid: "Q1", geom: point)
-      target = event_fixture(qid: "Q2", geom: point)
+      center = event_fixture(qid: center_qid, geom: point)
+      target = event_fixture(qid: target_qid, geom: point)
 
       event_link_fixture(source_id: center.id, target_id: target.id, type: :part_of)
 
-      assert {:ok, %{"features" => [feature]}} = Atlas.list_event_links_geojson("Q1")
+      assert {:ok, %{"features" => [feature]}} = Atlas.list_event_links_geojson(center_qid)
       assert feature["geometry"]["coordinates"] == [[2.35, 48.85], [2.35, 48.85]]
     end
 
@@ -443,11 +468,12 @@ defmodule Amanogawa.AtlasTest do
 
   describe "indexes and constraints" do
     test "qid has a unique constraint" do
-      event_fixture(qid: "Q1")
+      qid = hd(unique_qids(1))
+      event_fixture(qid: qid)
 
       assert {:error, changeset} =
                %Event{}
-               |> Event.changeset(event_attrs(qid: "Q1"))
+               |> Event.changeset(event_attrs(qid: qid))
                |> Repo.insert()
 
       assert "has already been taken" in errors_on(changeset).qid
@@ -480,7 +506,7 @@ defmodule Amanogawa.AtlasTest do
 
   defp event_attrs(overrides) do
     %{
-      qid: "Q0",
+      qid: hd(unique_qids(1)),
       label_fr: "Evenement de test",
       begin_year: 1789,
       begin_precision: 9,
