@@ -27,6 +27,15 @@ config :amanogawa, Amanogawa.Ingestion.SparqlClient.QLever,
   backoff_base_ms: 500,
   retry_after_unit_ms: 1000
 
+# Background jobs (ingestion pipelines): a single :ingestion queue at
+# concurrency 1 enforces the "one SPARQL query at a time" etiquette rule
+# (.claude/rules/ethics.md); transient backoff is handled by the SparqlClient
+# adapter itself, durable resume by the sync_run cursor (#010).
+config :amanogawa, Oban,
+  engine: Oban.Engines.Basic,
+  repo: Amanogawa.Repo,
+  queues: [ingestion: 1]
+
 # French is the source and default locale of the user-facing text.
 config :amanogawa, AmanogawaWeb.Gettext, default_locale: "fr"
 

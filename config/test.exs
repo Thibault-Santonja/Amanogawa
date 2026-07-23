@@ -46,3 +46,16 @@ config :amanogawa, Amanogawa.Ingestion.SparqlClient.QLever,
   plug: {Req.Test, Amanogawa.Ingestion.SparqlClient.QLever},
   backoff_base_ms: 1,
   retry_after_unit_ms: 1
+
+# Oban runs in manual testing mode: jobs are asserted with Oban.Testing
+# (enqueued jobs, `perform_job/2`) instead of executing through real queues,
+# so tests never race a background poller.
+config :amanogawa, Oban, testing: :manual
+
+# Tiny pagination plan so tests can exercise several slices and several
+# pages per slice against small fixtures instead of the production
+# millions-of-QIDs plan.
+config :amanogawa, Amanogawa.Ingestion.Workers.ImportEvents,
+  page_size: 3,
+  slice_width: 10,
+  max_qid: 20

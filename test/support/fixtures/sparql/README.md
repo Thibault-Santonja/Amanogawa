@@ -109,3 +109,98 @@ skill and issue #008 call out: an intermediary (reverse proxy, CDN) serving
 an HTML error page instead of the expected
 `application/sparql-results+json`, as a generic `502 Bad Gateway` (nginx)
 page. Constructed by hand on 2026-07-23.
+
+## events_page.json (#009)
+
+Captured 2026-07-23 from `https://qlever.dev/api/wikidata`, by rendering
+and running the exact query `Amanogawa.Ingestion.Wikidata.Templates.
+events_page/1` produces for the slice `[178000, 179300)`:
+
+```sparql
+PREFIX wd: <http://www.wikidata.org/entity/>
+PREFIX wdt: <http://www.wikidata.org/prop/direct/>
+PREFIX p: <http://www.wikidata.org/prop/>
+PREFIX psv: <http://www.wikidata.org/prop/statement/value/>
+PREFIX wikibase: <http://wikiba.se/ontology#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX schema: <http://schema.org/>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+SELECT ?e
+       (SAMPLE(?labelFrV) AS ?labelFr) (SAMPLE(?labelEnV) AS ?labelEn)
+       (SAMPLE(?descFrV) AS ?descFr) (SAMPLE(?descEnV) AS ?descEn)
+       (SAMPLE(?kindV) AS ?kind)
+       (SAMPLE(?beginTimeRaw) AS ?beginTime) (SAMPLE(?beginPrecisionRaw) AS ?beginPrecision) (SAMPLE(?beginCalendarRaw) AS ?beginCalendar)
+       (SAMPLE(?endTimeV) AS ?endTime) (SAMPLE(?endPrecisionV) AS ?endPrecision) (SAMPLE(?endCalendarV) AS ?endCalendar)
+       (SAMPLE(?coordDirectV) AS ?coordDirect) (SAMPLE(?coordPlaceV) AS ?coordPlace)
+       (SAMPLE(?articleFrV) AS ?articleFr) (SAMPLE(?articleEnV) AS ?articleEn)
+       (SAMPLE(?sitelinkCountV) AS ?sitelinkCount)
+WHERE {
+  ?e wdt:P31/wdt:P279* wd:Q1190554 .
+  BIND(xsd:integer(STRAFTER(STR(?e), "http://www.wikidata.org/entity/Q")) AS ?qidNum)
+  FILTER(?qidNum >= 178000 && ?qidNum < 179300)
+  MINUS { VALUES ?blocked { <Blocklist.qids/0, see amanogawa/ingestion/wikidata/blocklist.ex> } ?e wdt:P31 ?blocked }
+  { ?e p:P585/psv:P585 ?beginNode585 . ?beginNode585 wikibase:timeValue ?beginTimeRaw ; wikibase:timePrecision ?beginPrecisionRaw ; wikibase:timeCalendarModel ?beginCalendarRaw . }
+  UNION
+  { MINUS { ?e p:P585/psv:P585 ?anyBeginNode585 } ?e p:P580/psv:P580 ?beginNode580 . ?beginNode580 wikibase:timeValue ?beginTimeRaw ; wikibase:timePrecision ?beginPrecisionRaw ; wikibase:timeCalendarModel ?beginCalendarRaw . }
+  OPTIONAL { ?e p:P582/psv:P582 ?endNode . ?endNode wikibase:timeValue ?endTimeV ; wikibase:timePrecision ?endPrecisionV ; wikibase:timeCalendarModel ?endCalendarV . }
+  OPTIONAL { ?e wdt:P625 ?coordDirectV . }
+  OPTIONAL { ?e wdt:P276/wdt:P625 ?coordPlaceV . }
+  FILTER(BOUND(?coordDirectV) || BOUND(?coordPlaceV))
+  OPTIONAL { ?e rdfs:label ?labelFrV . FILTER(LANG(?labelFrV) = "fr") }
+  OPTIONAL { ?e rdfs:label ?labelEnV . FILTER(LANG(?labelEnV) = "en") }
+  OPTIONAL { ?e schema:description ?descFrV . FILTER(LANG(?descFrV) = "fr") }
+  OPTIONAL { ?e schema:description ?descEnV . FILTER(LANG(?descEnV) = "en") }
+  OPTIONAL { ?e wdt:P31 ?kindV . }
+  OPTIONAL { ?articleFrV schema:about ?e ; schema:isPartOf <https://fr.wikipedia.org/> . }
+  OPTIONAL { ?articleEnV schema:about ?e ; schema:isPartOf <https://en.wikipedia.org/> . }
+  OPTIONAL { ?e wikibase:sitelinks ?sitelinkCountV . }
+}
+GROUP BY ?e
+ORDER BY ?e
+LIMIT 200
+OFFSET 0
+```
+
+26 real, diverse bindings: begin precisions 9, 10 and 11; direct-only,
+place-only and direct+place coordinate combinations; events with both a
+begin and an end date (wars); events with a French article, an English
+article, both, or neither (`Q178530`). Used as the nominal page fixture for
+`Amanogawa.Ingestion.Wikidata.EventDecoder` and, later, the import worker
+(#010).
+
+## marathon.json (#009)
+
+Captured 2026-07-23 from `https://qlever.dev/api/wikidata`, rendering
+`Templates.events_by_qids(["Q31900"])` (same query shape as above, `VALUES
+?e { wd:Q31900 }` instead of a slice filter). This is the RDF
+astronomical-year regression fixture: the battle of Marathon has three
+`P585` statements (dates hesitate across sources), all serialized
+`-0489-...`, decoding to internal year `-489` (490 BCE, ADR 0006) with no
+correction applied to the RDF channel.
+
+Historical note: early project documentation and the first #007 fixtures
+referred to the battle of Marathon as `Q46335`, which is in fact
+"typewriter" on Wikidata. The real battle of Marathon is `Q31900`; every
+reference in code, tests and docs now uses `Q31900`.
+
+## hostile_bindings.json (#009)
+
+Not captured: each row is a data-quality failure `EventDecoder.decode/1`
+must reject without crashing, which QLever does not spontaneously produce
+for a syntactically valid query. Constructed by hand on 2026-07-23,
+`events_page.json`-shaped, one row per failure mode: a date missing
+`beginPrecision`, a `coordDirect` WKT literal that is not a `POINT(...)`,
+an entity URI that is a statement node rather than a plain QID entity
+(`http://www.wikidata.org/entity/statement/Q31900-...`), and a `beginTime`
+literal that does not match the RDF time format at all.
+
+## prehistory.json (#009)
+
+Not captured: no real, richly-annotated `Q1190554` occurrence with a
+precision this coarse and this deep in the past was found in the ranges
+sampled while building `events_page.json` (network to QLever was also
+intermittently unavailable, `502`, while searching further). Constructed
+by hand on 2026-07-23 as a single realistic binding (Toba supereruption,
+`-123000`, precision 5, ten-thousand-year), used for the "deep prehistory
+decodes correctly" limit case.

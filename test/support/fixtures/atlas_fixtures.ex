@@ -11,7 +11,7 @@ defmodule Amanogawa.AtlasFixtures do
   alias Amanogawa.Repo
 
   @doc """
-  Inserts a valid event (defaults to the Battle of Marathon, Q46335, a
+  Inserts a valid event (defaults to the Battle of Marathon, Q31900, a
   BCE date known to the day), overridable via `attrs`.
   """
   @spec event_fixture(map() | keyword()) :: Event.t()

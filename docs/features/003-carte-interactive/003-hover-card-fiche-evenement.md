@@ -64,7 +64,7 @@ Le panneau latéral est un composant fonction branché sur la LiveView de la pag
 
 ### Tests d'intégration
 
-- [ ] **Intégration** (ConnCase) : `GET /api/events/Q46335/summary` retourne 200 avec les champs attendus ; QID inconnu 404 ; QID invalide 400 ; contenu strictement JSON (pas de HTML).
+- [ ] **Intégration** (ConnCase) : `GET /api/events/Q31900/summary` retourne 200 avec les champs attendus ; QID inconnu 404 ; QID invalide 400 ; contenu strictement JSON (pas de HTML).
 - [ ] **Intégration** (LiveViewTest) : `select_event` avec QID valide affiche le panneau (titre, attribution, lien avec `rel="noopener noreferrer"` et `target="_blank"`) ; extrait contenant `<script>alert(1)</script>` rendu échappé dans le HTML ; `deselect_event` ferme le panneau ; QID invalide n'altère pas la vue ; `assert_push_event` sur `event_selected` et `event_deselected`.
 
 ### Tests end-to-end (si applicable)

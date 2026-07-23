@@ -8,7 +8,7 @@ defmodule Amanogawa.Atlas.EventTest do
   alias Amanogawa.HistoricalDate
 
   @valid_attrs %{
-    qid: "Q46335",
+    qid: "Q31900",
     label_fr: "Bataille de Marathon",
     begin_year: -489,
     begin_precision: 9,

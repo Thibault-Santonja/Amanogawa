@@ -93,7 +93,7 @@ Les pièges Wikidata documentés dans `.claude/memory/data-sources.md` sont trai
 - **Documentation de référence** : ADR 0006 (modèle temporel), `.claude/rules/geo-temporal.md`, `.claude/memory/data-sources.md` (pièges des dates), étude `docs/studies/2026-07-sources-donnees-historiques.md` §5, [Help:Dates](https://www.wikidata.org/wiki/Help:Dates).
 - **Compétences requises** : Ecto `embedded_schema` et changesets, StreamData (générateurs composés, propriétés d'ordre), conventions de numérotation des années (astronomique vs historique).
 - **Points d'attention** :
-  - Convention astronomique stricte (ADR 0006) : 490 av. J.-C. = année -489. Le RDF SPARQL livre déjà cette valeur (`-0489`) ; c'est le canal JSON qui livre `-0490` et demande un décalage. La vue d'ensemble F02 documente la même convention (valeur interne -489 pour Marathon, Q46335).
+  - Convention astronomique stricte (ADR 0006) : 490 av. J.-C. = année -489. Le RDF SPARQL livre déjà cette valeur (`-0489`) ; c'est le canal JSON qui livre `-0490` et demande un décalage. La vue d'ensemble F02 documente la même convention (valeur interne -489 pour Marathon, Q31900).
   - Ne jamais utiliser `Date`/`NaiveDateTime` Elixir pour parser ou stocker ces valeurs : plages insuffisantes pour la préhistoire.
   - Le calendrier est une métadonnée d'affichage : aucune conversion julien/grégorien des valeurs, qui restent en grégorien proleptique.
   - La lecture de la précision via `psv:`/`wikibase:timePrecision` relève du template SPARQL (#009) ; ici on suppose la précision déjà extraite en entier.

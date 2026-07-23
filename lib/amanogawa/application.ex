@@ -12,8 +12,7 @@ defmodule Amanogawa.Application do
       Amanogawa.Repo,
       {DNSCluster, query: Application.get_env(:amanogawa, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Amanogawa.PubSub},
-      # Start a worker by calling: Amanogawa.Worker.start_link(arg)
-      # {Amanogawa.Worker, arg},
+      {Oban, Application.fetch_env!(:amanogawa, Oban)},
       # Start to serve requests, typically the last entry
       AmanogawaWeb.Endpoint
     ]
