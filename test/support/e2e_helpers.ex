@@ -31,7 +31,7 @@ defmodule AmanogawaWeb.E2EHelpers do
     # below would otherwise hide the real cause.
     degraded =
       session
-      |> Wallaby.Browser.attr(Query.css("#map"), "data-map-degraded")
+      |> Wallaby.Browser.attr(Query.css("#map", visible: :any), "data-map-degraded")
 
     if degraded == "true" do
       raise "MapHook degraded: no WebGL context could be created in this browser " <>
@@ -39,7 +39,18 @@ defmodule AmanogawaWeb.E2EHelpers do
               "Check the chrome flags in config/test.exs."
     end
 
-    assert_has(session, Query.css("#map[data-events-loaded='true']"))
+    assert_has(session, Query.css("#map[data-events-loaded='true']", visible: :any))
+  rescue
+    error in [Wallaby.QueryError, Wallaby.ExpectationNotMetError] ->
+      # Diagnostic of last resort: what page is the browser actually on?
+      source = Wallaby.Browser.page_source(session)
+
+      reraise RuntimeError.exception(
+                Exception.message(error) <>
+                  "\n\nPage source (first 3000 bytes):\n" <>
+                  String.slice(source, 0, 3000)
+              ),
+              __STACKTRACE__
   end
 
   @doc """
