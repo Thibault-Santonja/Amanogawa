@@ -7,15 +7,12 @@
 // under plain `node:test`, independent of a browser.
 //
 // The domain here is `Amanogawa.Atlas.TimeScale`'s own `[minYear, maxYear]`
-// (the symlog scale's rendering domain, e.g. the default `-300000..2100`),
-// not the wider astronomical domain `Amanogawa.HistoricalDate` accepts
-// (`-13_800_000_000..current year`): a window edge can never be dragged to
-// a year the scale cannot position on the strip in the first place. The
-// server-side validation of a client-pushed window
-// (`AmanogawaWeb.Params.ExploreParams.valid_window?/2`) deliberately keeps
-// the wider `HistoricalDate` domain, since it also validates windows that
-// never went through a drag (a pasted URL, for instance): the two domains
-// serve different purposes and are not meant to match.
+// (the time-window domain, `-300000..current year`, F04 decision D1),
+// which since D1 is also EXACTLY the domain the server validates a
+// client-pushed window against (`AmanogawaWeb.Params.ExploreParams.
+// valid_window?/2` delegates its bounds to `TimeScale.default/0`): a
+// window this module produces can never be rejected server-side, and a
+// window a pasted URL carries can always be positioned on the strip.
 
 function clamp(value, min, max) {
   if (value < min) return min

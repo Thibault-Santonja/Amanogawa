@@ -217,52 +217,81 @@ defmodule Amanogawa.Atlas.EventQueries do
         }
 
   @doc """
-  Counts events whose `begin_year` falls in `[opts.from, opts.to]`, grouped
-  by their position on `opts.scale`'s symlog axis (issue #020): one SQL
-  `width_bucket` aggregation, no per-event Elixir loop.
+  The exact integer bucket edges of the histogram for `opts` (issue #020,
+  F04 quality finding m5): `opts.buckets + 1` strictly ordered years,
+  `opts.from` and `opts.to` exact at the extremes, interior edges computed
+  by `TimeScale.year/2` at positions equally spaced between
+  `position(opts.from)` and `position(opts.to)` and rounded to whole
+  years.
+
+  This is the single definition both sides of the histogram contract
+  consume: `Amanogawa.Atlas.event_histogram/1` announces these edges in
+  the endpoint's response, and `histogram_counts/1` below assigns events
+  to buckets in SQL against these SAME integer edges (never against a
+  recomputed floating-point position), so an event's bucket always matches
+  the integer bounds the response advertises.
+  """
+  @spec bucket_edges(histogram_opts()) :: [integer()]
+  def bucket_edges(%{from: from, to: to, buckets: buckets, scale: scale}) do
+    low = TimeScale.position(scale, from)
+    high = TimeScale.position(scale, to)
+
+    interior_edges =
+      Enum.map(1..(buckets - 1)//1, fn i ->
+        TimeScale.year(scale, low + i * (high - low) / buckets)
+      end)
+
+    [from] ++ interior_edges ++ [to]
+  end
+
+  @doc """
+  Counts events whose `begin_year` falls in `[opts.from, opts.to]`,
+  grouped by histogram bucket (issue #020): one SQL `width_bucket`
+  aggregation, no per-event Elixir loop.
 
   Returns a sparse map `%{bucket_index => count}`, `bucket_index` 1-based
   (PostgreSQL's `width_bucket` convention). `Amanogawa.Atlas.event_histogram/1`
   turns this into the dense, zero-filled response the API contract
   promises.
 
-  `opts.scale`'s `pivot` and `max_year` are passed as bound query
-  parameters into the `width_bucket` fragment below, never duplicated as
-  literals in the SQL text (`.claude/rules/geo-temporal.md`: the symlog
-  formula lives in exactly one place, `Amanogawa.Atlas.TimeScale`'s
-  moduledoc; this fragment computes the *same* `t(year)` formula, just
-  inline in SQL since a set-based aggregation cannot call back into
-  Elixir per row). `low`/`high` (the bucket boundaries in position space)
-  are `TimeScale.position/2` computed in Elixir from `opts.from`/`opts.to`
-  and passed as parameters too, so PostgreSQL never needs its own copy of
-  the `ln`-based position formula beyond the one `t(year)` fragment.
+  ## Bucket assignment semantics (F04 quality finding m5)
 
-  An event landing exactly on `opts.to` (`begin_year == opts.to`) is
-  assigned to the *last* bucket, not PostgreSQL's default "count + 1"
-  overflow bucket for an operand `>= high`: the result is clamped into
-  `[1, opts.buckets]` (`least(greatest(..., 1), buckets)`), so the last
-  bucket is closed on both ends while every other bucket boundary stays
-  half-open (`[low, high)`, `width_bucket`'s own semantics). The same
-  clamp absorbs the sub-ULP floating-point disagreement that can occur
-  between PostgreSQL's `ln` and Elixir's `:math.log` for an operand
-  mathematically equal to a boundary (verified against real data by the
-  `Amanogawa.Atlas.EventQueriesTest` DataCase test comparing this
-  fragment's bucket assignment to `TimeScale.position/2`'s).
+  Events are assigned against the exact integer bucket edges the endpoint
+  announces (`bucket_edges/1`), through `width_bucket(begin_year,
+  thresholds_array)`: the interior edges are passed as a sorted array of
+  thresholds, and PostgreSQL returns the number of thresholds `<=`
+  `begin_year`, which is exactly `bucket - 1`. Bucket `k` therefore covers
+  `[edge(k-1), edge(k))`, half-open on the right, except the last bucket,
+  which is closed on both ends (`begin_year == opts.to` lands in it, since
+  the query's own `begin_year <= opts.to` filter already excludes anything
+  beyond). An event landing exactly on an interior integer edge belongs to
+  the bucket that *starts* at that edge.
+
+  The previous implementation recomputed each event's floating-point
+  symlog position in SQL and bucketed uniformly in position space: correct
+  in position space, but the response's integer edges are *rounded* years,
+  so an event lying between a rounded edge and the true position boundary
+  could be counted in one bucket while the announced integer bounds placed
+  it in the neighbor. Assigning against the announced integer edges makes
+  the SQL and the response contract agree by construction, at the bounded
+  cost of one array parameter of at most `opts.buckets - 1 <= 199`
+  bigints per query.
   """
   @spec histogram_counts(histogram_opts()) :: %{pos_integer() => non_neg_integer()}
-  def histogram_counts(%{from: from, to: to, buckets: buckets, scale: scale}) do
-    low = TimeScale.position(scale, from)
-    high = TimeScale.position(scale, to)
+  def histogram_counts(%{from: from, to: to} = opts) do
+    interior_edges = opts |> bucket_edges() |> Enum.drop(1) |> Enum.drop(-1)
 
     # Built as a map of per-field `dynamic/2` expressions, interpolated as
     # a whole (`^selects`) rather than pinning the `bucket` fragment alone
     # inside a literal select map: Ecto only allows a dynamic to appear as
     # the *entire* select value (`select: ^fields`), not nested inside one
     # (`select: %{field: ^dynamic(...)}`), per `Ecto.Query`'s "Dynamic
-    # queries" documentation.
+    # queries" documentation. `count()` is SQL `count(*)`: rows are counted
+    # as such, no per-row column evaluation for a column that is `NOT NULL`
+    # by schema anyway.
     selects = %{
-      bucket: histogram_bucket_expr(scale, low, high, buckets),
-      count: dynamic([e], count(e.id))
+      bucket: histogram_bucket_expr(interior_edges),
+      count: dynamic([e], count())
     }
 
     # `begin_year` is required at the `Amanogawa.Atlas.Event` changeset
@@ -277,46 +306,27 @@ defmodule Amanogawa.Atlas.EventQueries do
     |> Map.new(fn %{bucket: bucket, count: count} -> {bucket, count} end)
   end
 
-  # `t(min_year)` (see `Amanogawa.Atlas.TimeScale`'s moduledoc) is constant
-  # for a given scale, computed once in Elixir with the exact same formula
-  # `Amanogawa.Atlas.TimeScale.position/2` uses, and passed as a single
-  # bound parameter below rather than recomputed per row in SQL.
-  defp symlog_t_min(%TimeScale{min_year: min_year, max_year: max_year, pivot: pivot}) do
-    :math.log(1 + (max_year - min_year) / pivot)
-  end
-
   # The `width_bucket` expression shared by `select` (aliased `:bucket` via
   # `selected_as/2`) and `group_by` (referencing that alias via
   # `selected_as/1`) in `histogram_counts/1` above: PostgreSQL requires
   # grouping by the same expression a computed `select` column comes from,
   # and `selected_as/1` is what lets `group_by` reference the alias instead
-  # of repeating the SQL text a second time. `begin_year` is bound inside
-  # the fragment string (Ecto interpolates `e.begin_year` positionally,
-  # like every other fragment in this module), everything else
-  # (`max_year`, `pivot`, `t_min`, `low`, `high`, `buckets`) is a query
-  # parameter from `scale` and the caller's window, never a literal.
-  defp histogram_bucket_expr(
-         %TimeScale{max_year: max_year, pivot: pivot} = scale,
-         low,
-         high,
-         buckets
-       ) do
-    t_min = symlog_t_min(scale)
+  # of repeating the SQL text a second time.
+  #
+  # `width_bucket(operand, thresholds)` with an array returns the count of
+  # thresholds `<= operand` (the array must be sorted ascending, which
+  # `bucket_edges/1` guarantees), so `+ 1` yields the 1-based bucket index.
+  # `buckets == 1` degenerates to an empty threshold array; PostgreSQL
+  # rejects an empty array there, so that case is the constant bucket `1`.
+  defp histogram_bucket_expr([]) do
+    dynamic(selected_as(fragment("1"), :bucket))
+  end
 
+  defp histogram_bucket_expr(interior_edges) do
     dynamic(
       [e],
       selected_as(
-        fragment(
-          "least(greatest(width_bucket(1 - ln(1 + (?::float - ?) / ?) / ?, ?, ?, ?), 1), ?)",
-          ^max_year,
-          e.begin_year,
-          ^pivot,
-          ^t_min,
-          ^low,
-          ^high,
-          ^buckets,
-          ^buckets
-        ),
+        fragment("width_bucket(?, ?::bigint[]) + 1", e.begin_year, ^interior_edges),
         :bucket
       )
     )

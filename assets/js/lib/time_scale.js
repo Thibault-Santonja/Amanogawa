@@ -22,12 +22,24 @@
 // No dependency, no DOM: pure and testable under plain Node (`node:test`),
 // exactly like `assets/js/map/*.js`. d3 only enters at render time (#020).
 
+// Default domain: mirrors `Amanogawa.Atlas.TimeScale.default/0` (F04
+// decision D1): `[-300000, current UTC year]`. The authoritative domain is
+// the server's, transmitted to the hooks through the `data-domain-min`/
+// `data-domain-max` attributes `AmanogawaWeb.ExploreLive` renders; these
+// defaults only cover a scale built without an explicit config (tests, a
+// hook whose attributes are missing).
 const DEFAULT_MIN_YEAR = -300000
-const DEFAULT_MAX_YEAR = 2100
 const DEFAULT_PIVOT = 10000
 
-// Radiocarbon "before present" epoch: BP = BP_EPOCH - year.
-const BP_EPOCH = 1950
+function defaultMaxYear() {
+  // UTC, matching the Elixir side's `Date.utc_today().year`.
+  return new Date().getUTCFullYear()
+}
+
+// Radiocarbon "before present" epoch: BP = BP_EPOCH - year. Exported as
+// the single JS definition (`time_format.js` imports it rather than
+// duplicating the literal), mirroring `Amanogawa.Atlas.TimeScale.bp_epoch/0`.
+export const BP_EPOCH = 1950
 
 // Fixed display convention (issue #019/#020): below this astronomical year,
 // ticks and axis labels switch to the BP regime. Independent of a custom
@@ -133,7 +145,7 @@ function splitTicks(from, to, count) {
 // has no tagged-tuple convention to lean on).
 export function createTimeScale(config = {}) {
   const minYear = config.minYear ?? DEFAULT_MIN_YEAR
-  const maxYear = config.maxYear ?? DEFAULT_MAX_YEAR
+  const maxYear = config.maxYear ?? defaultMaxYear()
   const pivot = config.pivot ?? DEFAULT_PIVOT
 
   if (!(minYear < maxYear)) throw new Error("minYear must be less than maxYear")

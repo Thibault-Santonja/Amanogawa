@@ -1,8 +1,8 @@
 {
-  "_comment": "Canonical anchors for Amanogawa.Atlas.TimeScale (issue #019), consumed verbatim by both test/amanogawa/atlas/time_scale_test.exs (ExUnit) and assets/js/test/time_scale.test.js (node:test). Positions are computed once (double-precision ln/exp, the same primitives both implementations use) and written in hard, never regenerated at test time: if the default configuration below ever changes, this file must be regenerated and both suites must fail, then pass again, together.",
+  "_comment": "Canonical anchors for Amanogawa.Atlas.TimeScale (issue #019), consumed verbatim by both test/amanogawa/atlas/time_scale_test.exs (ExUnit) and assets/js/test/time_scale.test.js (node:test). Positions are computed once (double-precision ln/exp, the same primitives both implementations use) and written in hard, never regenerated at test time. The config pins a snapshot of the default domain (F04 decision D1: max_year is the current UTC year at runtime, 2026 when this file was last regenerated); the anchors verify the FORMULA contract between the two implementations against this pinned config, so they stay valid even after max_year moves on. If the formula, min_year, or pivot ever change, this file must be regenerated and both suites must fail, then pass again, together.",
   "config": {
     "min_year": -300000,
-    "max_year": 2100,
+    "max_year": 2026,
     "pivot": 10000
   },
   "tolerance": 1.0e-9,
@@ -15,41 +15,41 @@
     {
       "label": "100,000 years ago",
       "year": -100000,
-      "position": 0.29759085221077
+      "position": 0.29773437183092522
     },
     {
       "label": "start of the Neolithic (pivot)",
       "year": -10000,
-      "position": 0.7695284013713625
+      "position": 0.77048738445940379
     },
     {
-      "label": "Battle of Marathon (astronomical year, 490 BCE, F02 anchor)",
-      "year": -490,
-      "position": 0.9330615356863844
+      "label": "Battle of Marathon (astronomical year -489, 490 BCE, F02 anchor)",
+      "year": -489,
+      "position": 0.93479356518192103
     },
     {
       "label": "year 1 BCE (astronomical year 0)",
       "year": 0,
-      "position": 0.9445989991710988
+      "position": 0.94637819990420002
     },
     {
       "label": "year 1000",
       "year": 1000,
-      "position": 0.9696692981413294
+      "position": 0.97161139755010473
     },
     {
       "label": "French Revolution",
       "year": 1789,
-      "position": 0.9910989477867075
+      "position": 0.99319183105823339
     },
     {
       "label": "year 2000",
       "year": 2000,
-      "position": 0.9971080828460509
+      "position": 0.99924527691555598
     },
     {
       "label": "domain upper bound",
-      "year": 2100,
+      "year": 2026,
       "position": 1.0
     }
   ]

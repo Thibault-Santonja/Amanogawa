@@ -23,6 +23,7 @@ defmodule AmanogawaWeb.Components.TimeLegend do
   use AmanogawaWeb, :html
 
   alias Amanogawa.Atlas
+  alias AmanogawaWeb.TimelineI18n
 
   attr :from, :integer, required: true
   attr :to, :integer, required: true
@@ -45,12 +46,13 @@ defmodule AmanogawaWeb.Components.TimeLegend do
   end
 
   # Each bound is labeled at the granularity its distance to the *other*
-  # bound suggests (`Amanogawa.Atlas.format_axis_year/2`, issue #020's
-  # formatter): a narrow window reads its exact years, a wide one reads
-  # centuries or millennia BP, mirroring how the axis itself scales its
-  # own tick labels with the window's span.
+  # bound suggests (`Amanogawa.Atlas.format_axis_year/3`, issue #020's
+  # formatter, localized through `AmanogawaWeb.TimelineI18n`'s templates):
+  # a narrow window reads its exact years, a wide one reads centuries or
+  # millennia BP, mirroring how the axis itself scales its own tick labels
+  # with the window's span.
   defp format_bound(year, other_year) do
     step = max(abs(other_year - year), 1)
-    Atlas.format_axis_year(year, step)
+    Atlas.format_axis_year(year, step, TimelineI18n.axis_templates())
   end
 end

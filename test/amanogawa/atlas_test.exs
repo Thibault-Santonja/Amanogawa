@@ -384,8 +384,9 @@ defmodule Amanogawa.AtlasTest do
       assert [%{"from" => -1000, "to" => 2000, "count" => 1}] = result["buckets"]
     end
 
-    test "limit case: buckets=200 returns exactly 200 dense buckets" do
-      result = Atlas.event_histogram(%{from: -300_000, to: 2_100, buckets: 200})
+    test "limit case: buckets=200 over the full domain returns exactly 200 dense buckets" do
+      result =
+        Atlas.event_histogram(%{from: -300_000, to: TimeScale.current_year(), buckets: 200})
 
       assert length(result["buckets"]) == 200
     end
@@ -426,10 +427,17 @@ defmodule Amanogawa.AtlasTest do
     end
   end
 
-  describe "format_axis_year/2" do
+  describe "format_axis_year/2 and /3" do
     test "delegates to Amanogawa.Atlas.TimeScale.Format" do
       assert Atlas.format_axis_year(1969, 1) == "1969"
       assert Atlas.format_axis_year(-750, 100) == "VIIIe s. av. J.-C."
+    end
+
+    test "the /3 arity renders through caller-provided templates (F04 quality finding m6)" do
+      templates = %{ka_bp: "%{ka} ka BP", century: "%{century}th c.", bce: "%{text} BCE"}
+
+      assert Atlas.format_axis_year(-750, 100, templates) == "VIIIth c. BCE"
+      assert Atlas.format_axis_year(-489, 1, templates) == "490 BCE"
     end
   end
 

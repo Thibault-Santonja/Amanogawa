@@ -115,6 +115,16 @@
   }
 }
 
+/* Keyboard focus of the timeline window's interactive SVG nodes (drag
+   handles and window body, assets/js/hooks/timeline.js): an explicit
+   :focus-visible outline, since SVG rects get no useful user-agent focus
+   ring and the handles are the timeline's only keyboard controls. */
+.timeline-window-handle:focus-visible,
+.timeline-window-body:focus-visible {
+  outline: 2px solid var(--palette-accent);
+  outline-offset: 1px;
+}
+
 /* Add variants based on LiveView classes */
 @custom-variant phx-click-loading (.phx-click-loading&, .phx-click-loading &);
 @custom-variant phx-submit-loading (.phx-submit-loading&, .phx-submit-loading &);

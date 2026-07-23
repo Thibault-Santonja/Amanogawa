@@ -15,10 +15,15 @@ defmodule AmanogawaWeb.Params.HistogramQuery do
   surfacing it as a 422.
 
   `from`/`to` are bounded to `Amanogawa.Atlas.TimeScale.default/0`'s domain
-  (`[-300_000, 2_100]`), not `Amanogawa.HistoricalDate`'s much wider one:
-  the histogram's bucket edges are computed on that scale
+  (`[-300_000, current UTC year]`, F04 design decision D1: the single
+  time-window domain, shared with `AmanogawaWeb.Params.ExploreParams`),
+  not `Amanogawa.HistoricalDate`'s much wider one: the histogram's bucket
+  edges are computed on that scale
   (`Amanogawa.Atlas.EventQueries.histogram_counts/1`), so a window outside
-  it can never be served meaningfully.
+  it can never be served meaningfully. The bounds are read from
+  `TimeScale.default/0` at runtime, never captured at compile time: the
+  domain's upper bound is the current year, and a compile-time capture
+  would freeze the build year into the release.
   """
 
   use Ecto.Schema
@@ -28,10 +33,6 @@ defmodule AmanogawaWeb.Params.HistogramQuery do
   alias Amanogawa.Atlas.TimeScale
 
   @type normalized :: %{from: integer(), to: integer(), buckets: pos_integer()}
-
-  @scale TimeScale.default()
-  @min_year @scale.min_year
-  @max_year @scale.max_year
 
   @default_buckets 100
   @max_buckets 200
@@ -78,9 +79,11 @@ defmodule AmanogawaWeb.Params.HistogramQuery do
   end
 
   defp validate_year(changeset, field) do
+    %TimeScale{min_year: min_year, max_year: max_year} = TimeScale.default()
+
     validate_number(changeset, field,
-      greater_than_or_equal_to: @min_year,
-      less_than_or_equal_to: @max_year
+      greater_than_or_equal_to: min_year,
+      less_than_or_equal_to: max_year
     )
   end
 

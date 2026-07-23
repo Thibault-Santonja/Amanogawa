@@ -41,16 +41,15 @@ defmodule AmanogawaWeb.Controllers.Api.EventController do
   # endpoint snaps `from`/`to` to before querying: two requests whose
   # bounds differ by a few years but fall in the same grid cell converge on
   # the identical, cacheable window, rather than each producing its own
-  # cache entry. Computed once at compile time from `TimeScale.default/0`
-  # (200 points spanning the full domain in equal position steps, the
-  # scale's own resolution, independent of the caller's requested
-  # `buckets`): deliberately much coarser than the finest possible
-  # `buckets` (200) so nearby requests actually collide instead of each
-  # landing on its own grid cell.
+  # cache entry. The grid is 40 points spanning the full domain in equal
+  # position steps, independent of the caller's requested `buckets`:
+  # deliberately much coarser than the finest possible `buckets` (200) so
+  # nearby requests actually collide instead of each landing on its own
+  # grid cell. Computed per request (41 cheap `TimeScale.year/2` calls),
+  # not at compile time: `TimeScale.default/0`'s upper bound is the
+  # current year (F04 design decision D1), and a compile-time capture
+  # would freeze the build year into the release.
   @cache_grid_size 40
-  @cache_grid_edges (for i <- 0..@cache_grid_size do
-                       TimeScale.year(TimeScale.default(), i / @cache_grid_size)
-                     end)
 
   @doc """
   Renders the requested viewport as GeoJSON (`200`), or a structured
@@ -97,7 +96,7 @@ defmodule AmanogawaWeb.Controllers.Api.EventController do
   malformed.
 
   `from`/`to` are rounded outward to the nearest point of a fixed
-  reference grid (`@cache_grid_edges`) before querying, so nearby requests
+  reference grid (`cache_grid_edges/0`) before querying, so nearby requests
   converge on the same cacheable window; the response's own `"from"`/
   `"to"` reflect the rounded (served) window, not the raw request, and
   `cache-control` advertises `#{@histogram_cache_max_age_seconds}s` of
@@ -123,22 +122,33 @@ defmodule AmanogawaWeb.Controllers.Api.EventController do
     end
   end
 
-  # Snaps `from` down and `to` up to the nearest `@cache_grid_edges` point:
-  # the served window is always at least as wide as the one requested,
-  # never narrower (a caller's events are never silently dropped by the
-  # rounding), and at most one grid step wider on each side.
+  # Snaps `from` down and `to` up to the nearest `cache_grid_edges/0`
+  # point: the served window is always at least as wide as the one
+  # requested, never narrower (a caller's events are never silently
+  # dropped by the rounding), and at most one grid step wider on each
+  # side.
   defp round_to_cache_grid(from, to) do
+    edges = cache_grid_edges()
+
     rounded_from =
-      @cache_grid_edges
+      edges
       |> Enum.filter(&(&1 <= from))
-      |> List.last() || List.first(@cache_grid_edges)
+      |> List.last() || List.first(edges)
 
     rounded_to =
-      @cache_grid_edges
+      edges
       |> Enum.filter(&(&1 >= to))
-      |> List.first() || List.last(@cache_grid_edges)
+      |> List.first() || List.last(edges)
 
     {rounded_from, rounded_to}
+  end
+
+  defp cache_grid_edges do
+    scale = TimeScale.default()
+
+    for i <- 0..@cache_grid_size do
+      TimeScale.year(scale, i / @cache_grid_size)
+    end
   end
 
   defp render_by_qid(conn, qid, fetch) do

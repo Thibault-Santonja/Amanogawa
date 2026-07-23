@@ -6,6 +6,22 @@
 // draggable edges (resize), a draggable body (translate at constant
 // width), and a keyboard-operable ARIA slider pair.
 //
+// Rendering model (F04 design decision D2): the strip is a STATIC
+// full-domain frise. The axis is graduated over the whole domain
+// (independent of the current window), and the histogram is fetched ONCE
+// over the whole domain (refetched only when a resize significantly
+// changes the bucket count worth drawing, never on a drag or a window
+// change). The time window is only a highlight brushed on top of that
+// static background (the gradient-filled body rectangle and its two
+// handles), so moving it costs zero network round trips and never
+// re-lays-out the axis under the user's cursor.
+//
+// Domain (F04 design decision D1): the hook never hardcodes the temporal
+// bounds. `AmanogawaWeb.ExploreLive` renders the single server-side
+// domain (`Amanogawa.Atlas.TimeScale.default/0`, `[-300000, current
+// year]`) as `data-domain-min`/`data-domain-max`, and this hook builds
+// its scale from those attributes (`readDomain`).
+//
 // State (the current time window) is owned by the LiveView (ADR 0005,
 // issue #018): a local drag never mutates it directly. Client -> server,
 // the debounced gesture pushes `select_time_window` (150ms after the last
@@ -26,9 +42,10 @@ import {scaleLinear} from "d3-scale"
 import {select} from "d3-selection"
 
 import {TIME_WINDOW_PREVIEW_EVENT, colorFor, readGradientTokens} from "../lib/time_gradient.js"
-import {formatAxisYear} from "../lib/time_format.js"
+import {DEFAULT_AXIS_TEMPLATES, formatAxisYear} from "../lib/time_format.js"
 import {createTimeScale} from "../lib/time_scale.js"
 import {clampWindow, resizeEdge, translateWindow} from "../lib/time_window.js"
+import {createEchoGuard} from "../lib/window_echo.js"
 
 // Roughly one graduation per this many pixels of axis width, per issue
 // #020 ("nombre de graduations cible proportionnel à la largeur").
@@ -38,23 +55,32 @@ const MIN_TICK_COUNT = 2
 const MARGIN = {top: 8, right: 16, bottom: 20, left: 16}
 const HISTOGRAM_HEIGHT_RATIO = 0.55
 
-// Time between the last `ResizeObserver` callback and the next render, and
-// between successive histogram fetches triggered by the same burst of
-// resizes: matches the map hook's own debounce constant
+// Time between the last `ResizeObserver` callback and the next render:
+// matches the map hook's own debounce constant
 // (`.claude/rules/liveview.md`: debounce before a data refetch). Issue
 // #021 reuses this exact constant for the window drag's own debounce
 // (`pushEvent("select_time_window", ...)`, 150ms after the last movement):
 // one debounce duration for every client intent this hook pushes.
 const RESIZE_DEBOUNCE_MS = 150
 
-const HISTOGRAM_BUCKETS = 100
+// Histogram resolution (F04 decision D2): the bucket count adapts to the
+// rendered width (about one bucket per `PIXELS_PER_HISTOGRAM_BUCKET`
+// pixels), quantized to steps of `HISTOGRAM_BUCKET_STEP` so only a
+// *significant* resize (roughly 200px or more) changes the count and
+// triggers a refetch; a minor resize re-renders the bars it already has.
+// Bounded by the server's own `buckets` cap
+// (`AmanogawaWeb.Params.HistogramQuery`, 200).
+const PIXELS_PER_HISTOGRAM_BUCKET = 10
+const HISTOGRAM_BUCKET_STEP = 20
+const MIN_HISTOGRAM_BUCKETS = 20
+const MAX_HISTOGRAM_BUCKETS = 200
 
 // The window's minimum width in years (issue #021's own default) and the
 // domain-independent constraint logic it is enforced through
 // (`assets/js/lib/time_window.js`). Mirrors, but is not shared with,
 // `AmanogawaWeb.Params.ExploreParams`'s own minimum: the two enforce the
-// same rule on either side of the wire, on deliberately different domains
-// (see `time_window.js`'s own moduledoc-equivalent header).
+// same rule on either side of the wire, on the same domain since F04
+// decision D1 (see `time_window.js`'s own header).
 const MIN_WINDOW_WIDTH_YEARS = 1
 
 // Hit-target sizing for the window's edge handles (WAI-ARIA slider
@@ -107,12 +133,63 @@ function debounce(fn, delayMs) {
   return debounced
 }
 
+// The time-window domain read off the hook element's `data-domain-min`/
+// `data-domain-max` attributes (F04 decision D1: the server is the single
+// source of these bounds). A missing or malformed attribute falls back to
+// `time_scale.js`'s own defaults, which mirror the server's. Exported for
+// the `node:test` suite.
+export function readDomain(dataset) {
+  const fallback = createTimeScale()
+
+  return {
+    minYear: parseYear(dataset.domainMin, fallback.minYear),
+    maxYear: parseYear(dataset.domainMax, fallback.maxYear)
+  }
+}
+
+// The initial time window read off `data-from`/`data-to`, clamped into
+// `domain` (a URL may legitimately carry no window at all, and a hostile
+// or stale one must degrade to the domain edge, never crash or fetch out
+// of bounds). Exported for the `node:test` suite (F04 correction M1: the
+// mount-time clamp is what guarantees the very first histogram request
+// is in bounds).
+export function initialTimeWindow(dataset, domain) {
+  const raw = {
+    from: parseYear(dataset.from, domain.minYear),
+    to: parseYear(dataset.to, domain.maxYear)
+  }
+
+  return clampWindow(raw, domain, MIN_WINDOW_WIDTH_YEARS)
+}
+
+// The adaptive histogram bucket count for a rendered width (F04 decision
+// D2, see the constants above). Exported for the `node:test` suite.
+export function histogramBucketCount(width) {
+  const innerWidth = Math.max(width - MARGIN.left - MARGIN.right, 0)
+  const quantized =
+    Math.round(innerWidth / PIXELS_PER_HISTOGRAM_BUCKET / HISTOGRAM_BUCKET_STEP) *
+    HISTOGRAM_BUCKET_STEP
+
+  return Math.min(Math.max(quantized, MIN_HISTOGRAM_BUCKETS), MAX_HISTOGRAM_BUCKETS)
+}
+
 const TimelineHook = {
   mounted() {
-    this.timeScale = createTimeScale()
-    this.timeWindow = {
-      from: parseYear(this.el.dataset.from, this.timeScale.minYear),
-      to: parseYear(this.el.dataset.to, this.timeScale.maxYear)
+    const domain = readDomain(this.el.dataset)
+    this.timeScale = createTimeScale({minYear: domain.minYear, maxYear: domain.maxYear})
+    this.timeWindow = initialTimeWindow(this.el.dataset, domain)
+
+    // Translated labels served by the server (`AmanogawaWeb.TimelineI18n`
+    // through `data-i18n-*`, F04 quality finding m6), falling back to the
+    // French source-locale defaults when an attribute is missing.
+    this.i18n = {
+      templates: {
+        kaBp: this.el.dataset.i18nKaBp || DEFAULT_AXIS_TEMPLATES.kaBp,
+        century: this.el.dataset.i18nCentury || DEFAULT_AXIS_TEMPLATES.century,
+        bce: this.el.dataset.i18nBce || DEFAULT_AXIS_TEMPLATES.bce
+      },
+      windowStart: this.el.dataset.i18nWindowStart || "Début de la fenêtre",
+      windowEnd: this.el.dataset.i18nWindowEnd || "Fin de la fenêtre"
     }
 
     this.motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)")
@@ -120,13 +197,11 @@ const TimelineHook = {
 
     this.abortController = null
     this.histogram = null
-
-    // Set by `renderAxis` on every render to the currently visible tick
-    // step: reused as the keyboard nudge's step size ("pas de graduation
-    // courant", issue #021), so an arrow key moves a handle by roughly one
-    // graduation regardless of zoom level. `1` (the finest regime) until
-    // the first render has run.
-    this.currentStepYears = 1
+    // Bucket count of the last histogram request sent (F04 decision D2):
+    // the histogram covers the full domain, so this is the only thing a
+    // refetch can change; `maybeFetchHistogram` refetches exactly when it
+    // differs (first fetch included, `null` matches nothing).
+    this.lastFetchedBuckets = null
 
     // The window drag/keyboard gesture in progress, or `null`: `{kind:
     // "resize", edge: "from"|"to", pointerId, startClientX, startWindow}`
@@ -148,6 +223,10 @@ const TimelineHook = {
     // dispatch so an unrelated re-render (a resize, a theme flip) does not
     // re-notify `MapHook` with an unchanged window.
     this.lastDispatchedWindow = null
+
+    // Anti-echo guard for the `select_time_window`/`set_time_window`
+    // round trip (F04 quality finding m1, `assets/js/lib/window_echo.js`).
+    this.echoGuard = createEchoGuard()
 
     this.svg = select(this.el).append("svg").attr("class", "block h-full w-full")
     this.histogramLayer = this.svg.append("g").attr("class", "timeline-histogram")
@@ -192,20 +271,27 @@ const TimelineHook = {
     // (`select_time_window`, `pushWindow` below), debounced client-side
     // before it does.
     //
-    // Anti-echo (issue #021's own point d'attention): a window identical
-    // to the one already rendered is a no-op (guards the ordinary
-    // `pushEvent` -> `push_patch` -> `handle_params` -> `push_event` round
-    // trip from re-rendering itself); a window received while `this.drag`
-    // is active is dropped outright, even if different, since the user's
-    // in-progress gesture takes priority over whatever the server
-    // resynchronizes from a *previous* debounce tick that is still
-    // in flight.
+    // Anti-echo, hardened (F04 quality finding m1): a window received
+    // while `this.drag` is active is absorbed by the gesture guard, and
+    // the current local preview is re-broadcast so `MapHook` (which has
+    // no drag guard of its own and just applied the server's window) does
+    // not diverge from what this hook renders (F04 quality finding m2).
+    // Outside a drag, `this.echoGuard` drops any stale echo from an
+    // earlier push while a newer push is in flight (see
+    // `assets/js/lib/window_echo.js`); an identical window is a no-op.
+    // A window change never refetches the histogram (F04 decision D2:
+    // the histogram covers the full domain, the window is only a brush).
     this.handleEvent("set_time_window", ({from, to}) => {
-      if (this.drag) return
+      if (this.drag) {
+        this.redispatchPreview()
+        return
+      }
+
+      if (!this.echoGuard.shouldApply({from, to})) return
       if (from === this.timeWindow.from && to === this.timeWindow.to) return
 
       this.timeWindow = {from, to}
-      this.renderAndFetch()
+      this.render()
     })
 
     this.renderAndFetch()
@@ -244,8 +330,8 @@ const TimelineHook = {
       .style("cursor", "grab")
       .style("touch-action", "none")
 
-    this.handleFromRect = this.createHandle("from")
-    this.handleToRect = this.createHandle("to")
+    this.handleFromRect = this.createHandle("from", this.i18n.windowStart)
+    this.handleToRect = this.createHandle("to", this.i18n.windowEnd)
 
     this.bodyRect.node().addEventListener("pointerdown", event => {
       this.beginDrag(event, this.bodyRect.node(), {kind: "translate"})
@@ -253,13 +339,16 @@ const TimelineHook = {
     this.bodyRect.node().addEventListener("keydown", event => this.handleBodyKeydown(event))
   },
 
-  createHandle(edge) {
+  // `ariaLabel` (F04 quality finding m3) is the translated handle name
+  // served through the `data-i18n-window-start`/`-end` attributes.
+  createHandle(edge, ariaLabel) {
     const handle = this.windowLayer
       .append("rect")
       .attr("class", `timeline-window-handle timeline-window-handle-${edge}`)
       .attr("tabindex", "0")
       .attr("role", "slider")
       .attr("aria-orientation", "horizontal")
+      .attr("aria-label", ariaLabel)
       .style("cursor", "ew-resize")
       .style("touch-action", "none")
 
@@ -272,13 +361,19 @@ const TimelineHook = {
   },
 
   beginDrag(event, target, drag) {
-    // Only the primary pointer/button starts a gesture (issue #021 is
-    // scoped to a single drag at a time; a second simultaneous pointer,
-    // e.g. a multi-touch gesture, is simply ignored rather than racing
-    // the first).
+    // Only the primary pointer's main button starts a gesture (F04
+    // quality finding m4): a right/middle click or a second simultaneous
+    // touch is ignored rather than starting (or racing) a drag.
+    if (event.button !== 0 || !event.isPrimary) return
     if (this.drag) return
 
     event.preventDefault()
+    // `preventDefault()` on `pointerdown` suppresses the browser's own
+    // focus-on-click, so focus is given programmatically (F04 quality
+    // finding m3): clicking a handle or the body makes it the keyboard
+    // target, and the `:focus-visible` styles in `assets/css/app.css`
+    // stay reachable without tabbing.
+    if (typeof target.focus === "function") target.focus({preventScroll: true})
     target.setPointerCapture(event.pointerId)
 
     this.dragTarget = target
@@ -344,35 +439,85 @@ const TimelineHook = {
     this.pushWindow()
   },
 
+  // WAI-ARIA slider keyboard support on each handle (F04 quality finding
+  // m3): arrows nudge by the window-local graduation step (Shift for x10),
+  // Home/End send the edge to the domain bound on its side
+  // (`resizeEdge` clamps the opposite side to `minWidth`, so Home on the
+  // right handle stops at `from + minWidth`, as the slider pattern
+  // expects for its minimum).
   handleHandleKeydown(edge, event) {
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return
     event.preventDefault()
 
-    const direction = event.key === "ArrowRight" ? 1 : -1
-    const startWindow = clampWindow(this.timeWindow, this.domain(), MIN_WINDOW_WIDTH_YEARS)
-    const proposedYear = startWindow[edge] + direction * this.keyboardStepYears(event)
+    const domain = this.domain()
+    const startWindow = clampWindow(this.timeWindow, domain, MIN_WINDOW_WIDTH_YEARS)
+    const proposedYear = this.proposedHandleYear(edge, event, startWindow, domain)
 
-    this.timeWindow = resizeEdge(startWindow, edge, proposedYear, this.domain(), MIN_WINDOW_WIDTH_YEARS)
+    this.timeWindow = resizeEdge(startWindow, edge, proposedYear, domain, MIN_WINDOW_WIDTH_YEARS)
     this.render()
     this.debouncedPushWindow()
   },
 
+  proposedHandleYear(edge, event, startWindow, domain) {
+    if (event.key === "Home") return domain.minYear
+    if (event.key === "End") return domain.maxYear
+
+    const direction = event.key === "ArrowRight" ? 1 : -1
+    return startWindow[edge] + direction * this.keyboardStepYears(event)
+  },
+
+  // Body keyboard support: arrows translate the whole window (width
+  // preserved), Home/End slide it flush against the domain's start/end
+  // (F04 quality finding m3).
   handleBodyKeydown(event) {
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return
     event.preventDefault()
 
-    const direction = event.key === "ArrowRight" ? 1 : -1
-    const startWindow = clampWindow(this.timeWindow, this.domain(), MIN_WINDOW_WIDTH_YEARS)
+    const domain = this.domain()
+    const startWindow = clampWindow(this.timeWindow, domain, MIN_WINDOW_WIDTH_YEARS)
 
-    this.timeWindow = translateWindow(startWindow, direction * this.keyboardStepYears(event), this.domain())
+    this.timeWindow = translateWindow(
+      startWindow,
+      this.bodyKeyDelta(event, startWindow, domain),
+      domain
+    )
     this.render()
     this.debouncedPushWindow()
   },
 
-  // Shift+arrow moves by 10 graduations at once (issue #021), plain arrow
-  // by one (`this.currentStepYears`, refreshed on every render).
+  bodyKeyDelta(event, startWindow, domain) {
+    if (event.key === "Home") return domain.minYear - startWindow.from
+    if (event.key === "End") return domain.maxYear - startWindow.to
+
+    const direction = event.key === "ArrowRight" ? 1 : -1
+    return direction * this.keyboardStepYears(event)
+  },
+
+  // Shift+arrow moves by 10 steps at once (issue #021), plain arrow by
+  // one `windowStepYears()` (the graduation step the *window's own span*
+  // would produce, not the static full-domain axis step of decision D2:
+  // the nudge must stay proportionate to what the user is looking at,
+  // and a full-domain graduation would jump tens of millennia at once).
   keyboardStepYears(event) {
-    return (event.shiftKey ? 10 : 1) * this.currentStepYears
+    return (event.shiftKey ? 10 : 1) * this.windowStepYears()
+  },
+
+  // The "typical" tick step of the current window at the current width:
+  // the same tick machinery the axis used before D2 made the axis static,
+  // now computed on demand for the keyboard nudge and the handles'
+  // `aria-valuetext` granularity. The middle tick's own step reads as
+  // "typical" better than the first (which, per `tickSteps`'s own doc, is
+  // measured against the *second* tick rather than a true predecessor).
+  windowStepYears() {
+    const {width} = this.dimensions()
+    const ticks = this.timeScale.ticks(
+      this.timeWindow.from,
+      this.timeWindow.to,
+      this.tickCount(width)
+    )
+    const steps = tickSteps(ticks)
+
+    return steps.length > 0 ? steps[Math.floor(steps.length / 2)] : 1
   },
 
   // Pushes the current window to the server, debounced during a drag
@@ -383,7 +528,11 @@ const TimelineHook = {
   // push shared with the map hook (issue #018), this one is the
   // client -> server intent; reusing one name for both directions is
   // exactly the ambiguity this issue's own contract exists to resolve.
+  // The push is recorded on `this.echoGuard` first, so the eventual
+  // server echo is recognized and any stale echo from an earlier push is
+  // dropped (F04 quality finding m1).
   pushWindow() {
+    this.echoGuard.recordPush(this.timeWindow)
     this.pushEvent("select_time_window", {from: this.timeWindow.from, to: this.timeWindow.to})
   },
 
@@ -406,6 +555,17 @@ const TimelineHook = {
     )
   },
 
+  // Re-broadcasts the current preview even if unchanged (F04 quality
+  // finding m2): used when a server `set_time_window` was absorbed by the
+  // active-drag guard, since `MapHook` has no such guard and just applied
+  // the server's (older) window to its gradient; without this rebroadcast
+  // the two hooks would render different windows until the next pointer
+  // movement.
+  redispatchPreview() {
+    this.lastDispatchedWindow = null
+    this.dispatchPreview()
+  },
+
   dimensions() {
     const rect = this.el.getBoundingClientRect()
     return {width: Math.max(rect.width, 0), height: Math.max(rect.height, 0)}
@@ -416,12 +576,12 @@ const TimelineHook = {
     return Math.max(Math.round(innerWidth / PIXELS_PER_TICK), MIN_TICK_COUNT)
   },
 
-  // Fetches the histogram for the current window and re-renders once it
-  // resolves; the axis itself renders immediately (it needs no network
-  // round-trip), so the graduations never wait on the histogram fetch.
+  // Renders, then refetches the histogram only if the rendered width now
+  // calls for a different bucket count (F04 decision D2): the axis and
+  // window render immediately and never wait on the network.
   renderAndFetch() {
     this.render()
-    this.fetchHistogram()
+    this.maybeFetchHistogram()
   },
 
   render() {
@@ -450,26 +610,26 @@ const TimelineHook = {
     this.dispatchPreview()
   },
 
+  // The axis is graduated over the FULL domain, independent of the current
+  // window (F04 decision D2): the frise is a static background the window
+  // brushes over, so its graduations never re-layout during a drag.
   renderAxis(xScale, top, tokens) {
     const {width} = this.dimensions()
-    const {from, to} = this.timeWindow
+    const {minYear, maxYear} = this.domain()
     const count = this.tickCount(width)
-    const ticks = this.timeScale.ticks(from, to, count)
+    const ticks = this.timeScale.ticks(minYear, maxYear, count)
     // The step passed to `formatAxisYear` for each tick is its distance to
-    // the *previous* tick (or to the next one for the very first): a
-    // window straddling the BP threshold merges two different regimes
+    // the *previous* tick (or to the next one for the very first): the
+    // full domain straddles the BP threshold and merges two regimes
     // (`Amanogawa.Atlas.TimeScale.ticks/3`'s own moduledoc), so a single
-    // window-wide step would mislabel one side of the merge.
+    // domain-wide step would mislabel one side of the merge.
     const steps = tickSteps(ticks)
-    // The keyboard nudge's step size (issue #021's "pas de graduation
-    // courant"): the middle tick's own step reads as "typical" better than
-    // the first (which, per `tickSteps`'s own doc, is measured against the
-    // *second* tick rather than a true predecessor).
-    this.currentStepYears = steps.length > 0 ? steps[Math.floor(steps.length / 2)] : 1
 
     const axis = axisBottom(xScale)
       .tickValues(ticks.map(year => this.timeScale.position(year)))
-      .tickFormat((_position, index) => formatAxisYear(ticks[index], steps[index]))
+      .tickFormat((_position, index) =>
+        formatAxisYear(ticks[index], steps[index], this.i18n.templates)
+      )
       .tickSizeOuter(0)
 
     this.axisLayer.attr("transform", `translate(0, ${top})`).call(axis)
@@ -533,6 +693,7 @@ const TimelineHook = {
     const left = Math.min(fromX, toX)
     const width = Math.max(Math.abs(toX - fromX), 0)
     const handleHeight = Math.max(height, HANDLE_MIN_HIT_HEIGHT_PX)
+    const stepYears = this.windowStepYears()
 
     this.gradientStartStop.attr("stop-color", colorFor(0, tokens.gradientTokens))
     this.gradientEndStop.attr("stop-color", colorFor(1, tokens.gradientTokens))
@@ -547,7 +708,7 @@ const TimelineHook = {
       .attr("height", height)
       .attr(
         "aria-label",
-        `${formatAxisYear(from, this.currentStepYears)} - ${formatAxisYear(to, this.currentStepYears)}`
+        `${this.formatYear(from, stepYears)} - ${this.formatYear(to, stepYears)}`
       )
       .style("opacity", WINDOW_FILL_OPACITY)
       .style("transition", transition)
@@ -556,17 +717,19 @@ const TimelineHook = {
       value: from,
       min: this.timeScale.minYear,
       max: to,
+      stepYears,
       transition
     })
     this.positionHandle(this.handleToRect, toX, handleHeight, {
       value: to,
       min: from,
       max: this.timeScale.maxYear,
+      stepYears,
       transition
     })
   },
 
-  positionHandle(handle, centerX, height, {value, min, max, transition}) {
+  positionHandle(handle, centerX, height, {value, min, max, stepYears, transition}) {
     handle
       .attr("x", centerX - HANDLE_HIT_WIDTH_PX / 2)
       .attr("y", 0)
@@ -575,21 +738,49 @@ const TimelineHook = {
       .attr("aria-valuemin", min)
       .attr("aria-valuemax", max)
       .attr("aria-valuenow", value)
-      .attr("aria-valuetext", formatAxisYear(value, this.currentStepYears))
+      .attr("aria-valuetext", this.formatYear(value, stepYears))
       .style("transition", transition)
   },
 
-  async fetchHistogram() {
+  formatYear(year, stepYears) {
+    return formatAxisYear(year, stepYears, this.i18n.templates)
+  },
+
+  // Fetches the full-domain histogram (F04 decision D2), but only when
+  // the bucket count worth drawing actually changed (the first render,
+  // then a significant resize): a drag or a window change never lands
+  // here.
+  maybeFetchHistogram() {
+    const {width} = this.dimensions()
+    if (width === 0) return
+
+    const buckets = histogramBucketCount(width)
+    if (buckets === this.lastFetchedBuckets) return
+
+    this.lastFetchedBuckets = buckets
+    this.fetchHistogram(buckets)
+  },
+
+  async fetchHistogram(buckets) {
     if (this.abortController) this.abortController.abort()
 
     const controller = new AbortController()
     this.abortController = controller
 
-    const {from, to} = this.timeWindow
+    // Defensive clamp (F04 correction M1): the request is built from the
+    // domain itself, so it is in bounds by construction, but the clamp
+    // guarantees that no future caller (or misconfigured scale) can ever
+    // send `GET /api/events/histogram` a window the server would 422.
+    const {from, to} = clampWindow(
+      {from: this.timeScale.minYear, to: this.timeScale.maxYear},
+      this.domain(),
+      MIN_WINDOW_WIDTH_YEARS
+    )
+
     const params = new URLSearchParams({
       from: String(from),
       to: String(to),
-      buckets: String(HISTOGRAM_BUCKETS)
+      buckets: String(buckets)
     })
 
     try {
@@ -604,6 +795,10 @@ const TimelineHook = {
     } catch (error) {
       if (error.name === "AbortError") return
 
+      // Allow a later resize (or reconnect-triggered remount) to retry
+      // instead of pinning the failed bucket count as "already fetched".
+      if (this.lastFetchedBuckets === buckets) this.lastFetchedBuckets = null
+
       if (process.env.NODE_ENV !== "production") {
         console.error("TimelineHook: failed to fetch histogram", error)
       }
@@ -615,6 +810,7 @@ const TimelineHook = {
     this.debouncedPushWindow.cancel()
     this.resizeObserver.disconnect()
     if (this.abortController) this.abortController.abort()
+    this.echoGuard.dispose()
 
     this.darkScheme.removeEventListener("change", this.onSchemeChange)
     this.motionQuery.removeEventListener("change", this.onMotionChange)

@@ -23,14 +23,17 @@ defmodule Amanogawa.Atlas.TimeScaleTest do
   defp default_scale, do: TimeScale.default()
 
   describe "new/1" do
-    test "builds the documented default domain with no overrides" do
-      assert {:ok, %TimeScale{min_year: -300_000, max_year: 2_100, pivot: 10_000}} =
+    test "builds the documented default domain with no overrides: max_year is the current UTC year (F04 decision D1)" do
+      assert {:ok, %TimeScale{min_year: -300_000, max_year: max_year, pivot: 10_000}} =
                TimeScale.new()
+
+      assert max_year == Date.utc_today().year
+      assert max_year == TimeScale.current_year()
     end
 
     test "overrides individual fields" do
-      assert {:ok, %TimeScale{min_year: -1000, max_year: 2_100, pivot: 10_000}} =
-               TimeScale.new(min_year: -1000)
+      assert {:ok, %TimeScale{min_year: -1000, pivot: 10_000}} = TimeScale.new(min_year: -1000)
+      assert {:ok, %TimeScale{max_year: 2_100}} = TimeScale.new(max_year: 2_100)
     end
 
     test "error case: rejects min_year >= max_year" do
@@ -64,7 +67,14 @@ defmodule Amanogawa.Atlas.TimeScaleTest do
           pivot: config["pivot"]
         )
 
-      assert scale == default_scale()
+      # The fixture pins a snapshot of the default domain (its `max_year`
+      # is the current year at regeneration time, see the fixture's own
+      # comment): `min_year` and `pivot` must always match the runtime
+      # default, `max_year` is compared to the snapshot only, so the
+      # anchors keep verifying the formula contract after the year rolls
+      # over.
+      assert scale.min_year == default_scale().min_year
+      assert scale.pivot == default_scale().pivot
 
       for %{"year" => year, "position" => expected_position} <- anchors do
         actual = TimeScale.position(scale, year)
@@ -77,10 +87,25 @@ defmodule Amanogawa.Atlas.TimeScaleTest do
     end
 
     test "the fixture is well-formed and contains every documented mandatory anchor" do
-      %{"anchors" => anchors} = fixture()
+      %{"config" => config, "anchors" => anchors} = fixture()
       years = MapSet.new(anchors, & &1["year"])
 
-      mandatory = MapSet.new([-300_000, -100_000, -10_000, -490, 0, 1000, 1789, 2000, 2100])
+      # -489 is the Battle of Marathon in astronomical convention (490
+      # BCE), matching labels.json (F04 quality finding m9: -490 would be
+      # 491 BCE). The domain bounds come from the fixture's own pinned
+      # config.
+      mandatory =
+        MapSet.new([
+          config["min_year"],
+          -100_000,
+          -10_000,
+          -489,
+          0,
+          1000,
+          1789,
+          2000,
+          config["max_year"]
+        ])
 
       assert MapSet.subset?(mandatory, years)
 

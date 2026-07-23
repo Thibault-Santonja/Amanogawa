@@ -10,12 +10,28 @@
 // shared fixture `test/support/fixtures/time_scale/labels.json`
 // (`assets/js/test/time_format.test.js` here, ExUnit on the Elixir side).
 //
+// i18n (F04 quality finding m6): the regime rules live here, the label
+// text is a template object the caller may localize. `formatAxisYear`
+// accepts `{kaBp, century, bce}` templates carrying `%{ka}`/`%{century}`/
+// `%{text}` placeholders; `DEFAULT_AXIS_TEMPLATES` are the French
+// originals (the shared fixture's language, mirroring the Elixir side's
+// `default_templates/0`). `TimelineHook` reads translated templates off
+// its `data-i18n-*` attributes (rendered by `AmanogawaWeb.ExploreLive`
+// via `AmanogawaWeb.TimelineI18n`), the same pattern the map hover card
+// already uses: no second language is ever hardcoded in JS.
+//
 // No dependency, no DOM: pure and testable under plain Node, exactly like
 // `time_scale.js`.
 
-import {BP_THRESHOLD_YEAR} from "./time_scale.js"
+import {BP_EPOCH, BP_THRESHOLD_YEAR} from "./time_scale.js"
 
-const BP_EPOCH = 1950
+// French label templates, mirroring
+// `Amanogawa.Atlas.TimeScale.Format.default_templates/0`.
+export const DEFAULT_AXIS_TEMPLATES = {
+  kaBp: "%{ka} ka BP",
+  century: "%{century}e s.",
+  bce: "%{text} av. J.-C."
+}
 
 const ROMAN_NUMERALS = [
   [1000, "M"],
@@ -56,24 +72,29 @@ function eraAndDisplayYear(year) {
   return year <= 0 ? {displayYear: 1 - year, era: "bce"} : {displayYear: year, era: "ce"}
 }
 
-function withEra(text, era) {
-  return era === "bce" ? `${text} av. J.-C.` : text
+function render(template, placeholder, value) {
+  return template.replace(`%{${placeholder}}`, value)
+}
+
+function withEra(text, era, templates) {
+  return era === "bce" ? render(templates.bce, "text", text) : text
 }
 
 // Formats `year` (an astronomical year) as an axis label appropriate for
-// `step` (the current tick step in years). Never throws.
-export function formatAxisYear(year, step) {
+// `step` (the current tick step in years), rendered through `templates`
+// (`DEFAULT_AXIS_TEMPLATES` when omitted). Never throws.
+export function formatAxisYear(year, step, templates = DEFAULT_AXIS_TEMPLATES) {
   if (step >= 1000 && year <= BP_THRESHOLD_YEAR) {
     const ka = (BP_EPOCH - year) / 1000
-    return `${Math.round(ka)} ka BP`
+    return render(templates.kaBp, "ka", String(Math.round(ka)))
   }
 
   if (step >= 100) {
     const {displayYear, era} = eraAndDisplayYear(year)
     const century = Math.floor(displayYear / 100) + 1
-    return withEra(`${toRoman(century)}e s.`, era)
+    return withEra(render(templates.century, "century", toRoman(century)), era, templates)
   }
 
   const {displayYear, era} = eraAndDisplayYear(year)
-  return withEra(String(displayYear), era)
+  return withEra(String(displayYear), era, templates)
 }

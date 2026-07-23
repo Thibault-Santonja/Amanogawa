@@ -375,37 +375,58 @@ defmodule Amanogawa.Atlas.EventQueriesTest do
     end
   end
 
-  describe "histogram_counts/1 SQL/Elixir cohesion (issue #020 point d'attention)" do
-    test "the SQL width_bucket assignment matches Elixir's TimeScale.position/2-derived bucket" do
+  describe "histogram_counts/1 SQL/edges cohesion (issue #020, F04 quality finding m5)" do
+    test "the SQL width_bucket assignment matches the announced integer bucket edges" do
       scale = TimeScale.default()
-      from = -50_000
-      to = 2000
-      buckets = 20
+      opts = %{from: -50_000, to: 2000, buckets: 20, scale: scale}
 
       years = [-50_000, -20_000, -10_000, -5_000, -489, 0, 500, 1000, 1789, 1969, 2000]
       for year <- years, do: event_fixture(begin_year: year)
 
-      sql_counts =
-        Atlas.EventQueries.histogram_counts(%{from: from, to: to, buckets: buckets, scale: scale})
+      sql_counts = Atlas.EventQueries.histogram_counts(opts)
+      edges = Atlas.EventQueries.bucket_edges(opts)
 
       expected_counts =
         years
-        |> Enum.map(&elixir_bucket(scale, from, to, buckets, &1))
+        |> Enum.map(&edge_bucket(edges, opts.buckets, &1))
         |> Enum.frequencies()
 
       assert sql_counts == expected_counts
     end
 
-    # Mirrors exactly what `Amanogawa.Atlas.EventQueries.histogram_bucket_expr/4`
-    # computes in SQL, but purely in Elixir via `TimeScale.position/2`: the
-    # guard against the two formulas ever silently diverging.
-    defp elixir_bucket(scale, from, to, buckets, year) do
-      low = TimeScale.position(scale, from)
-      high = TimeScale.position(scale, to)
-      position = TimeScale.position(scale, year)
+    test "an event exactly on an interior integer edge lands in the bucket that starts there" do
+      opts = %{from: 0, to: 2000, buckets: 4, scale: TimeScale.default()}
 
-      bucket = trunc((position - low) / (high - low) * buckets) + 1
-      bucket |> max(1) |> min(buckets)
+      # The second interior edge (the exact integer year the response
+      # announces as bucket 3's `from`): the announced contract says a
+      # `begin_year` equal to it belongs to bucket 3, not bucket 2.
+      edge_year = opts |> Atlas.EventQueries.bucket_edges() |> Enum.at(2)
+      event_fixture(begin_year: edge_year)
+
+      assert Atlas.EventQueries.histogram_counts(opts) == %{3 => 1}
+    end
+
+    test "bucket_edges/1 announces from/to exactly, as strictly increasing integers" do
+      opts = %{from: -50_000, to: 2000, buckets: 20, scale: TimeScale.default()}
+
+      edges = Atlas.EventQueries.bucket_edges(opts)
+
+      assert length(edges) == 21
+      assert hd(edges) == -50_000
+      assert List.last(edges) == 2000
+      assert edges == Enum.sort(edges)
+      assert edges == Enum.uniq(edges)
+      assert Enum.all?(edges, &is_integer/1)
+    end
+
+    # The announced bucket of `year` against the integer `edges` contract:
+    # bucket `k` covers `[edge(k-1), edge(k))`, the last bucket closed on
+    # both ends. Mirrors in Elixir what the SQL
+    # `width_bucket(begin_year, interior_edges) + 1` computes.
+    defp edge_bucket(edges, buckets, year) do
+      interior = edges |> Enum.drop(1) |> Enum.drop(-1)
+      bucket = Enum.count(interior, &(&1 <= year)) + 1
+      min(bucket, buckets)
     end
   end
 

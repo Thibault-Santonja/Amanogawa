@@ -65,6 +65,29 @@ defmodule Amanogawa.Atlas.TimeScale.FormatTest do
     end
   end
 
+  describe "format_axis_year/3 templates (F04 quality finding m6)" do
+    test "renders through caller-provided templates in every regime" do
+      templates = %{ka_bp: "%{ka} ka BP", century: "%{century}th c.", bce: "%{text} BCE"}
+
+      assert Format.format_axis_year(-98_050, 1_000, templates) == "100 ka BP"
+      assert Format.format_axis_year(-750, 100, templates) == "VIIIth c. BCE"
+      assert Format.format_axis_year(1100, 100, templates) == "XIIth c."
+      assert Format.format_axis_year(-489, 1, templates) == "490 BCE"
+      assert Format.format_axis_year(1969, 1, templates) == "1969"
+    end
+
+    test "the /2 arity uses the French default templates" do
+      assert Format.default_templates() == %{
+               ka_bp: "%{ka} ka BP",
+               century: "%{century}e s.",
+               bce: "%{text} av. J.-C."
+             }
+
+      assert Format.format_axis_year(-489, 1) ==
+               Format.format_axis_year(-489, 1, Format.default_templates())
+    end
+  end
+
   describe "format_axis_year/2 edge cases" do
     test "year 0 (1 av. J.-C.) is not rendered as a bare 0" do
       assert Format.format_axis_year(0, 1) == "1 av. J.-C."

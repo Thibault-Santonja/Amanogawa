@@ -181,6 +181,22 @@ defmodule AmanogawaWeb.Controllers.Api.EventControllerTest do
       assert Enum.sum(Enum.map(body["buckets"], & &1["count"])) == 1
     end
 
+    test "the full-domain request the timeline sends at mount returns a non-empty histogram (F04 correction M1)",
+         %{conn: conn} do
+      event_fixture(begin_year: -489)
+      event_fixture(begin_year: 1969)
+      max_year = Date.utc_today().year
+
+      conn =
+        conn
+        |> unique_conn()
+        |> get(~p"/api/events/histogram?from=-300000&to=#{max_year}&buckets=100")
+
+      body = json_response(conn, 200)
+      assert length(body["buckets"]) == 100
+      assert Enum.sum(Enum.map(body["buckets"], & &1["count"])) == 2
+    end
+
     test "missing from/to returns 422 with structured errors, never a silent default", %{
       conn: conn
     } do

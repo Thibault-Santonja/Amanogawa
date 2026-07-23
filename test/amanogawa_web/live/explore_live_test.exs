@@ -52,8 +52,29 @@ defmodule AmanogawaWeb.ExploreLiveTest do
 
       assert has_element?(
                lv,
-               ~s(#timeline-hook[data-from="#{-13_800_000_000}"][data-to="#{Date.utc_today().year}"])
+               ~s(#timeline-hook[data-from="#{-300_000}"][data-to="#{Date.utc_today().year}"])
              )
+    end
+
+    test "renders the time-window domain as data-domain-* attributes (F04 decision D1: the hook reads the domain, never hardcodes it)",
+         %{conn: conn} do
+      {:ok, lv, _html} = live(conn, ~p"/")
+
+      assert has_element?(
+               lv,
+               ~s(#timeline-hook[data-domain-min="#{-300_000}"][data-domain-max="#{Date.utc_today().year}"])
+             )
+    end
+
+    test "renders the translated axis templates and handle ARIA labels as data-i18n-* attributes on #timeline-hook",
+         %{conn: conn} do
+      {:ok, lv, _html} = live(conn, ~p"/")
+
+      assert has_element?(lv, ~s(#timeline-hook[data-i18n-ka-bp="%{ka} ka BP"]))
+      assert has_element?(lv, ~s(#timeline-hook[data-i18n-century="%{century}e s."]))
+      assert has_element?(lv, ~s(#timeline-hook[data-i18n-bce="%{text} av. J.-C."]))
+      assert has_element?(lv, ~s(#timeline-hook[data-i18n-window-start="Début de la fenêtre"]))
+      assert has_element?(lv, ~s(#timeline-hook[data-i18n-window-end="Fin de la fenêtre"]))
     end
 
     test "the timeline window data-attributes follow a shared time window from the URL", %{
@@ -297,7 +318,8 @@ defmodule AmanogawaWeb.ExploreLiveTest do
       assert Process.alive?(lv.pid)
     end
 
-    test "a window out of the astronomical domain is rejected", %{conn: conn} do
+    test "a window out of the time-window domain is rejected (F04 D1: no to beyond the current year, no from below -300000)",
+         %{conn: conn} do
       {:ok, lv, _html} = live(conn, ~p"/")
       max_year = Date.utc_today().year
 
@@ -306,7 +328,42 @@ defmodule AmanogawaWeb.ExploreLiveTest do
       |> render_hook("select_time_window", %{"from" => -200, "to" => max_year + 1})
 
       refute_patched(lv)
+
+      lv
+      |> element("#timeline-hook")
+      |> render_hook("select_time_window", %{"from" => -300_001, "to" => 500})
+
+      refute_patched(lv)
       assert Process.alive?(lv.pid)
+    end
+
+    test "dragging the right edge flush against the domain bound is accepted and patched (F04 correction M2)",
+         %{conn: conn} do
+      {:ok, lv, _html} = live(conn, ~p"/")
+      max_year = Date.utc_today().year
+
+      # The drag gesture clamps at the domain edge
+      # (`assets/js/lib/time_window.js`), which since D1 is exactly the
+      # server's own upper bound: the resulting push must be accepted, not
+      # silently dropped as it was when the client domain (2100) exceeded
+      # the server's (current year).
+      lv
+      |> element("#timeline-hook")
+      |> render_hook("select_time_window", %{"from" => 1789, "to" => max_year})
+
+      assert_patch(lv, ~p"/?from=1789&to=#{max_year}")
+    end
+
+    test "a URL carrying to beyond the current year falls back to the default window (F04 item 14)",
+         %{conn: conn} do
+      max_year = Date.utc_today().year
+
+      {:ok, lv, _html} = live(conn, ~p"/?from=1789&to=#{max_year + 1}")
+
+      # `to` is invalid alone, so it falls back to its default (the domain
+      # edge) while `from` survives: no path (URL, gesture, patch) can
+      # yield an applied `to` beyond the current year.
+      assert has_element?(lv, ~s(#timeline-hook[data-from="1789"][data-to="#{max_year}"]))
     end
 
     test "a window exactly at the minimum width is accepted", %{conn: conn} do

@@ -37,11 +37,32 @@ test("happy path: every fixture anchor matches within the fixture's tolerance", 
 
 test("happy path: the fixture contains every documented mandatory anchor", () => {
   const years = new Set(fixture.anchors.map(anchor => anchor.year))
-  const mandatory = [-300000, -100000, -10000, -490, 0, 1000, 1789, 2000, 2100]
+  // -489 is the Battle of Marathon in astronomical convention (490 BCE),
+  // matching labels.json (F04 quality finding m9); the domain bounds come
+  // from the fixture's own pinned config.
+  const mandatory = [
+    fixture.config.min_year,
+    -100000,
+    -10000,
+    -489,
+    0,
+    1000,
+    1789,
+    2000,
+    fixture.config.max_year
+  ]
 
   for (const year of mandatory) {
     assert.ok(years.has(year), `missing mandatory anchor year ${year}`)
   }
+})
+
+test("happy path: createTimeScale() defaults maxYear to the current UTC year (F04 decision D1)", () => {
+  const scale = createTimeScale()
+
+  assert.equal(scale.minYear, -300000)
+  assert.equal(scale.maxYear, new Date().getUTCFullYear())
+  assert.equal(scale.pivot, 10000)
 })
 
 test("limit case: position(minYear) is exactly 0.0 and position(maxYear) is exactly 1.0", () => {

@@ -19,6 +19,19 @@ defmodule Amanogawa.Atlas.TimeScale.Format do
   same astronomical-to-BCE conversion (`year <= 0` becomes `1 - year` "av.
   J.-C."), so the two modules never disagree on how a BCE year reads.
 
+  ## Label templates and i18n (F04 quality finding m6)
+
+  The regime *rules* live here; the label *text* is a template map the
+  caller may localize. `format_axis_year/3` accepts
+  `%{ka_bp:, century:, bce:}` templates carrying `%{ka}`/`%{century}`/
+  `%{text}` placeholders; `default_templates/0` provides the French
+  originals (also the shared fixture's language, and the JS mirror's own
+  defaults). Translated templates come from the web layer
+  (`AmanogawaWeb.TimelineI18n`, dgettext domain `"timeline"`): this module
+  stays a pure Atlas formatter with no Gettext dependency, exactly like
+  the JS mirror receives its templates through `data-i18n-*` attributes
+  rather than hardcoding a second language.
+
   ## Regimes (checked in this order)
 
     * tick step `>= 1_000` years and year `<= #{Amanogawa.Atlas.TimeScale.bp_threshold_year()}`
@@ -56,11 +69,29 @@ defmodule Amanogawa.Atlas.TimeScale.Format do
   @bp_threshold_year TimeScale.bp_threshold_year()
   @bp_epoch TimeScale.bp_epoch()
 
+  @type templates :: %{ka_bp: String.t(), century: String.t(), bce: String.t()}
+
+  @default_templates %{
+    ka_bp: "%{ka} ka BP",
+    century: "%{century}e s.",
+    bce: "%{text} av. J.-C."
+  }
+
+  @doc """
+  The French label templates (the project's source language, and the
+  shared fixture's): `%{ka}` is the rounded ka BP value, `%{century}` the
+  Roman-numeral century, `%{text}` the era-less label a BCE suffix wraps.
+  """
+  @spec default_templates() :: templates()
+  def default_templates, do: @default_templates
+
   @doc """
   Formats `year` (an astronomical year, `Amanogawa.HistoricalDate`'s
   convention) as an axis label appropriate for `step` (the current tick
   step in years, as returned alongside `Amanogawa.Atlas.TimeScale.ticks/3`
-  or computed by the caller from consecutive ticks). Never raises.
+  or computed by the caller from consecutive ticks), rendered through
+  `templates` (`default_templates/0` when omitted; see the moduledoc).
+  Never raises.
 
   ## Examples
 
@@ -74,26 +105,33 @@ defmodule Amanogawa.Atlas.TimeScale.Format do
       "1969"
 
   """
-  @spec format_axis_year(integer(), pos_integer()) :: String.t()
-  def format_axis_year(year, step) when step >= 1000 and year <= @bp_threshold_year do
+  @spec format_axis_year(integer(), pos_integer(), templates()) :: String.t()
+  def format_axis_year(year, step, templates \\ @default_templates)
+
+  def format_axis_year(year, step, templates)
+      when step >= 1000 and year <= @bp_threshold_year do
     ka = (@bp_epoch - year) / 1000
-    "#{round(ka)} ka BP"
+    render(templates.ka_bp, "ka", to_string(round(ka)))
   end
 
-  def format_axis_year(year, step) when step >= 100 do
+  def format_axis_year(year, step, templates) when step >= 100 do
     {display_year, era} = era_and_display_year(year)
     century = div(display_year, 100) + 1
-    with_era("#{Formatter.to_roman(century)}e s.", era)
+    with_era(render(templates.century, "century", Formatter.to_roman(century)), era, templates)
   end
 
-  def format_axis_year(year, _step) do
+  def format_axis_year(year, _step, templates) do
     {display_year, era} = era_and_display_year(year)
-    with_era(Integer.to_string(display_year), era)
+    with_era(Integer.to_string(display_year), era, templates)
   end
 
   defp era_and_display_year(year) when year <= 0, do: {1 - year, :bce}
   defp era_and_display_year(year), do: {year, :ce}
 
-  defp with_era(text, :ce), do: text
-  defp with_era(text, :bce), do: text <> " av. J.-C."
+  defp with_era(text, :ce, _templates), do: text
+  defp with_era(text, :bce, templates), do: render(templates.bce, "text", text)
+
+  defp render(template, placeholder, value) do
+    String.replace(template, "%{#{placeholder}}", value)
+  end
 end

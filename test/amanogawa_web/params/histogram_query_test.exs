@@ -3,8 +3,11 @@ defmodule AmanogawaWeb.Params.HistogramQueryTest do
 
   alias AmanogawaWeb.Params.HistogramQuery
 
+  # The single time-window domain (F04 decision D1):
+  # `Amanogawa.Atlas.TimeScale.default/0`'s bounds, upper bound the
+  # current UTC year.
   @min_year -300_000
-  @max_year 2_100
+  @max_year Date.utc_today().year
 
   describe "parse/1 happy path" do
     test "parses from, to and buckets into normalized options" do

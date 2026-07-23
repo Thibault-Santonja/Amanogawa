@@ -32,18 +32,30 @@ defmodule Amanogawa.Atlas.TimeScale do
   (near `max_year`): the default, `10_000`, roughly centers that transition
   on the start of the Neolithic.
 
-  ## Default domain
+  ## Default domain: THE time-window domain
 
-  `min_year: -300_000`, `max_year: 2_100`, `pivot: 10_000`: from a
-  comfortable margin before the earliest events the corpus (Wikidata-backed
-  prehistory) can meaningfully place on a timeline, to a near future no
-  historical event can exceed. Deliberately narrower than
-  `Amanogawa.HistoricalDate`'s own `[-13_800_000_000, 3_000]` domain (the
-  age of the universe down to precision-0 dates): stretching the timeline
-  to cosmological depth would collapse everything since the Neolithic into
-  a sliver of pixels, defeating the whole point of a symlog scale tuned for
-  human history. A caller needing the full `HistoricalDate` domain builds
-  its own `%TimeScale{}` via `new/1`.
+  `min_year: -300_000`, `max_year:` the current UTC year (computed at
+  runtime, never a hardcoded literal), `pivot: 10_000`: from a comfortable
+  margin before the earliest events the corpus (Wikidata-backed
+  prehistory) can meaningfully place on a timeline, up to today.
+  Deliberately narrower than `Amanogawa.HistoricalDate`'s own
+  `[-13_800_000_000, 3_000]` domain (the age of the universe down to
+  precision-0 dates): stretching the timeline to cosmological depth would
+  collapse everything since the Neolithic into a sliver of pixels,
+  defeating the whole point of a symlog scale tuned for human history. A
+  caller needing the full `HistoricalDate` domain builds its own
+  `%TimeScale{}` via `new/1`.
+
+  `default/0` is the SINGLE server-side source of truth for the time
+  window's domain (F04 design decision D1): `AmanogawaWeb.Params.
+  ExploreParams` (URL window defaults and validation) and
+  `AmanogawaWeb.Params.HistogramQuery` (histogram bounds) both delegate
+  their bounds here, and `AmanogawaWeb.ExploreLive` transmits the same
+  domain to the client hooks through the `data-domain-min`/
+  `data-domain-max` attributes; no other module may duplicate these
+  bounds. Because `max_year` is the current year, `default/0` must never
+  be captured in a module attribute (that would freeze the build year into
+  the release): always call it at runtime.
 
   ## Clamping, never an exception
 
@@ -77,7 +89,6 @@ defmodule Amanogawa.Atlas.TimeScale do
   @type t :: %__MODULE__{min_year: integer(), max_year: integer(), pivot: pos_integer()}
 
   @default_min_year -300_000
-  @default_max_year 2_100
   @default_pivot 10_000
 
   # Radiocarbon "before present" epoch: BP = @bp_epoch - year.
@@ -94,7 +105,8 @@ defmodule Amanogawa.Atlas.TimeScale do
   @doc """
   Builds a validated `%TimeScale{}`. `opts` (a map or keyword list) may
   override `:min_year`, `:max_year`, `:pivot`; every field defaults to the
-  module's documented default domain.
+  module's documented default domain (`max_year` to the current UTC year,
+  evaluated when `new/1` is called).
 
   Returns `{:error, reason}` (a human-readable string) when
   `min_year >= max_year` or `pivot <= 0`, never raises.
@@ -102,8 +114,10 @@ defmodule Amanogawa.Atlas.TimeScale do
   ## Examples
 
       iex> {:ok, scale} = Amanogawa.Atlas.TimeScale.new()
-      iex> {scale.min_year, scale.max_year, scale.pivot}
-      {-300_000, 2_100, 10_000}
+      iex> {scale.min_year, scale.pivot}
+      {-300_000, 10_000}
+      iex> scale.max_year == Date.utc_today().year
+      true
 
       iex> Amanogawa.Atlas.TimeScale.new(min_year: 100, max_year: 0)
       {:error, "min_year must be less than max_year"}
@@ -113,7 +127,7 @@ defmodule Amanogawa.Atlas.TimeScale do
   def new(opts \\ []) do
     attrs = Map.new(opts)
     min_year = Map.get(attrs, :min_year, @default_min_year)
-    max_year = Map.get(attrs, :max_year, @default_max_year)
+    max_year = Map.get(attrs, :max_year, current_year())
     pivot = Map.get(attrs, :pivot, @default_pivot)
 
     cond do
@@ -138,12 +152,17 @@ defmodule Amanogawa.Atlas.TimeScale do
   end
 
   @doc """
-  The default scale (`new!/1` with no overrides): the single instance the
-  rest of the project (histogram query, timeline hook defaults) shares
-  unless it has a specific reason to build its own.
+  The default scale (`new!/1` with no overrides): the single server-side
+  source of truth for the time-window domain (see the moduledoc). Its
+  `max_year` is the current UTC year, so this function must be called at
+  runtime, never captured in a module attribute.
   """
   @spec default() :: t()
   def default, do: new!()
+
+  @doc "The current UTC year: the default domain's upper bound."
+  @spec current_year() :: integer()
+  def current_year, do: Date.utc_today().year
 
   @doc """
   Maps `year` to its normalized position in `[0.0, 1.0]` on `scale`.
@@ -151,7 +170,7 @@ defmodule Amanogawa.Atlas.TimeScale do
 
   ## Examples
 
-      iex> scale = Amanogawa.Atlas.TimeScale.default()
+      iex> scale = Amanogawa.Atlas.TimeScale.new!(max_year: 2_100)
       iex> Amanogawa.Atlas.TimeScale.position(scale, 2100)
       1.0
       iex> Amanogawa.Atlas.TimeScale.position(scale, -300_000)
@@ -172,7 +191,7 @@ defmodule Amanogawa.Atlas.TimeScale do
 
   ## Examples
 
-      iex> scale = Amanogawa.Atlas.TimeScale.default()
+      iex> scale = Amanogawa.Atlas.TimeScale.new!(max_year: 2_100)
       iex> Amanogawa.Atlas.TimeScale.year(scale, 1.0)
       2100
       iex> Amanogawa.Atlas.TimeScale.year(scale, 0.0)

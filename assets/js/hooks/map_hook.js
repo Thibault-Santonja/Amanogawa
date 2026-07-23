@@ -291,6 +291,17 @@ const MapHook = {
     // stays free during a drag that has not yet crossed the 150ms debounce
     // (`.claude/rules/liveview.md`).
     this.onWindowPreview = event => {
+      // Defense in depth: this is a plain DOM CustomEvent any same-page
+      // script could dispatch, so a malformed detail is dropped rather
+      // than poisoning the MapLibre paint expressions with NaN/Infinity.
+      if (
+        !event.detail ||
+        !Number.isFinite(event.detail.from) ||
+        !Number.isFinite(event.detail.to)
+      ) {
+        return
+      }
+
       const {from, to} = event.detail
       if (from === this.previewWindow.from && to === this.previewWindow.to) return
 

@@ -4,10 +4,13 @@ defmodule AmanogawaWeb.Params.ExploreParamsTest do
 
   doctest AmanogawaWeb.Params.ExploreParams
 
+  alias Amanogawa.Atlas.TimeScale
   alias AmanogawaWeb.Params.ExploreParams
 
+  # The single time-window domain (F04 decision D1): the same bounds
+  # `Amanogawa.Atlas.TimeScale.default/0` serves at runtime.
   @current_year Date.utc_today().year
-  @min_year Amanogawa.HistoricalDate.min_year()
+  @min_year -300_000
 
   describe "parse/1 happy path" do
     test "parses a full valid URL into the expected state" do
@@ -56,6 +59,13 @@ defmodule AmanogawaWeb.Params.ExploreParamsTest do
       state = ExploreParams.parse(%{"from" => Integer.to_string(@min_year)})
       assert state.from == @min_year
     end
+
+    test "the domain is TimeScale.default/0's own (F04 decision D1), never a duplicated bound" do
+      scale = TimeScale.default()
+
+      assert @min_year == scale.min_year
+      assert @current_year == scale.max_year
+    end
   end
 
   describe "parse/1 error cases" do
@@ -81,6 +91,16 @@ defmodule AmanogawaWeb.Params.ExploreParamsTest do
     test "lat/lng out of bounds fall back to their defaults" do
       assert ExploreParams.parse(%{"lat" => "91"}).lat == 20.0
       assert ExploreParams.parse(%{"lng" => "181"}).lng == 0.0
+    end
+
+    test "a bound outside the TimeScale domain falls back to its default (F04 decision D1)" do
+      state = ExploreParams.parse(%{"from" => "-13800000000", "to" => "500"})
+      assert state.from == @min_year
+      assert state.to == 500
+
+      state = ExploreParams.parse(%{"from" => "0", "to" => Integer.to_string(@current_year + 1)})
+      assert state.from == 0
+      assert state.to == @current_year
     end
 
     test "non-numeric values fall back to defaults without raising" do

@@ -18,9 +18,19 @@ defmodule AmanogawaWeb.Params.ExploreParams do
   assigns, and this module is the only place that turns raw query params
   into validated values, or validated values back into a query.
 
-  Year bounds mirror `AmanogawaWeb.Params.EventsQuery`, sharing the lower
-  bound through `Amanogawa.HistoricalDate.min_year/0` so the two can never
-  drift apart.
+  ## Time-window domain (F04 design decision D1)
+
+  The window's domain is `Amanogawa.Atlas.TimeScale.default/0`'s:
+  `[-300_000, current UTC year]`, the single source of truth shared with
+  the histogram bounds (`AmanogawaWeb.Params.HistogramQuery`) and the
+  client hooks (through `AmanogawaWeb.ExploreLive`'s `data-domain-min`/
+  `data-domain-max` attributes). Both the window defaults (`parse/1` with
+  absent `from`/`to`) and the validation of a client-pushed window
+  (`valid_window?/2`) are bounded on this SAME domain: no bound is
+  duplicated here, and no wider astronomical domain
+  (`Amanogawa.HistoricalDate`) is accepted anymore, since a window the
+  timeline cannot position on its strip was previously accepted by the
+  server but unreachable (and unrepairable) by the drag gesture.
 
   Unlike `EventsQuery.parse/1`, `parse/1` here never fails: it powers page
   navigation, not an API contract, so a malformed or hostile query string
@@ -32,7 +42,7 @@ defmodule AmanogawaWeb.Params.ExploreParams do
   else.
   """
 
-  alias Amanogawa.HistoricalDate
+  alias Amanogawa.Atlas.TimeScale
   alias AmanogawaWeb.Params.EventId
 
   @type t :: %{
@@ -44,14 +54,11 @@ defmodule AmanogawaWeb.Params.ExploreParams do
           lng: float()
         }
 
-  @min_year HistoricalDate.min_year()
-
   # Minimum accepted width, in years, of a client-pushed time window
   # (issue #021's own default): mirrors, but is deliberately not shared
   # with, the JS drag gesture's own minimum
   # (`assets/js/hooks/timeline.js`'s `MIN_WINDOW_WIDTH_YEARS`), since the
-  # two enforce the same rule against different domains (see
-  # `valid_window?/2`'s own doc).
+  # two enforce the same rule on either side of the wire.
   @min_window_width_years 1
 
   # Mirrors the map hook's initial camera (`assets/js/hooks/map_hook.js`,
@@ -113,8 +120,9 @@ defmodule AmanogawaWeb.Params.ExploreParams do
   end
 
   @doc """
-  True when `from`/`to` are both integers within the domain (inclusive),
-  strictly ordered, and at least `#{@min_window_width_years} an` apart
+  True when `from`/`to` are both integers within the time-window domain
+  (`Amanogawa.Atlas.TimeScale.default/0`'s, inclusive; see the moduledoc),
+  strictly ordered, and at least `#{@min_window_width_years}` year apart
   (issue #021's own minimum window width). Used by
   `AmanogawaWeb.ExploreLive` to validate a client-pushed
   `select_time_window` payload, for the same "leave state unchanged on
@@ -123,15 +131,10 @@ defmodule AmanogawaWeb.Params.ExploreParams do
   outright, so the caller can distinguish "apply this window" from "ignore
   this request" and never partially applies one bound without the other.
 
-  The domain here is the same one `parse/1` clamps a URL's `from`/`to`
-  into (`Amanogawa.HistoricalDate`'s full astronomical range): wider than
-  `Amanogawa.Atlas.TimeScale`'s own default rendering domain
-  (`-300_000..2_100`), which only bounds what the timeline's symlog scale
-  can *position on the strip* (`assets/js/lib/time_window.js`'s own
-  header comment). A window this function accepts is always valid state
-  to store and query by; whether the timeline hook's drag could have
-  produced it unassisted is a separate, narrower question this function
-  does not answer.
+  This is the SAME domain `parse/1` bounds a URL's `from`/`to` on (F04
+  design decision D1): a window the drag gesture can produce and a window
+  a pasted URL can carry are validated against one shared set of bounds,
+  so the gesture can never produce a window the server rejects.
 
   ## Examples
 
@@ -144,9 +147,11 @@ defmodule AmanogawaWeb.Params.ExploreParams do
   """
   @spec valid_window?(term(), term()) :: boolean()
   def valid_window?(from, to) do
+    %TimeScale{min_year: min_year, max_year: max_year} = TimeScale.default()
+
     is_integer(from) and is_integer(to) and
-      from >= @min_year and from <= current_year() and
-      to >= @min_year and to <= current_year() and
+      from >= min_year and from <= max_year and
+      to >= min_year and to <= max_year and
       to - from >= @min_window_width_years
   end
 
@@ -177,19 +182,18 @@ defmodule AmanogawaWeb.Params.ExploreParams do
   end
 
   defp parse_window(from_param, to_param) do
-    from = parse_year(from_param, @min_year)
-    to = parse_year(to_param, current_year())
+    %TimeScale{min_year: min_year, max_year: max_year} = TimeScale.default()
+    from = parse_year(from_param, min_year, min_year, max_year)
+    to = parse_year(to_param, max_year, min_year, max_year)
 
-    if from <= to, do: {from, to}, else: {@min_year, current_year()}
+    if from <= to, do: {from, to}, else: {min_year, max_year}
   end
 
-  defp parse_year(nil, default), do: default
+  defp parse_year(nil, default, _min_year, _max_year), do: default
 
-  defp parse_year(value, default) do
-    max_year = current_year()
-
+  defp parse_year(value, default, min_year, max_year) do
     case parse_integer(value) do
-      {:ok, year} when year >= @min_year and year <= max_year -> year
+      {:ok, year} when year >= min_year and year <= max_year -> year
       _other -> default
     end
   end
@@ -238,7 +242,9 @@ defmodule AmanogawaWeb.Params.ExploreParams do
   defp parse_number(_other), do: :error
 
   defp put_window(query, %{from: from, to: to}) do
-    if {from, to} == {@min_year, current_year()} do
+    %TimeScale{min_year: min_year, max_year: max_year} = TimeScale.default()
+
+    if {from, to} == {min_year, max_year} do
       query
     else
       query
@@ -260,6 +266,4 @@ defmodule AmanogawaWeb.Params.ExploreParams do
       |> Map.put("lng", to_string(lng))
     end
   end
-
-  defp current_year, do: Date.utc_today().year
 end

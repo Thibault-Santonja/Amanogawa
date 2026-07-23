@@ -156,34 +156,36 @@ defmodule Amanogawa.Atlas do
   The scale used is always `TimeScale.default/0`: the histogram, the axis
   ticks (#019), and the map's temporal filter all read the same default
   domain, so a caller never has to pass its own `TimeScale` here. Bucket
-  edges are the *requested* `opts.from`/`opts.to` at the extremes (not a
-  round-tripped approximation): only the interior edges are computed via
-  `TimeScale.year/2`, so the first bucket's `from` and the last bucket's
-  `to` always match the response's top-level `from`/`to` exactly. Actual
-  counting (the SQL aggregation) is centralized in
-  `Amanogawa.Atlas.EventQueries.histogram_counts/1`.
+  edges come from `Amanogawa.Atlas.EventQueries.bucket_edges/1`, the
+  single definition also used by the SQL aggregation
+  (`Amanogawa.Atlas.EventQueries.histogram_counts/1`), so the counts and
+  the announced integer edges agree by construction (F04 quality finding
+  m5): the requested `opts.from`/`opts.to` are exact at the extremes, and
+  interior edges are `TimeScale.year/2` at equally spaced positions.
   """
   @spec event_histogram(%{from: integer(), to: integer(), buckets: pos_integer()}) :: map()
   def event_histogram(%{from: from, to: to, buckets: buckets}) do
-    scale = TimeScale.default()
-    counts = EventQueries.histogram_counts(%{from: from, to: to, buckets: buckets, scale: scale})
+    opts = %{from: from, to: to, buckets: buckets, scale: TimeScale.default()}
+    counts = EventQueries.histogram_counts(opts)
 
     %{
       "from" => from,
       "to" => to,
-      "buckets" => bucket_list(scale, from, to, buckets, counts)
+      "buckets" => bucket_list(opts, counts)
     }
   end
 
   @doc """
   Formats an astronomical year as a timeline axis label (issue #020).
-  Delegates to `Amanogawa.Atlas.TimeScale.Format.format_axis_year/2`,
-  exposed here so callers (the timeline hook's server-rendered
-  counterparts, future components) only ever depend on `Amanogawa.Atlas`'s
-  public API, never reach into `Amanogawa.Atlas.TimeScale.Format`
-  directly.
+  Delegates to `Amanogawa.Atlas.TimeScale.Format.format_axis_year/3`
+  (`templates` optional, French defaults; localized templates come from
+  the web layer, `AmanogawaWeb.TimelineI18n`), exposed here so callers
+  (the timeline hook's server-rendered counterparts, future components)
+  only ever depend on `Amanogawa.Atlas`'s public API, never reach into
+  `Amanogawa.Atlas.TimeScale.Format` directly.
   """
   defdelegate format_axis_year(year, step), to: TimeScale.Format
+  defdelegate format_axis_year(year, step, templates), to: TimeScale.Format
 
   @doc "Fetches an event by its Wikidata QID, or `nil` if unknown locally."
   @spec get_event_by_qid(String.t()) :: Event.t() | nil
@@ -362,27 +364,16 @@ defmodule Amanogawa.Atlas do
     end
   end
 
-  # Builds the dense bucket list `event_histogram/1` returns: `from` and
-  # `to` are exact at the extremes (the caller's own `opts.from`/`opts.to`,
-  # never a round-tripped approximation), interior edges come from
-  # `TimeScale.year/2` at positions equally spaced between
-  # `position(from)` and `position(to)`. `counts` (from
+  # Builds the dense bucket list `event_histogram/1` returns, from the
+  # exact integer edges `EventQueries.bucket_edges/1` defines (the same
+  # edges the SQL aggregation assigns against). `counts` (from
   # `EventQueries.histogram_counts/1`) is sparse and 1-indexed
   # (PostgreSQL's `width_bucket` convention); a bucket absent from it is a
   # genuine zero, not a gap, so every bucket index in `1..buckets` is
   # looked up with a `0` default.
-  defp bucket_list(scale, from, to, buckets, counts) do
-    low = TimeScale.position(scale, from)
-    high = TimeScale.position(scale, to)
-
-    interior_edges =
-      Enum.map(1..(buckets - 1)//1, fn i ->
-        TimeScale.year(scale, low + i * (high - low) / buckets)
-      end)
-
-    edges = [from] ++ interior_edges ++ [to]
-
-    edges
+  defp bucket_list(opts, counts) do
+    opts
+    |> EventQueries.bucket_edges()
     |> Enum.chunk_every(2, 1, :discard)
     |> Enum.with_index(1)
     |> Enum.map(fn {[edge_from, edge_to], index} ->
