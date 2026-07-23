@@ -71,6 +71,12 @@ defmodule AmanogawaWeb.FeatureCase do
   def start_wallaby_and_raise_test_only_rate_limits do
     {:ok, _apps} = Application.ensure_all_started(:wallaby)
 
+    # Every scenario visits relative paths; Wallaby resolves them against
+    # :base_url, which nothing else sets. The endpoint runs a real HTTP
+    # listener in this env (server: true, config/test.exs), so its url/0
+    # is the single source of truth for host and port.
+    Application.put_env(:wallaby, :base_url, AmanogawaWeb.Endpoint.url())
+
     Application.put_env(:amanogawa, AmanogawaWeb.RateLimit,
       limit: 10_000,
       scale_ms: :timer.hours(24)
