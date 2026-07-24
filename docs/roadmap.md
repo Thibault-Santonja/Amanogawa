@@ -33,14 +33,16 @@ Phase 2 : collaboratif
 
 Objectif : un site public où l'on explore les événements historiques sur carte + frise, avec résumés, liens Wikipedia, relations et frontières historiques.
 
-| ID | Feature | Priorité | Spec |
-|----|---------|----------|------|
-| F01 | Fondations (projet, qualité, CI, fond de carte) | P0 | [F01](features/001-fondations/000-fondations.md) |
-| F02 | Ingestion Wikidata / Wikipedia | P0 | [F02](features/002-ingestion-wikidata/000-ingestion-wikidata.md) |
-| F03 | Carte interactive | P0 | [F03](features/003-carte-interactive/000-carte-interactive.md) |
-| F04 | Frise chronologique | P0 | [F04](features/004-frise-chronologique/000-frise-chronologique.md) |
-| F05 | Frontières historiques | P1 | [F05](features/005-frontieres-historiques/000-frontieres-historiques.md) |
-| F06 | Déploiement et pages légales | P1 | [F06](features/006-deploiement/000-deploiement.md) |
+État au 2026-07-24 : les six features sont développées, revues (qualité + sécurité par feature, corrections appliquées) et mergées, couvertes par 856 tests dont une suite E2E navigateur de 12 scénarios. Restent à réaliser par l'opérateur : le déploiement réel (placeholders de `docs/ops/deploy.md`) et les imports de données réels (`docs/ops/sync.md`, mix tasks d'import des frontières), avec la mesure de payload et le recalibrage documentés à faire au premier import.
+
+| ID | Feature | Priorité | Statut | Spec |
+|----|---------|----------|--------|------|
+| F01 | Fondations (projet, qualité, CI, fond de carte) | P0 | Livrée (PR #1) | [F01](features/001-fondations/000-fondations.md) |
+| F02 | Ingestion Wikidata / Wikipedia | P0 | Livrée (PR #2) | [F02](features/002-ingestion-wikidata/000-ingestion-wikidata.md) |
+| F03 | Carte interactive | P0 | Livrée (PR #3, E2E PR #5) | [F03](features/003-carte-interactive/000-carte-interactive.md) |
+| F04 | Frise chronologique | P0 | Livrée (PR #4) | [F04](features/004-frise-chronologique/000-frise-chronologique.md) |
+| F05 | Frontières historiques | P1 | Livrée (PR #6) | [F05](features/005-frontieres-historiques/000-frontieres-historiques.md) |
+| F06 | Déploiement et pages légales | P1 | Livrée (PR #7) | [F06](features/006-deploiement/000-deploiement.md) |
 
 Critère de sortie : parcours complet en production (charger la carte, régler la fenêtre temporelle, survoler un événement, ouvrir Wikipedia, voir les frontières de la période), >90% de couverture par module, precommit et CI verts.
 
