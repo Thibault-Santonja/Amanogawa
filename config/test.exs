@@ -89,6 +89,10 @@ chrome_binary = System.get_env("CHROME_BINARY")
 config :wallaby,
   otp_app: :amanogawa,
   screenshot_on_failure: true,
+  # Default is 3000 ms: too tight for CI runners rendering WebGL through
+  # swiftshader, where a theme switch (style reload plus events refetch)
+  # can legitimately take longer; observed flaky only in CI.
+  max_wait_time: 12_000,
   chromedriver: [
     # `headless: true` would append Chrome's LEGACY `--headless` flag
     # (wallaby appends the bare flag), whose rendering stack cannot create
