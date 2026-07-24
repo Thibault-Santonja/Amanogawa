@@ -6,8 +6,18 @@ defmodule AmanogawaWeb.LoggingIntegrationTest do
   wiring production uses (`config/runtime.exs`'s `:default_formatter`
   override), without mutating global test configuration:
   `ExUnit.CaptureLog.capture_log/2`'s `:format` option overrides the
-  formatter only for the duration of the capture (`ExUnit.CaptureLog`
-  moduledoc), leaving every other async test's logging untouched.
+  formatter only for the duration of the capture.
+
+  `ExUnit.CaptureLog`'s own moduledoc is explicit that, under `async:
+  true`, "messages from other tests might be captured" (it mutes the
+  single global handler for the duration of the call, not a
+  per-process one): with the JSON formatter emitting one object per
+  line, an unrelated concurrent `:error` log from another async test
+  (for example `Amanogawa.Accounts.deliver_magic_link/3`'s own
+  logged notifier failure) can legitimately land in the same captured
+  string. This test isolates its own line by `request_id` before
+  decoding, rather than assuming the whole capture is exactly one JSON
+  document.
   """
 
   use AmanogawaWeb.ConnCase, async: true
@@ -29,7 +39,12 @@ defmodule AmanogawaWeb.LoggingIntegrationTest do
         Logger.error("integration check", request_id: request_id)
       end)
 
+    own_line =
+      log
+      |> String.split("\n", trim: true)
+      |> Enum.find(&(&1 =~ request_id))
+
     assert %{"level" => "error", "message" => "integration check", "request_id" => ^request_id} =
-             log |> String.trim() |> Jason.decode!()
+             Jason.decode!(own_line)
   end
 end

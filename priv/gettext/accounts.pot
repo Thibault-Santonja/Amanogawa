@@ -1,0 +1,22 @@
+## This file is a PO Template file.
+##
+## "msgid"s here are often extracted from source code.
+## Add new messages manually only if they're dynamic
+## messages that can't be statically extracted.
+##
+## Run "mix gettext.extract" to bring this file up to
+## date. Leave "msgstr"s empty as changing them here has no
+## effect: edit them in PO (.po) files instead.
+#
+msgid ""
+msgstr ""
+
+#: lib/amanogawa/accounts/magic_link_notifier/mailer.ex:60
+#, elixir-autogen, elixir-format
+msgid "Voici votre lien de connexion :\n\n%{url}\n\nCe lien est valable %{minutes} minutes et ne peut être utilisé qu'une seule fois.\n\nSi vous n'êtes pas à l'origine de cette demande, vous pouvez ignorer cet email.\n"
+msgstr ""
+
+#: lib/amanogawa/accounts/magic_link_notifier/mailer.ex:57
+#, elixir-autogen, elixir-format
+msgid "Votre lien de connexion Amanogawa"
+msgstr ""

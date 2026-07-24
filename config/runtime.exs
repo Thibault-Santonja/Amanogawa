@@ -134,8 +134,9 @@ if config_env() == :prod do
     from: System.get_env("ALERT_FROM_EMAIL"),
     recipient: System.get_env("ALERT_RECIPIENT_EMAIL")
 
-  # Local SMTP relay (issue #028): the same relay already used by the
-  # other projects on this VPS (msmtp or equivalent, `.claude/memory/
+  # Local SMTP relay (issue #028, and since issue #031 also the magic
+  # link sign-in emails): the same relay already used by the other
+  # projects on this VPS (msmtp or equivalent, `.claude/memory/
   # tech-stack.md`), never a third-party transactional email provider.
   # No authentication by default (`SMTP_USERNAME` unset): a relay bound to
   # localhost typically needs none.
@@ -148,6 +149,21 @@ if config_env() == :prod do
     ssl: System.get_env("SMTP_SSL") in ~w(true 1),
     tls: :if_available,
     auth: if(System.get_env("SMTP_USERNAME"), do: :always, else: :never)
+
+  # Magic link sender address (issue #031): reuses ALERT_FROM_EMAIL
+  # rather than a second dedicated environment variable (config/config.exs
+  # explains why), falling back to the same documented placeholder used
+  # in dev/test if this deployment never set ALERT_FROM_EMAIL either.
+  config :amanogawa, Amanogawa.Accounts,
+    from: System.get_env("ALERT_FROM_EMAIL", "connexion@amanogawa.example")
+
+  # Magic link rate limit (issue #031): overridable per deployment
+  # without a rebuild, same spirit as RATE_LIMIT_PER_MINUTE above. Window
+  # stays fixed at 15 minutes (F07 overview's own security arbitration);
+  # only the quota is meant to be tuned per environment.
+  config :amanogawa, Amanogawa.Accounts.MagicLinkThrottle,
+    limit: String.to_integer(System.get_env("MAGIC_LINK_RATE_LIMIT", "5")),
+    scale_ms: :timer.minutes(15)
 
   # ## SSL Support
   #

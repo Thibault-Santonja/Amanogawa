@@ -233,12 +233,23 @@ defmodule Mix.Tasks.Amanogawa.SyncTest do
                Enum.find(oban_config[:plugins], &match?({Oban.Plugins.Cron, _}, &1))
 
       kinds =
-        Enum.map(cron_opts[:crontab], fn {_expr, worker, opts} ->
-          assert worker == Amanogawa.Ingestion.Workers.ScheduledSync
-          opts[:args]["kind"]
-        end)
+        cron_opts[:crontab]
+        |> Enum.filter(&match?({_expr, Amanogawa.Ingestion.Workers.ScheduledSync, _opts}, &1))
+        |> Enum.map(fn {_expr, _worker, opts} -> opts[:args]["kind"] end)
 
       assert kinds == ["events", "links", "summaries"]
+    end
+
+    test "the base config also carries the daily magic link token purge (#030)" do
+      oban_config = read_oban_config(:prod)
+
+      assert {Oban.Plugins.Cron, cron_opts} =
+               Enum.find(oban_config[:plugins], &match?({Oban.Plugins.Cron, _}, &1))
+
+      assert Enum.any?(
+               cron_opts[:crontab],
+               &match?({_expr, Amanogawa.Accounts.Workers.PurgeExpiredTokens}, &1)
+             )
     end
 
     test "the test config never schedules the cron plugin" do

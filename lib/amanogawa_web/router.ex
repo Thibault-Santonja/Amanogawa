@@ -77,4 +77,17 @@ defmodule AmanogawaWeb.Router do
     get "/events/:qid/links", EventController, :links
     get "/borders", BorderController, :index
   end
+
+  # Local mailbox preview (issue #031): lets a developer see the magic
+  # link emails sent through Swoosh.Adapters.Local (config/dev.exs)
+  # without a real SMTP relay. `Application.compile_env/3` gates this at
+  # compile time (`config :amanogawa, dev_routes: true`, config/dev.exs
+  # only), so the route does not even exist in the :test or :prod build.
+  if Application.compile_env(:amanogawa, :dev_routes, false) do
+    scope "/dev" do
+      pipe_through :browser
+
+      forward "/mailbox", Plug.Swoosh.MailboxPreview
+    end
+  end
 end

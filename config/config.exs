@@ -67,16 +67,22 @@ config :amanogawa, Amanogawa.Ingestion.Workers.EnrichSummaries,
 # first), summaries the day after (the 30-day extract cache means a
 # monthly run only refreshes what expired). Disabled in test
 # (config/test.exs): a schedule must never fire during the test suite.
+#
+# Daily magic link token purge (issue #030), off-peak (UTC), through
+# Amanogawa.Accounts.Workers.PurgeExpiredTokens: hygiene only, the
+# validity window is enforced in the verification query itself
+# (Amanogawa.Accounts.MagicLink), not by this cron.
 config :amanogawa, Oban,
   engine: Oban.Engines.Basic,
   repo: Amanogawa.Repo,
-  queues: [ingestion: 1, wikipedia: 1],
+  queues: [ingestion: 1, wikipedia: 1, accounts: 1],
   plugins: [
     {Oban.Plugins.Cron,
      crontab: [
        {"0 2 1 * *", Amanogawa.Ingestion.Workers.ScheduledSync, args: %{"kind" => "events"}},
        {"0 2 2 * *", Amanogawa.Ingestion.Workers.ScheduledSync, args: %{"kind" => "links"}},
-       {"0 2 3 * *", Amanogawa.Ingestion.Workers.ScheduledSync, args: %{"kind" => "summaries"}}
+       {"0 2 3 * *", Amanogawa.Ingestion.Workers.ScheduledSync, args: %{"kind" => "summaries"}},
+       {"30 3 * * *", Amanogawa.Accounts.Workers.PurgeExpiredTokens}
      ]}
   ]
 
@@ -107,12 +113,35 @@ config :amanogawa, Amanogawa.Alerting,
   recipient: nil
 
 # Swoosh mailer (issue #028): no adapter needs the API HTTP client
-# (Amanogawa.Mailer only ever uses Amanogawa.Alerting.Notifier.Mailer
-# through Swoosh.Adapters.Local in dev/test or Swoosh.Adapters.SMTP in
+# (Amanogawa.Mailer is used by Amanogawa.Alerting.Notifier.Mailer and,
+# since issue #031, Amanogawa.Accounts.MagicLinkNotifier.Mailer, through
+# Swoosh.Adapters.Local in dev/test or Swoosh.Adapters.SMTP in
 # production, config/dev.exs and config/runtime.exs), so this drops the
 # Finch dependency Swoosh would otherwise require for API-based adapters
 # (SendGrid, Mailgun, ...), which this project never uses.
 config :swoosh, :api_client, false
+
+# Magic link sender address (issue #031): reuses ALERT_FROM_EMAIL
+# (config/runtime.exs, production only) instead of a second dedicated
+# environment variable, both addresses meaning the same thing, "where
+# Amanogawa's automated mail comes from" on this host. This documented
+# placeholder covers dev/test, where ALERT_FROM_EMAIL is never set and
+# Amanogawa.Mailer never actually dials out (Swoosh.Adapters.Local/Test).
+config :amanogawa, Amanogawa.Accounts, from: "connexion@amanogawa.example"
+
+# Default outbound port for magic link emails (issue #031): a Mox mock
+# in test (config/test.exs), the real Swoosh-backed adapter everywhere
+# else. Same pattern as :sparql_client/:wikipedia_client (Ingestion).
+config :amanogawa, :magic_link_notifier, Amanogawa.Accounts.MagicLinkNotifier.Mailer
+
+# Magic link double rate limit (issue #031, `.claude/rules/security.md`):
+# 5 requests per 15-minute window, per IP and independently per
+# normalized email (Amanogawa.Accounts.MagicLinkThrottle), read at call
+# time so config/runtime.exs can override the quota
+# (MAGIC_LINK_RATE_LIMIT) per environment without a rebuild.
+config :amanogawa, Amanogawa.Accounts.MagicLinkThrottle,
+  limit: 5,
+  scale_ms: :timer.minutes(15)
 
 # Configure the endpoint
 config :amanogawa, AmanogawaWeb.Endpoint,
