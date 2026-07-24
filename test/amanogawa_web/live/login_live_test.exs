@@ -7,7 +7,7 @@ defmodule AmanogawaWeb.LoginLiveTest do
 
   alias Amanogawa.MagicLinkNotifierMock
 
-  # Global mode: LoginLive's `handle_event` runs `Accounts.deliver_magic_link/3`
+  # Global mode: LoginLive's `handle_event` runs `Accounts.deliver_magic_link/4`
   # inside the LiveView process, distinct from the test process that sets
   # up expectations (same rationale as `HealthControllerTest`).
   setup :set_mox_global
@@ -87,8 +87,11 @@ defmodule AmanogawaWeb.LoginLiveTest do
         |> form("#login-form", login: %{email: unique_email()})
         |> render_submit()
 
-      assert known_html =~ "Vérifiez votre boîte mail" ==
-               (unknown_html =~ "Vérifiez votre boîte mail")
+      # Two positive, separate assertions: both journeys must actually
+      # reach the confirmation state (a comparative `a == b` assertion
+      # would also pass when NEITHER html contained the message).
+      assert known_html =~ "Vérifiez votre boîte mail"
+      assert unknown_html =~ "Vérifiez votre boîte mail"
     end
   end
 

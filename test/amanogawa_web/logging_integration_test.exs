@@ -13,7 +13,7 @@ defmodule AmanogawaWeb.LoggingIntegrationTest do
   single global handler for the duration of the call, not a
   per-process one): with the JSON formatter emitting one object per
   line, an unrelated concurrent `:error` log from another async test
-  (for example `Amanogawa.Accounts.deliver_magic_link/3`'s own
+  (for example `Amanogawa.Accounts.deliver_magic_link/4`'s own
   logged notifier failure) can legitimately land in the same captured
   string. This test isolates its own line by `request_id` before
   decoding, rather than assuming the whole capture is exactly one JSON

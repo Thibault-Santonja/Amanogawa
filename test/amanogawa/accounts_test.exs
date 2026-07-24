@@ -164,14 +164,14 @@ defmodule Amanogawa.AccountsTest do
     end
   end
 
-  describe "purge_expired_magic_link_tokens/0" do
-    test "deletes expired tokens, preserves valid ones, and returns the exact count" do
+  describe "purge_expired_tokens/0: magic link expiry" do
+    test "deletes expired magic link tokens, preserves valid ones, and returns the exact count" do
       expired_inserted_at = DateTime.add(DateTime.utc_now(), -20 * 60, :second)
       magic_link_token_fixture(inserted_at: expired_inserted_at)
       magic_link_token_fixture(inserted_at: expired_inserted_at)
       {valid_clear_token, _valid_token} = magic_link_token_fixture()
 
-      assert Accounts.purge_expired_magic_link_tokens() == 2
+      assert Accounts.purge_expired_tokens() == 2
       assert Repo.aggregate(MagicLinkToken, :count) == 1
       assert {:ok, %User{}} = Accounts.redeem_magic_link_token(valid_clear_token)
     end
@@ -220,11 +220,9 @@ defmodule Amanogawa.AccountsTest do
     end
   end
 
-  describe "deliver_magic_link/3 happy path" do
-    test "returns :ok, calls the notifier once with a URL carrying the token and the requested locale" do
+  describe "deliver_magic_link/4 happy path" do
+    test "returns :ok, calls the notifier once with a URL carrying the token and the explicit locale" do
       email = unique_email()
-      Gettext.put_locale(AmanogawaWeb.Gettext, "en")
-      on_exit(fn -> Gettext.put_locale(AmanogawaWeb.Gettext, "fr") end)
 
       expect(MagicLinkNotifierMock, :deliver, fn received_email, url, locale ->
         assert received_email == email
@@ -234,7 +232,7 @@ defmodule Amanogawa.AccountsTest do
       end)
 
       assert :ok =
-               Accounts.deliver_magic_link(email, unique_ip(), fn token ->
+               Accounts.deliver_magic_link(email, unique_ip(), "en", fn token ->
                  "https://amanogawa.example/connexion/#{token}"
                end)
 
@@ -243,19 +241,19 @@ defmodule Amanogawa.AccountsTest do
     end
   end
 
-  describe "deliver_magic_link/3 edge case: anti-enumeration" do
+  describe "deliver_magic_link/4 edge case: anti-enumeration" do
     test "an email with an existing account and one without behave identically" do
       known = user_fixture()
       unknown_email = unique_email()
 
       expect(MagicLinkNotifierMock, :deliver, 2, fn _email, _url, _locale -> :ok end)
 
-      assert Accounts.deliver_magic_link(known.email, unique_ip(), & &1) ==
-               Accounts.deliver_magic_link(unknown_email, unique_ip(), & &1)
+      assert Accounts.deliver_magic_link(known.email, unique_ip(), "fr", & &1) ==
+               Accounts.deliver_magic_link(unknown_email, unique_ip(), "fr", & &1)
     end
   end
 
-  describe "deliver_magic_link/3 error case: notifier failure" do
+  describe "deliver_magic_link/4 error case: notifier failure" do
     test "is swallowed: the facade still returns :ok and the generated token stays redeemable" do
       email = unique_email()
 
@@ -266,18 +264,18 @@ defmodule Amanogawa.AccountsTest do
         token
       end
 
-      assert :ok = Accounts.deliver_magic_link(email, unique_ip(), capture_token)
+      assert :ok = Accounts.deliver_magic_link(email, unique_ip(), "fr", capture_token)
 
       assert_receive {:token, token}
       assert {:ok, %User{email: ^email}} = Accounts.redeem_magic_link_token(token)
     end
   end
 
-  describe "deliver_magic_link/3 error case: invalid email" do
+  describe "deliver_magic_link/4 error case: invalid email" do
     test "is rejected before throttle or notifier: neither counter is consumed" do
       ip = unique_ip()
 
-      assert {:error, changeset} = Accounts.deliver_magic_link("sans-arobase", ip, & &1)
+      assert {:error, changeset} = Accounts.deliver_magic_link("sans-arobase", ip, "fr", & &1)
       assert "must be a valid email address" in errors_on(changeset).email
       assert Repo.aggregate(MagicLinkToken, :count) == 0
 
@@ -286,45 +284,45 @@ defmodule Amanogawa.AccountsTest do
       expect(MagicLinkNotifierMock, :deliver, 5, fn _e, _u, _l -> :ok end)
 
       for _n <- 1..5 do
-        assert :ok = Accounts.deliver_magic_link(unique_email(), ip, & &1)
+        assert :ok = Accounts.deliver_magic_link(unique_email(), ip, "fr", & &1)
       end
     end
   end
 
-  describe "deliver_magic_link/3 limit case: IP throttle" do
+  describe "deliver_magic_link/4 limit case: IP throttle" do
     test "the 6th request from the same IP is denied without a token or a notifier call" do
       ip = unique_ip()
       expect(MagicLinkNotifierMock, :deliver, 5, fn _e, _u, _l -> :ok end)
 
       for _n <- 1..5 do
-        assert :ok = Accounts.deliver_magic_link(unique_email(), ip, & &1)
+        assert :ok = Accounts.deliver_magic_link(unique_email(), ip, "fr", & &1)
       end
 
       count_before = Repo.aggregate(MagicLinkToken, :count)
-      assert {:error, :rate_limited} = Accounts.deliver_magic_link(unique_email(), ip, & &1)
+      assert {:error, :rate_limited} = Accounts.deliver_magic_link(unique_email(), ip, "fr", & &1)
       assert Repo.aggregate(MagicLinkToken, :count) == count_before
     end
   end
 
-  describe "deliver_magic_link/3 limit case: email throttle" do
+  describe "deliver_magic_link/4 limit case: email throttle" do
     test "the 6th request for the same email (any casing) from different IPs is denied" do
       email = "Person@Example.com"
       expect(MagicLinkNotifierMock, :deliver, 5, fn _e, _u, _l -> :ok end)
 
       for _n <- 1..5 do
-        assert :ok = Accounts.deliver_magic_link(String.upcase(email), unique_ip(), & &1)
+        assert :ok = Accounts.deliver_magic_link(String.upcase(email), unique_ip(), "fr", & &1)
       end
 
       count_before = Repo.aggregate(MagicLinkToken, :count)
 
       assert {:error, :rate_limited} =
-               Accounts.deliver_magic_link(String.downcase(email), unique_ip(), & &1)
+               Accounts.deliver_magic_link(String.downcase(email), unique_ip(), "fr", & &1)
 
       assert Repo.aggregate(MagicLinkToken, :count) == count_before
     end
   end
 
-  describe "deliver_magic_link/3 property: composition with #030" do
+  describe "deliver_magic_link/4 property: composition with #030" do
     property "the URL handed to the notifier always authenticates the normalized email it was issued for" do
       stub(MagicLinkNotifierMock, :deliver, fn _email, url, _locale ->
         send(self(), {:url, url})
@@ -335,7 +333,7 @@ defmodule Amanogawa.AccountsTest do
                 domain <- email_domain_part() do
         email = "#{local}@#{domain}"
 
-        assert :ok = Accounts.deliver_magic_link(email, unique_ip(), & &1)
+        assert :ok = Accounts.deliver_magic_link(email, unique_ip(), "fr", & &1)
         assert_receive {:url, token}
         assert {:ok, %User{email: normalized_email}} = Accounts.redeem_magic_link_token(token)
         assert normalized_email == User.normalize_email(email)
@@ -371,13 +369,40 @@ defmodule Amanogawa.AccountsTest do
     end
   end
 
+  describe "get_user_and_session_token/1" do
+    test "happy path: restitutes the user and the exact row the token matched, in one call" do
+      user = user_fixture()
+      {clear_token, session_token} = session_token_fixture(user_id: user.id)
+
+      assert {resolved_user, resolved_token} =
+               Accounts.get_user_and_session_token(clear_token)
+
+      assert resolved_user.id == user.id
+      assert resolved_token.id == session_token.id
+      assert resolved_token.inserted_at == session_token.inserted_at
+    end
+
+    test "error case: an unknown, empty, or non-binary token resolves to nil without raising" do
+      assert Accounts.get_user_and_session_token("not-a-real-token") == nil
+      assert Accounts.get_user_and_session_token("") == nil
+      assert Accounts.get_user_and_session_token(nil) == nil
+    end
+
+    test "limit case: a token just over 60 days old resolves to nil (never renewable)" do
+      inserted_at = DateTime.add(DateTime.utc_now(), -60 * 24 * 60 * 60 - 1, :second)
+      {clear_token, _session_token} = session_token_fixture(inserted_at: inserted_at)
+
+      assert Accounts.get_user_and_session_token(clear_token) == nil
+    end
+  end
+
   describe "renew_session_token/1 (edge case: sliding expiration)" do
-    test "a token older than 7 days is replaced by a new one and the old one is invalidated" do
+    test "a row older than 7 days is replaced by a new one and the old one is invalidated" do
       inserted_at = DateTime.add(DateTime.utc_now(), -8, :day)
       {clear_token, session_token} = session_token_fixture(inserted_at: inserted_at)
 
       assert {:ok, {new_clear_token, new_session_token}} =
-               Accounts.renew_session_token(clear_token)
+               Accounts.renew_session_token(session_token)
 
       refute new_clear_token == clear_token
       refute new_session_token.id == session_token.id
@@ -386,16 +411,54 @@ defmodule Amanogawa.AccountsTest do
       assert Repo.aggregate(SessionToken, :count) == 1
     end
 
-    test "a recent token is left unchanged" do
-      {clear_token, _session_token} = session_token_fixture()
+    test "a recent row is left unchanged" do
+      {clear_token, session_token} = session_token_fixture()
 
-      assert :unchanged = Accounts.renew_session_token(clear_token)
+      assert :unchanged = Accounts.renew_session_token(session_token)
       assert Accounts.get_user_by_session_token(clear_token) != nil
       assert Repo.aggregate(SessionToken, :count) == 1
     end
 
-    test "an unknown token is left unchanged" do
-      assert :unchanged = Accounts.renew_session_token("unknown")
+    test "an already-deleted row is left unchanged, no replacement is minted" do
+      inserted_at = DateTime.add(DateTime.utc_now(), -8, :day)
+      {_clear_token, session_token} = session_token_fixture(inserted_at: inserted_at)
+      :ok = Accounts.revoke_session_token(%User{id: session_token.user_id}, session_token.id)
+
+      assert :unchanged = Accounts.renew_session_token(session_token)
+      assert Repo.aggregate(SessionToken, :count) == 0
+    end
+  end
+
+  describe "renew_session_token/1 (error case: expired session, defense in depth)" do
+    test "a 61-day-old row handed directly to renew is never resurrected into a fresh session" do
+      inserted_at = DateTime.add(DateTime.utc_now(), -61, :day)
+      {clear_token, session_token} = session_token_fixture(inserted_at: inserted_at)
+
+      # The caller contract is to resolve first (which already refuses an
+      # expired token); even a caller that skips it cannot renew one.
+      assert :unchanged = Accounts.renew_session_token(session_token)
+
+      assert Repo.aggregate(SessionToken, :count) == 1
+      assert Accounts.get_user_by_session_token(clear_token) == nil
+      assert Accounts.get_user_and_session_token(clear_token) == nil
+    end
+  end
+
+  describe "renew_session_token/1 (limit case: two concurrent renewals)" do
+    test "exactly one of two concurrent renewals of the same row wins, the other observes :unchanged, never a crash" do
+      inserted_at = DateTime.add(DateTime.utc_now(), -8, :day)
+      {_clear_token, session_token} = session_token_fixture(inserted_at: inserted_at)
+
+      results =
+        [
+          Task.async(fn -> Accounts.renew_session_token(session_token) end),
+          Task.async(fn -> Accounts.renew_session_token(session_token) end)
+        ]
+        |> Task.await_many()
+
+      assert Enum.count(results, &match?({:ok, {_clear, %SessionToken{}}}, &1)) == 1
+      assert Enum.count(results, &(&1 == :unchanged)) == 1
+      assert Repo.aggregate(SessionToken, :count) == 1
     end
   end
 
@@ -455,15 +518,10 @@ defmodule Amanogawa.AccountsTest do
     end
   end
 
-  describe "Session module constants and error case: non-binary renew input" do
+  describe "Session module constants" do
     test "validity_days/0 and renewal_threshold_days/0 expose the documented windows" do
       assert Session.validity_days() == 60
       assert Session.renewal_threshold_days() == 7
-    end
-
-    test "renew_session_token/1 on a non-binary value is left unchanged without raising" do
-      assert :unchanged = Accounts.renew_session_token(nil)
-      assert :unchanged = Accounts.renew_session_token(123)
     end
   end
 
@@ -490,9 +548,29 @@ defmodule Amanogawa.AccountsTest do
       assert export.account.email == user.email
       assert export.account.inserted_at == user.inserted_at
       assert [%{inserted_at: _}] = export.sessions
+      assert export.pending_magic_link == nil
 
       refute contains_value?(export, clear_token)
       refute contains_key?(export, :token_hash)
+    end
+
+    test "surfaces the date of a pending magic link request, never its token" do
+      user = user_fixture()
+      {clear_token, magic_link_token} = magic_link_token_fixture(email: user.email)
+
+      export = Accounts.export_user_data(user)
+
+      assert export.pending_magic_link == %{requested_at: magic_link_token.inserted_at}
+      refute contains_value?(export, clear_token)
+      refute contains_key?(export, :token_hash)
+    end
+
+    test "edge case: an expired magic link request is no longer pending" do
+      user = user_fixture()
+      expired_at = DateTime.add(DateTime.utc_now(), -20 * 60, :second)
+      magic_link_token_fixture(email: user.email, inserted_at: expired_at)
+
+      assert Accounts.export_user_data(user).pending_magic_link == nil
     end
   end
 

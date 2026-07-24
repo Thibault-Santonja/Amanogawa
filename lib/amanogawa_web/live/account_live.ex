@@ -121,7 +121,10 @@ defmodule AmanogawaWeb.AccountLive do
   def handle_event("confirm_delete_account", %{"confirmation" => confirmation}, socket) do
     user = socket.assigns.current_scope.user
 
-    if String.trim(confirmation) == user.email do
+    # Same normalization the domain applies to every stored email (trim +
+    # downcase): the confirmation checks the visitor knows their address,
+    # not that they can reproduce its canonical casing.
+    if Accounts.normalize_email(confirmation) == user.email do
       current_session_id = socket.assigns.current_session_id
 
       # Snapshot the user's OTHER active sessions before the delete
@@ -184,7 +187,11 @@ defmodule AmanogawaWeb.AccountLive do
       </p>
       <p class="text-text-muted">
         <span class="font-semibold text-text">{gettext("Compte créé le :")}</span>
-        {Calendar.strftime(@current_scope.user.inserted_at, "%d/%m/%Y")}
+        <%!-- The strftime pattern itself is a translation (same technique
+        as the timeline's axis templates): "23/07/2026" reads as
+        month/day to an English speaker, so each locale supplies its own
+        date format. --%>
+        {Calendar.strftime(@current_scope.user.inserted_at, gettext("%d/%m/%Y"))}
       </p>
 
       <.section title={gettext("Sessions actives")}>
@@ -195,7 +202,7 @@ defmodule AmanogawaWeb.AccountLive do
             class="flex items-center justify-between rounded-md border border-border bg-surface p-3"
           >
             <div>
-              <span>{Calendar.strftime(row.inserted_at, "%d/%m/%Y %H:%M")}</span>
+              <span>{Calendar.strftime(row.inserted_at, gettext("%d/%m/%Y %H:%M"))}</span>
               <span
                 :if={row.current?}
                 class="ml-2 rounded bg-accent/20 px-2 py-0.5 text-xs text-accent"
@@ -230,10 +237,11 @@ defmodule AmanogawaWeb.AccountLive do
         </.button>
 
         <form :if={@confirm_delete?} phx-submit="confirm_delete_account" class="mt-2 max-w-sm">
-          <label class="mb-1 block text-sm text-text-muted">
+          <label for="delete-confirmation" class="mb-1 block text-sm text-text-muted">
             {gettext("Pour confirmer, saisissez votre adresse email :")}
           </label>
           <input
+            id="delete-confirmation"
             type="email"
             name="confirmation"
             required

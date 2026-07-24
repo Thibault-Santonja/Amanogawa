@@ -15,6 +15,7 @@ defmodule AmanogawaWeb.LoginLive do
   use AmanogawaWeb, :live_view
 
   alias Amanogawa.Accounts
+  alias AmanogawaWeb.ClientIp
 
   @impl true
   def mount(params, _session, socket) do
@@ -24,28 +25,18 @@ defmodule AmanogawaWeb.LoginLive do
       locale = resolve_locale(params["locale"])
       Gettext.put_locale(AmanogawaWeb.Gettext, locale)
 
+      # `AmanogawaWeb.ClientIp.peer_ip/1`: `nil` on a disconnected/mocked
+      # socket (no real client to throttle), the resolved client address
+      # otherwise (forwarding headers unwound against the trusted proxy
+      # list, peer fallback: behind a reverse proxy the raw peer would be
+      # the proxy itself, one shared throttle bucket for everyone).
       {:ok,
        socket
        |> assign(:page_title, gettext("Connexion"))
-       |> assign(:peer_ip, peer_ip(socket))
+       |> assign(:peer_ip, ClientIp.peer_ip(socket))
        |> assign(:locale, locale)
        |> assign(:sent?, false)
        |> assign(:form, to_form(%{"email" => ""}, as: "login"))}
-    end
-  end
-
-  # Same guard as `AmanogawaWeb.ExploreLive.peer_ip/1`: `nil` on a
-  # disconnected/mocked socket (no real client to throttle), the raw
-  # socket peer otherwise (LiveView sockets never go through the HTTP
-  # `RemoteIp` plug).
-  defp peer_ip(%{private: private} = socket) do
-    if Map.has_key?(private, :connect_info) do
-      case get_connect_info(socket, :peer_data) do
-        %{address: address} -> address
-        _other -> nil
-      end
-    else
-      nil
     end
   end
 
@@ -92,13 +83,13 @@ defmodule AmanogawaWeb.LoginLive do
     end
   end
 
-  defp deliver(%{assigns: %{peer_ip: nil}}, email, magic_link_url_fun) do
-    Accounts.deliver_magic_link(email, "unknown", magic_link_url_fun)
+  defp deliver(%{assigns: %{peer_ip: nil, locale: locale}}, email, magic_link_url_fun) do
+    Accounts.deliver_magic_link(email, "unknown", locale, magic_link_url_fun)
   end
 
-  defp deliver(%{assigns: %{peer_ip: peer_ip}}, email, magic_link_url_fun) do
+  defp deliver(%{assigns: %{peer_ip: peer_ip, locale: locale}}, email, magic_link_url_fun) do
     ip = peer_ip |> :inet.ntoa() |> to_string()
-    Accounts.deliver_magic_link(email, ip, magic_link_url_fun)
+    Accounts.deliver_magic_link(email, ip, locale, magic_link_url_fun)
   end
 
   @impl true

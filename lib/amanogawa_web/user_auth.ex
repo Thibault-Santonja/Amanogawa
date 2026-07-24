@@ -110,10 +110,29 @@ defmodule AmanogawaWeb.UserAuth do
   pipeline (after `:fetch_session`). Always assigns a `Scope`, `user`
   `nil` for an anonymous visitor: never assigns a bare `nil`. Slides the
   session forward when it is old enough (`Amanogawa.Accounts.
-  renew_session_token/1`), updating the cookie in the same response. One
-  query per navigation: the resolution itself
-  (`get_user_by_session_token/1`); renewal is skipped entirely when the
-  session was not renewed.
+  renew_session_token/1`), updating the cookie in the same response.
+
+  One query per navigation: the resolution
+  (`Accounts.get_user_and_session_token/1`) returns the user AND the
+  session token row it matched, so the renewal decision (compare the
+  row's `inserted_at` against the threshold) costs no second query.
+  Renewal only ever happens when that resolution succeeded: a token that
+  resolved to nothing (unknown, revoked, or past the 60-day validity
+  window) is never renewed, so presenting an expired cookie can never
+  resurrect a dead session (it simply yields an anonymous scope, on this
+  and every subsequent request).
+
+  When the session IS renewed, `"disconnect"` is broadcast on the OLD
+  `live_socket_id` (registered via `Plug.Conn.register_before_send/2`,
+  as close to the response as a plug can get): LiveView sockets mounted
+  under the previous session token would otherwise keep running,
+  unrevocable from #033's account page (their row no longer exists),
+  until their next full navigation. Disconnected tabs reconnect on their
+  own and pick up the cookie carrying the new token. Known limit: a tab
+  whose reconnect races the very response that sets the new cookie can
+  present the old (just-deleted) token once and remount anonymous until
+  its next reload; the browser applies `Set-Cookie` on response arrival,
+  so the window is the response's own transit time.
   """
   @spec fetch_current_scope_for_user(Plug.Conn.t(), keyword()) :: Plug.Conn.t()
   def fetch_current_scope_for_user(conn, _opts) do
@@ -122,9 +141,15 @@ defmodule AmanogawaWeb.UserAuth do
         assign(conn, :current_scope, Scope.for_user(nil))
 
       clear_token ->
-        conn
-        |> assign(:current_scope, Scope.for_user(Accounts.get_user_by_session_token(clear_token)))
-        |> maybe_renew_session(clear_token)
+        case Accounts.get_user_and_session_token(clear_token) do
+          nil ->
+            assign(conn, :current_scope, Scope.for_user(nil))
+
+          {user, session_token} ->
+            conn
+            |> assign(:current_scope, Scope.for_user(user))
+            |> maybe_renew_session(session_token)
+        end
     end
   end
 
@@ -196,12 +221,26 @@ defmodule AmanogawaWeb.UserAuth do
     end)
   end
 
-  defp maybe_renew_session(conn, clear_token) do
-    case Accounts.renew_session_token(clear_token) do
+  # Renewal is atomic on the old row (`Amanogawa.Accounts.Session.renew/1`):
+  # two racing requests both presenting the same old-enough token never
+  # raise and never both mint a replacement, the loser simply gets
+  # `:unchanged` and keeps serving the old token until the winner's
+  # response lands the new cookie.
+  defp maybe_renew_session(conn, session_token) do
+    case Accounts.renew_session_token(session_token) do
       {:ok, {new_clear_token, new_session_token}} ->
+        old_live_socket_id = get_session(conn, "live_socket_id")
+
         conn
         |> put_session(@user_session_token_key, new_clear_token)
         |> put_session("live_socket_id", live_socket_id(new_session_token.id))
+        |> register_before_send(fn conn ->
+          # See fetch_current_scope_for_user/2's doc: sockets mounted
+          # under the old token must not outlive it unrevocably; they
+          # reconnect with the cookie this very response carries.
+          disconnect_session(old_live_socket_id)
+          conn
+        end)
 
       :unchanged ->
         conn

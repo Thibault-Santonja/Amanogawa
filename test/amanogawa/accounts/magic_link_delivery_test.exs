@@ -1,6 +1,6 @@
 defmodule Amanogawa.Accounts.MagicLinkDeliveryTest do
   @moduledoc """
-  Integration test for `Amanogawa.Accounts.deliver_magic_link/3` through
+  Integration test for `Amanogawa.Accounts.deliver_magic_link/4` through
   the real `Amanogawa.Accounts.MagicLinkNotifier.Mailer` adapter (issue
   #031's own "chaîne complète avec l'adaptateur Swoosh réel"), instead of
   `Amanogawa.MagicLinkNotifierMock` (`config/test.exs`'s default). Kept
@@ -26,8 +26,15 @@ defmodule Amanogawa.Accounts.MagicLinkDeliveryTest do
   test "the URL captured from the real delivered email authenticates its issuing email" do
     email = "person-#{System.unique_integer([:positive])}@example.com"
 
+    # A unique IP, never a fixed literal: the IP throttle counter is a
+    # single process-wide Hammer table, so a fixed "10.0.0.1" here could
+    # collide with `Amanogawa.AccountsTest`'s own generated "10.0.0.N"
+    # buckets (its quota-exhausting tests then flake depending on test
+    # order, reproduced with --seed 1).
+    ip = "192.0.2.#{System.unique_integer([:positive, :monotonic])}"
+
     assert :ok =
-             Accounts.deliver_magic_link(email, "10.0.0.1", fn token ->
+             Accounts.deliver_magic_link(email, ip, "fr", fn token ->
                "https://amanogawa.example/connexion/#{token}"
              end)
 

@@ -25,6 +25,24 @@ defmodule AmanogawaWeb.AccountLiveTest do
     test "anonymous, /compte redirects to /connexion", %{conn: conn} do
       assert {:error, {:redirect, %{to: "/connexion"}}} = live(conn, ~p"/compte")
     end
+
+    test "anonymous, /compte stashes the return path: logging in comes back to /compte", %{
+      conn: conn
+    } do
+      # The initial GET goes through the :authenticated pipeline's
+      # require_authenticated_user plug, which stores "user_return_to"
+      # before redirecting (the on_mount hook alone never could: it runs
+      # on the websocket join, after the HTTP response is long gone).
+      conn = get(conn, ~p"/compte")
+      assert redirected_to(conn) == ~p"/connexion"
+      assert get_session(conn, "user_return_to") == "/compte"
+
+      {:ok, {clear_token, _magic_link}} =
+        Amanogawa.Accounts.generate_magic_link_token(unique_email())
+
+      conn = post(conn, ~p"/connexion/#{clear_token}")
+      assert redirected_to(conn) == "/compte"
+    end
   end
 
   describe "revocation" do
@@ -88,6 +106,33 @@ defmodule AmanogawaWeb.AccountLiveTest do
 
       lv
       |> form("form", %{"confirmation" => user.email})
+      |> render_submit()
+
+      assert_redirect(lv, "/")
+      assert Repo.aggregate(Amanogawa.Accounts.User, :count) == 0
+    end
+
+    test "the confirmation input is labelled and associated (for/id)", %{conn: conn} do
+      user = user_fixture()
+      conn = log_in_user(conn, user)
+
+      {:ok, lv, _html} = live(conn, ~p"/compte")
+      lv |> element("button", "Supprimer mon compte") |> render_click()
+
+      assert has_element?(lv, ~s(label[for="delete-confirmation"]))
+      assert has_element?(lv, ~s(input#delete-confirmation[name="confirmation"]))
+    end
+
+    test "edge case: the confirmation is case- and whitespace-insensitive, like every other email entry point",
+         %{conn: conn} do
+      user = user_fixture(email: "person@example.com")
+      conn = log_in_user(conn, user)
+
+      {:ok, lv, _html} = live(conn, ~p"/compte")
+      lv |> element("button", "Supprimer mon compte") |> render_click()
+
+      lv
+      |> form("form", %{"confirmation" => "  Person@Example.COM  "})
       |> render_submit()
 
       assert_redirect(lv, "/")

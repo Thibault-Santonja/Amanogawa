@@ -20,8 +20,15 @@ if System.get_env("PHX_SERVER") do
   config :amanogawa, AmanogawaWeb.Endpoint, server: true
 end
 
-config :amanogawa, AmanogawaWeb.Endpoint,
-  http: [port: String.to_integer(System.get_env("PORT", "4000"))]
+# HTTP port override, deliberately NOT applied to :test: config/test.exs
+# pins port 4002 (the E2E suite's real listener) and an unconditional
+# default here would silently override it back to 4000, making a plain
+# `mix test` collide with any dev server already listening there. :dev
+# and :prod keep the same PORT-with-4000-default contract as before.
+if config_env() in [:dev, :prod] do
+  config :amanogawa, AmanogawaWeb.Endpoint,
+    http: [port: String.to_integer(System.get_env("PORT", "4000"))]
+end
 
 # List of trusted reverse-proxy IPs/CIDRs the `RemoteIp` plug
 # (`AmanogawaWeb.Endpoint`) trusts to set `X-Forwarded-For`/`Forwarded`

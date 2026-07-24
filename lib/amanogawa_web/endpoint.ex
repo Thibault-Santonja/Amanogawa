@@ -31,15 +31,20 @@ defmodule AmanogawaWeb.Endpoint do
     secure: Mix.env() == :prod
   ]
 
-  # `:peer_data` is exposed to LiveView (`get_connect_info/2`) so
-  # `AmanogawaWeb.ExploreLive` can key its own selection rate limiter
-  # (issue security-review #6) on the socket's peer address, entirely
-  # separate from the HTTP `RemoteIp` plug below: LiveView sockets never go
-  # through the endpoint's HTTP plug pipeline, so `RemoteIp` never runs on
-  # them, and `:peer_data` here is always the raw connecting peer.
+  # `:peer_data` and `:x_headers` are exposed to LiveView
+  # (`get_connect_info/2`) so `AmanogawaWeb.ClientIp` can resolve the real
+  # client address for the per-socket rate limiters (`AmanogawaWeb.
+  # ExploreLive`'s selection throttle, issue security-review #6, and
+  # `AmanogawaWeb.LoginLive`'s magic link throttle): LiveView sockets
+  # never go through the endpoint's HTTP plug pipeline, so the `RemoteIp`
+  # plug below never runs on them, `:peer_data` is always the raw
+  # connecting peer (behind a reverse proxy: the proxy itself, one shared
+  # bucket for every real client), and `:x_headers` carries the
+  # forwarding headers `AmanogawaWeb.ClientIp` unwinds with the same
+  # trusted-proxy list the HTTP plug uses.
   socket "/live", Phoenix.LiveView.Socket,
-    websocket: [connect_info: [:peer_data, session: @session_options]],
-    longpoll: [connect_info: [:peer_data, session: @session_options]]
+    websocket: [connect_info: [:peer_data, :x_headers, session: @session_options]],
+    longpoll: [connect_info: [:peer_data, :x_headers, session: @session_options]]
 
   # Serve at "/" the static files from "priv/static" directory.
   #
@@ -80,7 +85,17 @@ defmodule AmanogawaWeb.Endpoint do
   # is never set.
   plug RemoteIp, proxies: {__MODULE__, :trusted_proxies, []}
 
-  plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
+  # Dynamic log level (`Phoenix.Logger` reads the `:log` MFA per request):
+  # `telemetry_log_level/1` disables the request log line entirely for
+  # `/connexion/<token>` (GET and POST), whose PATH carries the clear
+  # magic link token; a production log would otherwise retain a
+  # credential valid for up to 15 minutes ("GET /connexion/<token>").
+  # Parameter-level filtering (`config :phoenix, :filter_parameters`,
+  # config/config.exs) cannot help here: the token is a path segment,
+  # not a parameter, so the whole line has to go.
+  plug Plug.Telemetry,
+    event_prefix: [:phoenix, :endpoint],
+    log: {__MODULE__, :telemetry_log_level, []}
 
   plug Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],
@@ -115,4 +130,15 @@ defmodule AmanogawaWeb.Endpoint do
   """
   @spec trusted_proxies() :: [String.t()]
   def trusted_proxies, do: Application.get_env(:amanogawa, :trusted_proxies, [])
+
+  @doc """
+  Per-request log level for the `Plug.Telemetry` plug above: `false`
+  (no request log line at all) for `/connexion/<token>`, whose path
+  carries the clear magic link token (GET confirmation page and POST
+  redemption alike), the default `:info` for everything else. Public
+  because `Phoenix.Logger` invokes it as an MFA on every request.
+  """
+  @spec telemetry_log_level(Plug.Conn.t()) :: false | Logger.level()
+  def telemetry_log_level(%Plug.Conn{path_info: ["connexion", _token]}), do: false
+  def telemetry_log_level(%Plug.Conn{}), do: :info
 end

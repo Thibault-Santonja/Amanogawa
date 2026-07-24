@@ -36,7 +36,7 @@ defmodule Amanogawa.Accounts do
     through it, so casing/whitespace never split one real address into
     two accounts or two token lineages.
   * **Anti-enumeration is structural, not a response-shaping trick**
-    (issue #031). `deliver_magic_link/3` returns the exact same `:ok`
+    (issue #031). `deliver_magic_link/4` returns the exact same `:ok`
     whether or not `email` already has an account, hits the notifier
     exactly once either way, and a delivery failure is logged, never
     surfaced to the caller: the only externally distinguishable
@@ -114,8 +114,14 @@ defmodule Amanogawa.Accounts do
   (`Application.get_env(:amanogawa, :magic_link_notifier)`, a Mox mock
   in test).
 
-  `magic_link_url_fun` is a `(clear_token -> url)` function supplied by
-  the web caller: this context never depends on the router (the same
+  `locale` is the locale the email is rendered in, passed as an explicit
+  value by the web caller (which owns locale resolution,
+  `AmanogawaWeb.Plugs.SetLocale` / `AmanogawaWeb.LoginLive`): this
+  domain context never reads the web layer's Gettext state, and delivery
+  never depends on the calling process's own locale, so it stays correct
+  even if delivery ever becomes asynchronous. `magic_link_url_fun` is a
+  `(clear_token -> url)` function supplied by the web caller for the
+  same reason: this context never depends on the router (the same
   inversion `phx.gen.auth` uses).
 
   Returns `:ok` whether or not `email` already has an account
@@ -125,25 +131,17 @@ defmodule Amanogawa.Accounts do
   invalidates it anyway). Returns `{:error, :rate_limited}` when either
   throttle counter is exhausted, `{:error, changeset}` when `email` is
   syntactically invalid (not a secret: safe to show back to a form).
-
-  The locale used to render the email is read once, synchronously, from
-  the calling process's own Gettext state
-  (`Gettext.get_locale(AmanogawaWeb.Gettext)`, set for the current
-  request by `AmanogawaWeb.Plugs.SetLocale`) and passed to the notifier
-  as an explicit value: delivery itself never depends on the calling
-  process past this point, so it stays correct even if delivery ever
-  becomes asynchronous.
   """
-  @spec deliver_magic_link(String.t(), String.t(), (String.t() -> String.t())) ::
+  @spec deliver_magic_link(String.t(), String.t(), String.t(), (String.t() -> String.t())) ::
           :ok | {:error, :rate_limited} | {:error, Ecto.Changeset.t()}
-  def deliver_magic_link(email, ip, magic_link_url_fun) do
+  def deliver_magic_link(email, ip, locale, magic_link_url_fun) do
     case validate_email(email) do
       {:error, changeset} ->
         {:error, changeset}
 
       :ok ->
         if MagicLinkThrottle.allow?(ip, email) do
-          send_magic_link(email, magic_link_url_fun)
+          send_magic_link(email, locale, magic_link_url_fun)
         else
           {:error, :rate_limited}
         end
@@ -159,13 +157,15 @@ defmodule Amanogawa.Accounts do
   def get_user_by_email(email), do: Repo.get_by(User, email: User.normalize_email(email))
 
   @doc """
-  Deletes every magic link token older than the validity window.
-  Returns the number of rows deleted. Called daily by
-  `Amanogawa.Accounts.Workers.PurgeExpiredTokens` (Oban cron); hygiene
-  only, see the moduledoc.
+  Normalizes an email exactly the way this context stores and looks one
+  up (`Amanogawa.Accounts.User.normalize_email/1`: trim, downcase).
+  Exposed on the facade so the web layer can compare a user-typed email
+  against an account's (issue #033's deletion confirmation) with the
+  same normalization the domain applies, without reaching the internal
+  `User` module (`.claude/rules/architecture.md`).
   """
-  @spec purge_expired_magic_link_tokens() :: non_neg_integer()
-  defdelegate purge_expired_magic_link_tokens, to: MagicLink, as: :purge_expired
+  @spec normalize_email(String.t()) :: String.t()
+  defdelegate normalize_email(email), to: User
 
   @doc """
   Creates a server-side session for `user` (issue #032,
@@ -186,6 +186,18 @@ defmodule Amanogawa.Accounts do
   defdelegate get_user_by_session_token(clear_token), to: Session, as: :get_user
 
   @doc """
+  Resolves a clear session token to its user AND the session token row
+  it matched, within the 60-day validity window, in one query
+  (`Amanogawa.Accounts.Session.get_user_and_token/1`). The returned row
+  is what `renew_session_token/1` takes, so the caller
+  (`AmanogawaWeb.UserAuth.fetch_current_scope_for_user/2`) never needs a
+  second lookup to decide about sliding renewal. Never raises: an
+  altered, empty, unknown, or expired token resolves to `nil`.
+  """
+  @spec get_user_and_session_token(String.t()) :: {User.t(), SessionToken.t()} | nil
+  defdelegate get_user_and_session_token(clear_token), to: Session, as: :get_user_and_token
+
+  @doc """
   Deletes the session matching `clear_token`, if any (server-side
   revocation: logout, or the account-page revocation of #033).
   Idempotent.
@@ -194,14 +206,18 @@ defmodule Amanogawa.Accounts do
   defdelegate delete_session_token(clear_token), to: Session, as: :delete
 
   @doc """
-  Slides a session forward if it is older than 7 days (`Amanogawa.
+  Slides a session forward if the already-resolved row
+  (`get_user_and_session_token/1`) is older than 7 days (`Amanogawa.
   Accounts.Session.renewal_threshold_days/0`): returns `{:ok,
   {new_clear_token, new_session_token}}` when renewed, `:unchanged`
-  otherwise. Called from `AmanogawaWeb.UserAuth.
-  fetch_current_scope_for_user/2` on every authenticated request.
+  otherwise (still recent, already expired, or concurrently renewed:
+  the replacement is atomic, see `Amanogawa.Accounts.Session.renew/1`).
+  Called from `AmanogawaWeb.UserAuth.fetch_current_scope_for_user/2` on
+  every authenticated request.
   """
-  @spec renew_session_token(String.t()) :: {:ok, {String.t(), SessionToken.t()}} | :unchanged
-  defdelegate renew_session_token(clear_token), to: Session, as: :renew
+  @spec renew_session_token(SessionToken.t()) ::
+          {:ok, {String.t(), SessionToken.t()}} | :unchanged
+  defdelegate renew_session_token(session_token), to: Session, as: :renew
 
   @doc """
   `true` when `clear_token` is the one `session_token` was created from,
@@ -257,14 +273,19 @@ defmodule Amanogawa.Accounts do
   A versioned, serializable map of everything the database knows about
   `user` (issue #033, RGPD article 20 portability): `%{format_version:
   1, exported_at: ..., account: %{email:, inserted_at:}, sessions: [%{
-  inserted_at:}, ...]}`.
+  inserted_at:}, ...], pending_magic_link: %{requested_at:} | nil}`.
 
-  Never includes a `token_hash` or a clear token, in either the account
-  or the sessions list: an export is a right the user exercises on
-  themselves, but a credential is still not "data about the account" in
-  the sense this key means. `format_version` exists so F08 can add a
-  `contributions` key later without breaking a consumer that already
-  parsed an export under this shape.
+  `pending_magic_link` carries the request date of the still-valid
+  (15-minute window) magic link token issued for the user's email, or
+  `nil` when none is pending: a pending sign-in request is data the
+  database holds about this person, so the export must surface it.
+
+  Never includes a `token_hash` or a clear token, in the account, the
+  sessions list, or the pending magic link entry: an export is a right
+  the user exercises on themselves, but a credential is still not "data
+  about the account" in the sense this key means. `format_version`
+  exists so F08 can add a `contributions` key later without breaking a
+  consumer that already parsed an export under this shape.
   """
   @spec export_user_data(User.t()) :: map()
   def export_user_data(%User{} = user) do
@@ -272,7 +293,8 @@ defmodule Amanogawa.Accounts do
       format_version: 1,
       exported_at: DateTime.utc_now(),
       account: %{email: user.email, inserted_at: user.inserted_at},
-      sessions: Enum.map(list_session_tokens(user), &%{inserted_at: &1.inserted_at})
+      sessions: Enum.map(list_session_tokens(user), &%{inserted_at: &1.inserted_at}),
+      pending_magic_link: pending_magic_link(user.email)
     }
   end
 
@@ -306,6 +328,13 @@ defmodule Amanogawa.Accounts do
     :ok
   end
 
+  defp pending_magic_link(email) do
+    case MagicLink.pending_request_at(email) do
+      nil -> nil
+      requested_at -> %{requested_at: requested_at}
+    end
+  end
+
   defp validate_email(email) do
     changeset = User.changeset(%User{}, %{email: email})
 
@@ -320,22 +349,31 @@ defmodule Amanogawa.Accounts do
     Repo.get_by!(User, email: email)
   end
 
-  defp send_magic_link(email, magic_link_url_fun) do
+  defp send_magic_link(email, locale, magic_link_url_fun) do
     {:ok, {clear_token, _token}} = MagicLink.create(email)
 
     normalized_email = User.normalize_email(email)
     magic_link_url = magic_link_url_fun.(clear_token)
-    locale = Gettext.get_locale(AmanogawaWeb.Gettext)
 
     case notifier().deliver(normalized_email, magic_link_url, locale) do
       :ok ->
         :ok
 
       {:error, reason} ->
-        Logger.error("magic link delivery failed: #{inspect(reason)}")
+        # Bounded tag only, never `inspect(reason)`: an SMTP error reason
+        # can embed the whole outgoing message (recipient email, magic
+        # link URL), which must never reach the logs.
+        Logger.error("magic link delivery failed: #{delivery_error_tag(reason)}")
         :ok
     end
   end
+
+  # Reduces an arbitrary notifier error reason to a bounded, safe tag: an
+  # atom is logged as-is, an exception by its module name, anything else
+  # (tuples, binaries, whole SMTP transcripts) as an opaque marker.
+  defp delivery_error_tag(reason) when is_atom(reason), do: inspect(reason)
+  defp delivery_error_tag(%struct{}), do: inspect(struct)
+  defp delivery_error_tag(_reason), do: "unexpected error"
 
   defp notifier, do: Application.get_env(:amanogawa, :magic_link_notifier)
 end

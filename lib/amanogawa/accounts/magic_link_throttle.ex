@@ -21,7 +21,7 @@ defmodule Amanogawa.Accounts.MagicLinkThrottle do
   Both counters are hit, in a fixed order (IP, then email), on every
   call: a request denied on one counter is still recorded on the other,
   and a denial of either is a denial of the whole request. This module
-  is called only after `Amanogawa.Accounts.deliver_magic_link/3` has
+  is called only after `Amanogawa.Accounts.deliver_magic_link/4` has
   already validated the email's format, so a syntactically invalid
   email never reaches here at all: neither counter is consumed for it
   (a documented choice; the alternative of always consuming the IP

@@ -189,6 +189,14 @@ config :logger, :default_formatter,
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
 
+# Never log magic link tokens or passwords as request parameters
+# (Phoenix.Logger's "Parameters:" debug line): "token" covers the magic
+# link redemption POST (`AmanogawaWeb.SessionController.create/2`),
+# "password" is Phoenix's own default, kept since overriding this key
+# replaces it. The token-in-path case is handled separately by
+# `AmanogawaWeb.Endpoint.telemetry_log_level/1`.
+config :phoenix, :filter_parameters, ["password", "token"]
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"

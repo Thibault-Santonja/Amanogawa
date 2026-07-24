@@ -93,8 +93,14 @@ defmodule AmanogawaWeb.Router do
   # controller route below reuses the same require_authenticated_user
   # plug (its conn form) rather than the LiveView on_mount, since GET
   # /compte/export is a plain controller action, never a LiveView.
+  #
+  # The LiveView route stacks BOTH gates: the :authenticated pipeline is
+  # what stashes "user_return_to" on the initial anonymous GET (its
+  # `maybe_store_return_to`, so logging in comes back to /compte instead
+  # of /), the on_mount hook is what re-checks on the websocket join,
+  # which never runs the plug pipeline. Neither replaces the other.
   scope "/", AmanogawaWeb do
-    pipe_through :browser
+    pipe_through [:browser, :authenticated]
 
     live_session :require_authenticated_user,
       on_mount: [{AmanogawaWeb.UserAuth, :require_authenticated_user}] do

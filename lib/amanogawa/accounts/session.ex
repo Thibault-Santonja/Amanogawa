@@ -19,17 +19,40 @@ defmodule Amanogawa.Accounts.Session do
     not through a stored expiry column.
   * Sliding renewal: a session older than 7 days
     (`renewal_threshold_days/0`) is replaced by a fresh row (new token,
-    new `inserted_at`) the next time it is resolved, in the same
-    transaction the old row is deleted in
-    (`Amanogawa.Accounts.renew_session_token/1`, called from
-    `AmanogawaWeb.UserAuth.fetch_current_scope_for_user/2`); a session
-    younger than that is left untouched, so an active user is never
-    reissued a token on every single request.
+    new `inserted_at`) the next time it is resolved. The caller resolves
+    first (`get_user_and_token/1`, which returns the matched row so no
+    second lookup is ever needed) and only then calls `renew/1` with
+    that row; `renew/1` itself re-checks the validity window in its
+    delete (defense in depth): an expired session can never be
+    resurrected into a fresh one, even by a caller that skipped the
+    resolution step. A session younger than the threshold is left
+    untouched, so an active user is never reissued a token on every
+    single request.
+  * The replacement inside `renew/1` is atomic on the old row: the
+    delete is keyed on the row id AND the validity window, and the fresh
+    row is only inserted when that delete actually removed a row
+    (`{1, _}`). Two concurrent renewals of the same session therefore
+    never raise (no `Ecto.StaleEntryError`) and never mint two
+    replacement tokens: exactly one wins, the other observes `{0, _}`
+    and reports `:unchanged`.
   * Unlike a magic link token, a session token is repeatable (it
     authenticates every request until it expires or is revoked), so
     `get_user/1` never deletes the row it matched, and no URL-safe
     base64 pre-check is needed: any binary is hashed and compared as-is,
     an unknown or malformed value simply yields no match.
+
+  ## No absolute session lifetime cap (assumed arbitration)
+
+  Sliding renewal means a session that is used at least once every 60
+  days never expires: there is deliberately no absolute cap on total
+  session age (some deployments cap at 90 days or a year regardless of
+  activity). Arbitration from issue #032: for a service holding nothing
+  but an email, forcing a periodic re-login costs more (a magic link
+  email round trip) than it protects, and a stolen cookie is detected
+  through invalidation instead: every renewal invalidates the previous
+  token, so a legitimate client and a thief cannot both keep renewing
+  the same lineage, whichever presents the stale token first is logged
+  out, and the account page (#033) lists and revokes active sessions.
   """
 
   import Ecto.Query
@@ -86,14 +109,35 @@ defmodule Amanogawa.Accounts.Session do
   `nil`, exactly like an expired one.
   """
   @spec get_user(String.t()) :: User.t() | nil
-  def get_user(clear_token) when is_binary(clear_token) do
+  def get_user(clear_token) do
+    case get_user_and_token(clear_token) do
+      {user, _session_token} -> user
+      nil -> nil
+    end
+  end
+
+  @doc """
+  Resolves `clear_token` to its user AND the session token row it
+  matched, within the validity window, in one query.
+
+  The returned row is what lets the caller decide about sliding renewal
+  (`renew/1` takes it directly) without a second lookup: this pair is
+  the whole per-navigation database cost of authentication
+  (`AmanogawaWeb.UserAuth.fetch_current_scope_for_user/2`).
+
+  Never raises: an empty, malformed, unknown, or expired token resolves
+  to `nil`.
+  """
+  @spec get_user_and_token(String.t()) :: {User.t(), SessionToken.t()} | nil
+  def get_user_and_token(clear_token) when is_binary(clear_token) do
     User
     |> join(:inner, [u], t in SessionToken, on: t.user_id == u.id)
     |> where([_u, t], t.token_hash == ^hash(clear_token) and t.inserted_at >= ^expiry_threshold())
+    |> select([u, t], {u, t})
     |> Repo.one()
   end
 
-  def get_user(_clear_token), do: nil
+  def get_user_and_token(_clear_token), do: nil
 
   @doc """
   Deletes the row matching `clear_token`, if any. Idempotent: deleting an
@@ -112,40 +156,49 @@ defmodule Amanogawa.Accounts.Session do
   def delete(_clear_token), do: :ok
 
   @doc """
-  Slides the session forward if `clear_token` resolves to a row older
-  than `renewal_threshold_days/0`: deletes the old row and inserts a
-  fresh one for the same user, in one transaction.
+  Slides the session forward if `session_token` (the row already
+  resolved by `get_user_and_token/1`, never re-fetched here) is older
+  than `renewal_threshold_days/0`: atomically deletes the old row and
+  inserts a fresh one for the same user.
 
   Returns `{:ok, {new_clear_token, new_session_token}}` when renewed,
-  `:unchanged` when the token is unknown or still recent (nothing to do).
-  Only ever called after the caller has already established the token is
-  currently valid (`get_user/1`); does not re-check the validity window
-  itself.
+  `:unchanged` when the row is still recent, already expired, or already
+  gone. The delete is keyed on the row id AND the validity window
+  (defense in depth: an expired row is never replaced by a fresh one,
+  regardless of what the caller resolved), and the fresh row is only
+  created when the delete removed exactly one row, so two concurrent
+  renewals of the same session never raise and never both mint a token.
   """
-  @spec renew(String.t()) :: {:ok, {String.t(), SessionToken.t()}} | :unchanged
-  def renew(clear_token) when is_binary(clear_token) do
-    case get_row(clear_token) do
-      nil -> :unchanged
-      %SessionToken{} = old_token -> maybe_renew(old_token)
-    end
-  end
-
-  def renew(_clear_token), do: :unchanged
-
-  defp maybe_renew(%SessionToken{inserted_at: inserted_at} = old_token) do
+  @spec renew(SessionToken.t()) :: {:ok, {String.t(), SessionToken.t()}} | :unchanged
+  def renew(%SessionToken{inserted_at: inserted_at} = session_token) do
     if DateTime.compare(inserted_at, renewal_threshold()) == :lt do
-      replace(old_token)
+      replace(session_token)
     else
       :unchanged
     end
   end
 
-  defp replace(old_token) do
-    Repo.transaction(fn ->
-      Repo.delete!(old_token)
-      {:ok, {new_clear_token, new_token}} = create(%User{id: old_token.user_id})
-      {new_clear_token, new_token}
-    end)
+  # The delete and the insert share one transaction so a crash between
+  # them cannot leave the user without any session row; the {1, _} guard
+  # is what serializes concurrent renewals (the loser's delete matches
+  # zero rows once the winner's transaction commits).
+  defp replace(%SessionToken{id: id, user_id: user_id}) do
+    {:ok, result} =
+      Repo.transaction(fn ->
+        SessionToken
+        |> where([t], t.id == ^id and t.inserted_at >= ^expiry_threshold())
+        |> Repo.delete_all()
+        |> case do
+          {1, _} ->
+            {:ok, {new_clear_token, new_token}} = create(%User{id: user_id})
+            {:ok, {new_clear_token, new_token}}
+
+          {0, _} ->
+            :unchanged
+        end
+      end)
+
+    result
   end
 
   @doc """
@@ -202,12 +255,6 @@ defmodule Amanogawa.Accounts.Session do
       :error ->
         {:error, :not_found}
     end
-  end
-
-  defp get_row(clear_token) do
-    SessionToken
-    |> where([t], t.token_hash == ^hash(clear_token))
-    |> Repo.one()
   end
 
   defp generate_clear_token do

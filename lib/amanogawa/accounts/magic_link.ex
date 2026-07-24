@@ -123,6 +123,23 @@ defmodule Amanogawa.Accounts.MagicLink do
     :ok
   end
 
+  @doc """
+  The `inserted_at` of the still-valid (15-minute window) magic link
+  token issued for `email` (already normalized by the caller), or `nil`
+  when none is pending. At most one such row can exist (`create/1`
+  invalidates every previous token of the email). Feeds the RGPD export
+  (`Amanogawa.Accounts.export_user_data/1`, issue #033): a pending
+  sign-in request is data about the person who asked for it. Read-only,
+  never consumes or extends the token.
+  """
+  @spec pending_request_at(String.t()) :: DateTime.t() | nil
+  def pending_request_at(email) do
+    MagicLinkToken
+    |> where([t], t.email == ^email and t.inserted_at >= ^expiry_threshold())
+    |> select([t], t.inserted_at)
+    |> Repo.one()
+  end
+
   defp invalidate_previous_tokens(normalized_email) do
     MagicLinkToken
     |> where([t], t.email == ^normalized_email)
