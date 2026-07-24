@@ -50,10 +50,10 @@ Critère de sortie : parcours complet en production (charger la carte, régler l
 
 Objectif : ouvrir la contribution, type wiki, avec une gouvernance transparente.
 
-| ID | Feature | Priorité | Spec |
-|----|---------|----------|------|
-| F07 | Comptes utilisateurs (magic link) | P0 | [F07](features/007-comptes-utilisateurs/000-comptes-utilisateurs.md) |
-| F08 | Éditeur collaboratif éthique | P0 | [F08](features/008-editeur-collaboratif/000-editeur-collaboratif.md) |
+| ID | Feature | Priorité | Statut | Spec |
+|----|---------|----------|--------|------|
+| F07 | Comptes utilisateurs (magic link) | P0 | Livrée (PR #8) | [F07](features/007-comptes-utilisateurs/000-comptes-utilisateurs.md) |
+| F08 | Éditeur collaboratif éthique | P0 | En spécification | [F08](features/008-editeur-collaboratif/000-editeur-collaboratif.md) |
 
 Critère de sortie : proposition d'édition, historique public des révisions, modération documentée.
 
