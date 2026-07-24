@@ -47,7 +47,7 @@ defmodule AmanogawaWeb.Layouts do
   def app(assigns) do
     ~H"""
     <div class="flex h-dvh flex-col overflow-hidden">
-      <.topbar />
+      <.topbar current_scope={@current_scope} />
 
       <main id="map-zone" class="relative min-h-0 flex-1">
         {render_slot(@inner_block)}
@@ -69,18 +69,35 @@ defmodule AmanogawaWeb.Layouts do
 
   @doc """
   Renders the static content layout used by `AmanogawaWeb.PageController`
-  (issue #027: Sources/About, legal notice, privacy policy). Unlike `app/1`
+  (issue #027: Sources/About, legal notice, privacy policy), and, since
+  issue #032, `AmanogawaWeb.LoginLive`, `AmanogawaWeb.AccountLive`, and
+  `AmanogawaWeb.SessionController`'s confirmation page. Unlike `app/1`
   above, `main` scrolls normally: these are ordinary text pages, not the
   full-screen map.
+
+  `flash` defaults to an empty map rather than being required: the three
+  sessionless static pages (`AmanogawaWeb.PageController`, `:static_page`
+  router pipeline) never fetch flash at all (no `:fetch_session`, so no
+  form on those pages ever has one to show, and no cookie is ever written
+  for them, `AmanogawaWeb.Router`'s own rationale) and simply never pass
+  this attribute; the account/login/session pages, all on `:browser`
+  (`:fetch_live_flash`), pass their own `@flash`.
   """
   attr :page_title, :string, required: true
+
+  attr :current_scope, :map,
+    default: nil,
+    doc:
+      "the current [scope](https://phoenix.hexdocs.pm/scopes.html), absent on sessionless pages"
+
+  attr :flash, :map, default: %{}, doc: "the map of flash messages, absent on sessionless pages"
 
   slot :inner_block, required: true
 
   def page(assigns) do
     ~H"""
     <div class="flex h-dvh flex-col overflow-hidden">
-      <.topbar />
+      <.topbar current_scope={@current_scope} />
 
       <main class="min-h-0 flex-1 overflow-y-auto">
         <div class="mx-auto max-w-3xl px-4 py-10 text-text">
@@ -91,15 +108,26 @@ defmodule AmanogawaWeb.Layouts do
         <.legal_footer id="legal-footer" class="border-t border-border bg-surface" />
       </main>
     </div>
+
+    <.flash_group flash={@flash} />
     """
   end
 
   @doc """
-  The topbar shared by `app/1` and `page/1`: the site name plus the
+  The topbar shared by `app/1` and `page/1`: the site name, the
   Sources/About links (issue #027, wired to the combined `/sources` page:
   a single page serves as both the exhaustive source list and the "About"
-  page, so both entries point there).
+  page, so both entries point there), and the connexion/compte link
+  (issue #032).
+
+  `current_scope` is `nil` on the sessionless static pages (`page/1`'s
+  own default): shown exactly like an anonymous visitor's `nil`-user
+  scope, since a page with no session cannot know whether the visitor
+  holds one elsewhere (`.claude/rules/architecture.md`'s "aucun cookie"
+  promise for those pages stays true either way).
   """
+  attr :current_scope, :map, default: nil
+
   def topbar(assigns) do
     ~H"""
     <header
@@ -110,8 +138,27 @@ defmodule AmanogawaWeb.Layouts do
       <nav class="flex items-center gap-4 text-topbar text-text-muted">
         <.link href={~p"/sources"} class="hover:text-text">{gettext("Sources")}</.link>
         <.link href={~p"/sources"} class="hover:text-text">{gettext("À propos")}</.link>
+        <.auth_link current_scope={@current_scope} />
       </nav>
     </header>
+    """
+  end
+
+  @doc false
+  attr :current_scope, :map, default: nil
+
+  def auth_link(%{current_scope: %{user: %{email: _email}}} = assigns) do
+    ~H"""
+    <.link href={~p"/compte"} class="hover:text-text">{@current_scope.user.email}</.link>
+    <.link href={~p"/deconnexion"} method="delete" class="hover:text-text">
+      {gettext("Déconnexion")}
+    </.link>
+    """
+  end
+
+  def auth_link(assigns) do
+    ~H"""
+    <.link href={~p"/connexion"} class="hover:text-text">{gettext("Connexion")}</.link>
     """
   end
 

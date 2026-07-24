@@ -1,14 +1,19 @@
 <Layouts.page page_title={@page_title}>
   <p class="leading-relaxed text-text-muted">
     {gettext(
-      "Cette politique est volontairement courte : elle tient en quelques paragraphes parce qu'il n'y a, en pratique, rien à déclarer."
+      "Cette politique est volontairement courte : Amanogawa ne collecte que le strict nécessaire, que vous exploriez la carte sans compte ou que vous en créiez un."
     )}
   </p>
 
-  <.section title={gettext("Aucune donnée personnelle collectée")}>
+  <.section title={gettext("Aucune donnée personnelle collectée sans compte")}>
     <p>
       {gettext(
-        "En phase 1, Amanogawa ne collecte aucune donnée personnelle. Aucun compte, aucun formulaire, aucune inscription."
+        "Explorer la carte et la frise ne demande aucun compte : un visiteur anonyme n'est soumis à aucune donnée personnelle collectée, aucun formulaire, aucune inscription."
+      )}
+    </p>
+    <p>
+      {gettext(
+        "Créer un compte est optionnel (section \"Comptes utilisateurs\" ci-dessous) et ne collecte qu'une adresse email."
       )}
     </p>
   </.section>
@@ -22,6 +27,34 @@
     <p>
       {gettext(
         "La carte interactive dépose un unique cookie technique, strictement nécessaire au fonctionnement sécurisé de la connexion en temps réel qu'elle établit avec le serveur (protection contre la falsification de requête intersite). Ce cookie ne contient aucune information permettant d'identifier le visiteur, n'est jamais transmis à un tiers et n'est jamais utilisé à des fins de mesure d'audience ou de suivi."
+      )}
+    </p>
+    <p>
+      {gettext(
+        "Un visiteur qui se connecte reçoit en complément un second cookie, de session authentifiée (HttpOnly, SameSite=Lax, Secure) : voir la section \"Comptes utilisateurs\" ci-dessous."
+      )}
+    </p>
+  </.section>
+
+  <.section title={gettext("Comptes utilisateurs")}>
+    <p>
+      {gettext(
+        "Créer un compte (connexion sans mot de passe par lien envoyé par email) est optionnel et collecte une seule donnée : votre adresse email. Finalité : vous authentifier et, plus tard, attribuer vos éventuelles contributions à l'éditeur collaboratif. Base légale : votre consentement, exprimé en demandant un lien de connexion."
+      )}
+    </p>
+    <p>
+      {gettext(
+        "Durée de conservation : l'email et le compte sont conservés jusqu'à ce que vous supprimiez le compte vous-même. Le lien de connexion envoyé par email n'est valable que 15 minutes et à usage unique ; une session ouverte est valable 60 jours glissants."
+      )}
+    </p>
+    <p>
+      {gettext(
+        "Emails envoyés : uniquement le lien de connexion, à votre demande. Aucune newsletter, aucune sollicitation commerciale."
+      )}
+    </p>
+    <p>
+      {gettext(
+        "Vos droits : depuis la page \"Mon compte\", vous exportez l'intégralité de vos données (format JSON) et vous supprimez votre compte, immédiatement et sans délai, en autonomie complète. Pour toute autre demande, voir la section Contact ci-dessous."
       )}
     </p>
   </.section>

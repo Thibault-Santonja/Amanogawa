@@ -120,9 +120,26 @@ defmodule AmanogawaWeb.E2EHelpers do
   to confirm a *new* fetch landed, not merely that one happened at some
   point in the past.
   """
-  @spec wait_for_events_fetch_count(Session.t(), integer()) :: Session.t()
-  def wait_for_events_fetch_count(session, expected_count) do
-    assert_has(session, Query.css("#map[data-events-fetch-count='#{expected_count}']"))
+  @spec wait_for_events_fetch_count(Session.t(), integer(), non_neg_integer()) :: Session.t()
+  def wait_for_events_fetch_count(session, expected_count, attempts_left \\ 120) do
+    # Polls for >= rather than an exact attribute match: on slow CI
+    # runners an extra legitimate fetch (resize settle, moveend) can land
+    # between the read of the baseline and the awaited one, jumping the
+    # counter past the expected value and making an equality selector
+    # unsatisfiable forever.
+    count = events_fetch_count(session)
+
+    cond do
+      count >= expected_count ->
+        session
+
+      attempts_left > 0 ->
+        Process.sleep(250)
+        wait_for_events_fetch_count(session, expected_count, attempts_left - 1)
+
+      true ->
+        raise "data-events-fetch-count stuck at #{count}, expected at least #{expected_count}"
+    end
   end
 
   @doc """

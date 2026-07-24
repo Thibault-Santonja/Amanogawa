@@ -522,6 +522,49 @@ defmodule AmanogawaWeb.ExploreLiveTest do
     end
   end
 
+  describe "scope (issue #032): the anonymous journey stays intact, an authenticated one works too" do
+    test "an anonymous socket mounts with @current_scope.user nil (no regression)", %{conn: conn} do
+      {:ok, lv, _html} = live(conn, ~p"/")
+
+      assert %{user: nil} = :sys.get_state(lv.pid).socket.assigns.current_scope
+    end
+
+    test "an authenticated socket mounts with @current_scope.user set, map still fully functional",
+         %{conn: conn} do
+      user = Amanogawa.AccountsFixtures.user_fixture()
+      conn = log_in_user(conn, user)
+
+      {:ok, lv, html} = live(conn, ~p"/")
+
+      assert %{user: %{id: id}} = :sys.get_state(lv.pid).socket.assigns.current_scope
+      assert id == user.id
+      assert has_element?(lv, "#map")
+      assert html =~ user.email
+    end
+
+    test "the topbar shows a discreet Connexion link for an anonymous visitor", %{conn: conn} do
+      {:ok, lv, _html} = live(conn, ~p"/")
+      assert has_element?(lv, ~s(a[href="/connexion"]), "Connexion")
+    end
+  end
+
+  describe "scope (issue #032): :require_authenticated_user redirects an anonymous socket" do
+    test "GET /compte redirects anonymous visitors to /connexion with a flash", %{conn: conn} do
+      assert {:error, {:redirect, %{to: "/connexion", flash: flash}}} =
+               live(conn, ~p"/compte")
+
+      assert Phoenix.Flash.get(flash, :error) =~ "vous connecter"
+    end
+
+    test "GET /compte renders for an authenticated visitor", %{conn: conn} do
+      user = Amanogawa.AccountsFixtures.user_fixture()
+      conn = log_in_user(conn, user)
+
+      {:ok, _lv, html} = live(conn, ~p"/compte")
+      assert html =~ user.email
+    end
+  end
+
   # A unique fake remote IP per call: what gives the rate-limiting test its
   # own isolated Hammer bucket, distinct from every other test's default
   # (127.0.0.1) peer, mirroring

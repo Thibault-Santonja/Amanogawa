@@ -32,6 +32,13 @@ config :amanogawa, Amanogawa.HealthCheck, timeout_ms: 100
 config :amanogawa, :start_error_reporter, false
 config :amanogawa, Amanogawa.Mailer, adapter: Swoosh.Adapters.Test
 
+# Magic link delivery (issue #031): stubbed with Mox by default, so no
+# test accidentally depends on Amanogawa.Accounts.MagicLinkNotifier.
+# Mailer's own Swoosh.Adapters.Test path; that adapter has its own
+# dedicated tests (test/amanogawa/accounts/magic_link_notifier/
+# mailer_test.exs).
+config :amanogawa, :magic_link_notifier, Amanogawa.MagicLinkNotifierMock
+
 # A real HTTP listener is required for the E2E suite (issue #029): Chrome,
 # driven through Wallaby/chromedriver, is an actual browser process that
 # connects over the network, unlike `Phoenix.ConnTest`'s in-process conn.

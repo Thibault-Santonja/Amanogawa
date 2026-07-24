@@ -73,6 +73,21 @@ defmodule AmanogawaWeb.PageControllerTest do
       assert html =~ "No personal data collected"
       assert html =~ "No cookies, no trackers"
     end
+
+    test "issue #033: mentions the user accounts section in both locales, still no cookie", %{
+      conn: conn
+    } do
+      fr_conn = get(conn, ~p"/confidentialite")
+      fr_html = html_response(fr_conn, 200)
+
+      assert fr_html =~ "Comptes utilisateurs"
+      assert fr_html =~ "60 jours"
+      assert fr_html =~ "15 minutes"
+      assert get_resp_header(fr_conn, "set-cookie") == []
+
+      en_html = conn |> get(~p"/confidentialite?locale=en") |> html_response(200)
+      assert en_html =~ "User accounts"
+    end
   end
 
   describe "locale fallback" do

@@ -1,0 +1,14 @@
+<Layouts.page page_title={@page_title} current_scope={@current_scope} flash={@flash}>
+  <p class="leading-relaxed text-text-muted">
+    {gettext(
+      "Pour des raisons de sécurité, ce lien ne vous connecte pas automatiquement : confirmez votre connexion en cliquant sur le bouton ci-dessous."
+    )}
+  </p>
+
+  <form method="post" action={~p"/connexion/#{@token}"} class="mt-6">
+    <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+    <.button variant="primary">
+      {gettext("Confirmer la connexion")}
+    </.button>
+  </form>
+</Layouts.page>

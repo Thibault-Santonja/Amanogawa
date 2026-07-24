@@ -38,6 +38,7 @@ defmodule AmanogawaWeb.ExploreLive do
 
   alias Amanogawa.Atlas
   alias Amanogawa.Atlas.TimeScale
+  alias AmanogawaWeb.ClientIp
   alias AmanogawaWeb.Components.EventPanel
   alias AmanogawaWeb.Components.TimeLegend
   alias AmanogawaWeb.Params.ExploreParams
@@ -69,7 +70,7 @@ defmodule AmanogawaWeb.ExploreLive do
     {:ok,
      socket
      |> assign(:page_title, gettext("Carte du monde"))
-     |> assign(:peer_ip, peer_ip(socket))
+     |> assign(:peer_ip, ClientIp.peer_ip(socket))
      |> assign(:domain_min, domain_min)
      |> assign(:domain_max, domain_max)
      |> assign(:axis_templates, TimelineI18n.axis_templates())
@@ -83,37 +84,16 @@ defmodule AmanogawaWeb.ExploreLive do
      |> assign(:expose_e2e_test_api, Application.get_env(:amanogawa, :expose_e2e_test_api, false))}
   end
 
-  # Captured once at mount, not re-read on every event: `get_connect_info/2`
-  # only returns data during the (single) connected mount, `nil` on the
-  # static, disconnected render. A `nil` peer (no connect_info at all, e.g.
-  # `mount/3` called directly as a plain function, as the "no DB in
-  # mount" test below does) is never throttled by
-  # `selection_rate_limited?/1`: there is no real client to protect
-  # against.
-  #
-  # Deliberately the raw socket peer, not corrected for a reverse proxy
-  # the way `AmanogawaWeb.Plugs.RateLimit`'s HTTP-side quota is (issue
-  # security-review #4's `RemoteIp` plug runs on the endpoint's HTTP
-  # pipeline, which a LiveView websocket connection never goes through):
-  # good enough to bound abuse from a single client, not meant to be an
-  # exact client identity behind arbitrary infrastructure.
-  #
-  # `get_connect_info/2` itself raises when `socket.private[:connect_info]`
-  # is entirely absent (a socket that never went through the LiveView
-  # mount lifecycle at all, as opposed to one that went through it but
-  # simply lacks a `:peer_data` key): guarded against explicitly here
-  # rather than left to crash, since `mount/3` is called directly, as a
-  # bare struct, by its own "no DB access" test below.
-  defp peer_ip(%{private: private} = socket) do
-    if Map.has_key?(private, :connect_info) do
-      case get_connect_info(socket, :peer_data) do
-        %{address: address} -> address
-        _other -> nil
-      end
-    else
-      nil
-    end
-  end
+  # The peer IP is captured once at mount (`AmanogawaWeb.ClientIp.peer_ip/1`),
+  # not re-read on every event: `get_connect_info/2` only returns data
+  # during the (single) connected mount, `nil` on the static, disconnected
+  # render. A `nil` (no connect_info at all, e.g. `mount/3` called
+  # directly as a plain function, as the "no DB in mount" test below
+  # does) is never throttled by `selection_rate_limited?/1`: there is no
+  # real client to protect against. Behind a reverse proxy the helper
+  # resolves the forwarded client (same trusted proxy list as the HTTP
+  # `RemoteIp` plug) instead of the proxy's own address, which would
+  # otherwise be one shared throttle bucket for every visitor.
 
   @impl true
   def handle_params(params, _url, socket) do
@@ -252,7 +232,7 @@ defmodule AmanogawaWeb.ExploreLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash}>
+    <Layouts.app flash={@flash} current_scope={@current_scope}>
       <%!-- data-i18n-* carries the labels the hover card
       (`assets/js/map/hover_card.js`) renders into its DOM, translated
       server-side (security review, i18n finding): the hook reads them off

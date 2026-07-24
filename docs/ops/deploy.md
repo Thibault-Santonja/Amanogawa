@@ -211,3 +211,7 @@ curl -s http://127.0.0.1:4100/health
 ```
 
 Résultat observé : construction de l'image réussie (multi-stage, environ 75s à froid sur Apple Silicon avec émulation `linux/amd64` du builder `hexpm/elixir`, l'image finale démarre en environ 1s), migrations exécutées automatiquement par `rel/overlays/bin/docker-entrypoint`, `GET /health` répond `200` avec `{"status":"ok","version":"0.1.0"}`, `GET /` répond `200` et pose le cookie de session strictement nécessaire à la connexion LiveView (voir `/confidentialite`), `GET /sources` répond `200` sans cookie.
+
+## Cookie de session et TLS (F07)
+
+Le cookie de session (`_amanogawa_key`) porte le jeton de session authentifiée depuis F07. Il est configuré `secure: true` en production (`lib/amanogawa_web/endpoint.ex`), ce qui suppose que `force_ssl` avec `rewrite_on: [:x_forwarded_proto]` reste actif (`config/prod.exs`) et que kamal-proxy termine le TLS en transmettant l'en-tête `X-Forwarded-Proto`. Aucun réglage supplémentaire n'est nécessaire côté Kamal ; vérifier au smoke test que le `Set-Cookie` de production porte bien les attributs `secure`, `HttpOnly` et `SameSite=Lax`.
