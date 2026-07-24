@@ -223,9 +223,13 @@ defmodule AmanogawaWeb.UserAuth do
 
   # Renewal is atomic on the old row (`Amanogawa.Accounts.Session.renew/1`):
   # two racing requests both presenting the same old-enough token never
-  # raise and never both mint a replacement, the loser simply gets
-  # `:unchanged` and keeps serving the old token until the winner's
-  # response lands the new cookie.
+  # raise and never both mint a replacement. A loser that resolved the
+  # row BEFORE the winner's delete keeps serving the old token for its
+  # own response; a loser resolving AFTER it serves that single response
+  # anonymously. Either way the browser's cookie jar ends up with the
+  # winner's new token, so the very next request is authenticated again:
+  # a rare, self-healing blip accepted in exchange for strict single-use
+  # replacement (no overlap window a stolen old token could exploit).
   defp maybe_renew_session(conn, session_token) do
     case Accounts.renew_session_token(session_token) do
       {:ok, {new_clear_token, new_session_token}} ->

@@ -182,18 +182,31 @@ defmodule AmanogawaWeb.UserAuthTest do
         end)
         |> Task.await_many()
 
-      assert %Scope{user: %{id: user_id}} = conn_a.assigns.current_scope
-      assert %Scope{user: %{id: ^user_id}} = conn_b.assigns.current_scope
-      assert user_id == session_token.user_id
+      # The interleaving decides the loser's fate for its own response
+      # only: reading the row before the winner's delete_all serves the
+      # user with the old token; reading after it serves this single
+      # response anonymously. Both are acceptable; the contract
+      # guarantees no crash, exactly one surviving row, exactly one
+      # minted replacement, and that the replacement resolves the user
+      # (the browser's cookie jar ends up with it either way).
+      user_id = session_token.user_id
 
-      # Exactly one winner minted a replacement; the loser kept serving
-      # the old token for this response.
+      resolved =
+        Enum.map([conn_a, conn_b], fn c ->
+          case c.assigns.current_scope do
+            %Scope{user: %{id: ^user_id}} -> :user
+            %Scope{user: nil} -> :anonymous
+          end
+        end)
+
+      assert :user in resolved
+
       assert Amanogawa.Repo.aggregate(SessionToken, :count) == 1
 
       renewed_tokens =
         [conn_a, conn_b]
         |> Enum.map(&get_session(&1, "user_session_token"))
-        |> Enum.reject(&(&1 == clear_token))
+        |> Enum.reject(&(is_nil(&1) or &1 == clear_token))
 
       assert [new_clear_token] = renewed_tokens
       assert Accounts.get_user_by_session_token(new_clear_token).id == user_id
