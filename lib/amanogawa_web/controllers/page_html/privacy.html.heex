@@ -1,0 +1,50 @@
+<Layouts.page page_title={@page_title}>
+  <p class="leading-relaxed text-text-muted">
+    {gettext(
+      "Cette politique est volontairement courte : elle tient en quelques paragraphes parce qu'il n'y a, en pratique, rien à déclarer."
+    )}
+  </p>
+
+  <.section title={gettext("Aucune donnée personnelle collectée")}>
+    <p>
+      {gettext(
+        "En phase 1, Amanogawa ne collecte aucune donnée personnelle. Aucun compte, aucun formulaire, aucune inscription."
+      )}
+    </p>
+  </.section>
+
+  <.section title={gettext("Aucun cookie, aucun traceur")}>
+    <p>
+      {gettext(
+        "Les pages d'information (Sources, mentions légales, cette page) ne déposent aucun cookie, y compris pour un visiteur anonyme. Aucun traceur, aucun identifiant, aucun service tiers d'analyse ou de publicité."
+      )}
+    </p>
+    <p>
+      {gettext(
+        "La carte interactive dépose un unique cookie technique, strictement nécessaire au fonctionnement sécurisé de la connexion en temps réel qu'elle établit avec le serveur (protection contre la falsification de requête intersite). Ce cookie ne contient aucune information permettant d'identifier le visiteur, n'est jamais transmis à un tiers et n'est jamais utilisé à des fins de mesure d'audience ou de suivi."
+      )}
+    </p>
+  </.section>
+
+  <.section title={gettext("Journaux techniques")}>
+    <p>
+      {gettext(
+        "Comme tout service en ligne, le serveur conserve de brefs journaux techniques (adresse IP, horodatage, page demandée) nécessaires à la sécurité et au bon fonctionnement du service. Ces journaux ne servent à aucun profilage et sont conservés pour une durée courte."
+      )}
+    </p>
+  </.section>
+
+  <.section title={gettext("Wikimedia et les sources externes")}>
+    <p>
+      {gettext(
+        "Le serveur d'Amanogawa interroge Wikidata et Wikipedia pour importer et mettre à jour ses données, avec une identification explicite de son origine. Le navigateur d'un visiteur n'effectue lui-même aucun appel direct vers ces services : les résumés et images sont servis via le serveur d'Amanogawa ou l'infrastructure de Wikimedia pour les images uniquement, jamais suivis à des fins publicitaires."
+      )}
+    </p>
+  </.section>
+
+  <.section title={gettext("Contact")}>
+    <p>
+      {gettext("Pour toute question relative à cette politique : thibault.santonja@gmail.com")}
+    </p>
+  </.section>
+</Layouts.page>

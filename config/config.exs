@@ -93,6 +93,27 @@ config :amanogawa, AmanogawaWeb.RateLimit,
 # French is the source and default locale of the user-facing text.
 config :amanogawa, AmanogawaWeb.Gettext, default_locale: "fr"
 
+# Alerting (issue #028, option A): sober defaults for
+# Amanogawa.Alerting.ErrorReporter, overridable per environment through
+# `ALERT_ERROR_THRESHOLD`/`ALERT_WINDOW_MINUTES`/`ALERT_SILENCE_MINUTES`
+# (config/runtime.exs, production only). `from`/`recipient` stay nil here
+# on purpose: no mail can be sent without both explicitly configured, and
+# only production ever sets them.
+config :amanogawa, Amanogawa.Alerting,
+  threshold: 10,
+  window_minutes: 5,
+  silence_minutes: 60,
+  from: nil,
+  recipient: nil
+
+# Swoosh mailer (issue #028): no adapter needs the API HTTP client
+# (Amanogawa.Mailer only ever uses Amanogawa.Alerting.Notifier.Mailer
+# through Swoosh.Adapters.Local in dev/test or Swoosh.Adapters.SMTP in
+# production, config/dev.exs and config/runtime.exs), so this drops the
+# Finch dependency Swoosh would otherwise require for API-based adapters
+# (SendGrid, Mailgun, ...), which this project never uses.
+config :swoosh, :api_client, false
+
 # Configure the endpoint
 config :amanogawa, AmanogawaWeb.Endpoint,
   url: [host: "localhost"],

@@ -11,8 +11,8 @@ msgstr ""
 "Language: en\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: lib/amanogawa_web/components/layouts.ex:106
-#: lib/amanogawa_web/components/layouts.ex:121
+#: lib/amanogawa_web/components/layouts.ex:183
+#: lib/amanogawa_web/components/layouts.ex:198
 #, elixir-autogen, elixir-format
 msgid "Attempting to reconnect"
 msgstr "Attempting to reconnect"
@@ -22,22 +22,23 @@ msgstr "Attempting to reconnect"
 msgid "Carte du monde"
 msgstr "World map"
 
-#: lib/amanogawa_web/components/layouts.ex:69
+#: lib/amanogawa_web/components/layouts.ex:60
 #, elixir-autogen, elixir-format
 msgid "Frise chronologique"
 msgstr "Timeline"
 
-#: lib/amanogawa_web/components/layouts.ex:113
+#: lib/amanogawa_web/components/layouts.ex:190
 #, elixir-autogen, elixir-format
 msgid "Something went wrong!"
 msgstr "Something went wrong!"
 
-#: lib/amanogawa_web/components/layouts.ex:57
+#: lib/amanogawa_web/components/layouts.ex:111
+#: lib/amanogawa_web/components/layouts.ex:136
 #, elixir-autogen, elixir-format
 msgid "Sources"
 msgstr "Sources"
 
-#: lib/amanogawa_web/components/layouts.ex:98
+#: lib/amanogawa_web/components/layouts.ex:175
 #, elixir-autogen, elixir-format
 msgid "We can't find the internet"
 msgstr "We can't find the internet"
@@ -47,7 +48,8 @@ msgstr "We can't find the internet"
 msgid "close"
 msgstr "close"
 
-#: lib/amanogawa_web/components/layouts.ex:58
+#: lib/amanogawa_web/components/layouts.ex:112
+#: lib/amanogawa_web/controllers/page_html/sources.html.heex:110
 #, elixir-autogen, elixir-format
 msgid "À propos"
 msgstr "About"
@@ -68,12 +70,290 @@ msgid "Lire sur Wikipédia"
 msgstr "Read on Wikipedia"
 
 #: lib/amanogawa_web/components/event_panel.ex:75
-#: lib/amanogawa_web/live/explore_live.ex:265
+#: lib/amanogawa_web/live/explore_live.ex:270
 #, elixir-autogen, elixir-format
 msgid "Texte"
 msgstr "Text"
 
-#: lib/amanogawa_web/live/explore_live.ex:267
+#: lib/amanogawa_web/live/explore_live.ex:272
 #, elixir-autogen, elixir-format
 msgid "Carte interactive indisponible : ce navigateur ne fournit pas WebGL."
 msgstr "Interactive map unavailable: this browser does not provide WebGL."
+
+#: lib/amanogawa_web/controllers/page_html/legal.html.heex:14
+#, elixir-autogen, elixir-format
+msgid "Allemagne"
+msgstr "Germany"
+
+#: lib/amanogawa_web/controllers/page_html/sources.html.heex:3
+#, elixir-autogen, elixir-format
+msgid "Amanogawa est construit entièrement sur des communs : données structurées, résumés encyclopédiques et frontières historiques publiés par des projets ouverts. Cette page liste chaque source, son rôle dans l'application et sa licence exacte."
+msgstr "Amanogawa is built entirely on commons: structured data, encyclopedic summaries, and historical borders published by open projects. This page lists every source, its role in the application, and its exact license."
+
+#: lib/amanogawa_web/controllers/page_html/sources.html.heex:112
+#, elixir-autogen, elixir-format
+msgid "Amanogawa est un projet personnel, développé et publié en logiciel libre. Le code source est disponible sous licence AGPL-3.0."
+msgstr "Amanogawa is a personal project, developed and released as free software. The source code is available under the AGPL-3.0 license."
+
+#: lib/amanogawa_web/controllers/page_html/legal.html.heex:3
+#, elixir-autogen, elixir-format
+msgid "Amanogawa est édité par Thibault Santonja, à titre personnel."
+msgstr "Amanogawa is published by Thibault Santonja, in a personal capacity."
+
+#: lib/amanogawa_web/controllers/page_html/privacy.html.heex:16
+#, elixir-autogen, elixir-format
+msgid "Aucun cookie, aucun traceur"
+msgstr "No cookies, no trackers"
+
+#: lib/amanogawa_web/controllers/page_html/privacy.html.heex:8
+#, elixir-autogen, elixir-format
+msgid "Aucune donnée personnelle collectée"
+msgstr "No personal data collected"
+
+#: lib/amanogawa_web/controllers/page_html/privacy.html.heex:3
+#, elixir-autogen, elixir-format
+msgid "Cette politique est volontairement courte : elle tient en quelques paragraphes parce qu'il n'y a, en pratique, rien à déclarer."
+msgstr "This policy is deliberately short: it fits in a few paragraphs because there is, in practice, nothing to declare."
+
+#: lib/amanogawa_web/controllers/page_html/sources.html.heex:33
+#, elixir-autogen, elixir-format
+msgid "Chaque extrait affiché dans l'application est accompagné d'un lien vers son article d'origine et de la mention de la licence, conformément à l'obligation d'attribution de la CC BY-SA."
+msgstr "Every extract shown in the application is accompanied by a link to its source article and the license notice, in accordance with the CC BY-SA attribution requirement."
+
+#: lib/amanogawa_web/components/layouts.ex:149
+#, elixir-autogen, elixir-format
+msgid "Code source sous licence AGPL-3.0"
+msgstr "Source code under the AGPL-3.0 license"
+
+#: lib/amanogawa_web/controllers/page_html/privacy.html.heex:31
+#, elixir-autogen, elixir-format
+msgid "Comme tout service en ligne, le serveur conserve de brefs journaux techniques (adresse IP, horodatage, page demandée) nécessaires à la sécurité et au bon fonctionnement du service. Ces journaux ne servent à aucun profilage et sont conservés pour une durée courte."
+msgstr "Like any online service, the server keeps brief technical logs (IP address, timestamp, requested page) necessary for the security and proper operation of the service. These logs are never used for profiling and are kept for a short duration."
+
+#: lib/amanogawa_web/components/layouts.ex:141
+#, elixir-autogen, elixir-format
+msgid "Confidentialité"
+msgstr "Privacy"
+
+#: lib/amanogawa_web/controllers/page_html/legal.html.heex:4
+#: lib/amanogawa_web/controllers/page_html/privacy.html.heex:45
+#, elixir-autogen, elixir-format
+msgid "Contact"
+msgstr "Contact"
+
+#: lib/amanogawa_web/controllers/page_html/legal.html.heex:5
+#, elixir-autogen, elixir-format
+msgid "Directeur de la publication : Thibault Santonja."
+msgstr "Publication director: Thibault Santonja."
+
+#: lib/amanogawa_web/controllers/page_html/sources.html.heex:71
+#, elixir-autogen, elixir-format
+msgid "Dépôt GitHub"
+msgstr "GitHub repository"
+
+#: lib/amanogawa_web/controllers/page_html/sources.html.heex:54
+#, elixir-autogen, elixir-format
+msgid "Dépôt Zenodo, version 0.1.3"
+msgstr "Zenodo repository, version 0.1.3"
+
+#: lib/amanogawa_web/controllers/page_html/legal.html.heex:29
+#: lib/amanogawa_web/controllers/page_html/sources.html.heex:118
+#, elixir-autogen, elixir-format
+msgid "Dépôt du code source"
+msgstr "Source code repository"
+
+#: lib/amanogawa_web/controllers/page_html/privacy.html.heex:10
+#, elixir-autogen, elixir-format
+msgid "En phase 1, Amanogawa ne collecte aucune donnée personnelle. Aucun compte, aucun formulaire, aucune inscription."
+msgstr "In phase 1, Amanogawa collects no personal data. No account, no form, no sign-up."
+
+#: lib/amanogawa_web/controllers/page_html/sources.html.heex:79
+#, elixir-autogen, elixir-format
+msgid "Fond de carte"
+msgstr "Basemap"
+
+#: lib/amanogawa_web/controllers/page_html/legal.html.heex:8
+#, elixir-autogen, elixir-format
+msgid "Hébergeur"
+msgstr "Host"
+
+#: lib/amanogawa_web/controllers/page_html/sources.html.heex:102
+#, elixir-autogen, elixir-format
+msgid "Imprécision des frontières historiques"
+msgstr "Imprecision of historical borders"
+
+#: lib/amanogawa_web/controllers/page_html/privacy.html.heex:29
+#, elixir-autogen, elixir-format
+msgid "Journaux techniques"
+msgstr "Technical logs"
+
+#: lib/amanogawa_web/controllers/page_html/legal.html.heex:9
+#, elixir-autogen, elixir-format
+msgid "L'application est hébergée par :"
+msgstr "The application is hosted by:"
+
+#: lib/amanogawa_web/controllers/page_html/privacy.html.heex:23
+#, elixir-autogen, elixir-format
+msgid "La carte interactive dépose un unique cookie technique, strictement nécessaire au fonctionnement sécurisé de la connexion en temps réel qu'elle établit avec le serveur (protection contre la falsification de requête intersite). Ce cookie ne contient aucune information permettant d'identifier le visiteur, n'est jamais transmis à un tiers et n'est jamais utilisé à des fins de mesure d'audience ou de suivi."
+msgstr "The interactive map sets a single technical cookie, strictly necessary for the secure operation of the real-time connection it establishes with the server (cross-site request forgery protection). This cookie carries no information that identifies the visitor, is never transmitted to a third party, and is never used for audience measurement or tracking."
+
+#: lib/amanogawa_web/controllers/page_html/legal.html.heex:23
+#, elixir-autogen, elixir-format
+msgid "Le code source d'Amanogawa est publié sous licence AGPL-3.0 (GNU Affero General Public License, version 3). Cette licence impose notamment, pour tout service en réseau utilisant une version modifiée du code, la mise à disposition du code source correspondant (article 13 de l'AGPL)."
+msgstr "Amanogawa's source code is published under the AGPL-3.0 license (GNU Affero General Public License, version 3). Among other things, this license requires that any networked service using a modified version of the code make the corresponding source code available (AGPL article 13)."
+
+#: lib/amanogawa_web/controllers/page_html/sources.html.heex:81
+#, elixir-autogen, elixir-format
+msgid "Le fond de carte est servi par OpenFreeMap, une instance publique et gratuite de tuiles vectorielles, à partir des données OpenStreetMap."
+msgstr "The basemap is served by OpenFreeMap, a free public instance of vector tiles, built from OpenStreetMap data."
+
+#: lib/amanogawa_web/controllers/page_html/privacy.html.heex:39
+#, elixir-autogen, elixir-format
+msgid "Le serveur d'Amanogawa interroge Wikidata et Wikipedia pour importer et mettre à jour ses données, avec une identification explicite de son origine. Le navigateur d'un visiteur n'effectue lui-même aucun appel direct vers ces services : les résumés et images sont servis via le serveur d'Amanogawa ou l'infrastructure de Wikimedia pour les images uniquement, jamais suivis à des fins publicitaires."
+msgstr "Amanogawa's server queries Wikidata and Wikipedia to import and refresh its data, with an explicit identification of its origin. A visitor's browser never calls these services directly: summaries and images are served through Amanogawa's own server or, for images only, through Wikimedia's infrastructure, never tracked for advertising purposes."
+
+#: lib/amanogawa_web/controllers/page_html/sources.html.heex:104
+#, elixir-autogen, elixir-format
+msgid "Les frontières affichées sont des zones d'influence approximatives par nature, en particulier pour les périodes anciennes. Leur tracé ne constitue aucune prise de position sur des différends territoriaux, passés ou présents."
+msgstr "The borders shown are approximate zones of influence by nature, particularly for ancient periods. Their outlines do not constitute a position on any territorial dispute, past or present."
+
+#: lib/amanogawa_web/controllers/page_html/sources.html.heex:47
+#, elixir-autogen, elixir-format
+msgid "Les frontières historiques de -3400 avant notre ère à 2024 proviennent de Cliopatria, publié par la Seshat Global History Databank : plus de 1600 entités politiques et environ 14 000 polygones datés."
+msgstr "Historical borders from 3400 BCE to 2024 come from Cliopatria, published by the Seshat Global History Databank: more than 1,600 political entities and around 14,000 dated polygons."
+
+#: lib/amanogawa_web/controllers/page_html/legal.html.heex:39
+#, elixir-autogen, elixir-format
+msgid "Les licences des données affichées (Wikidata, Wikipedia, Cliopatria, historical-basemaps, fond de carte) sont détaillées sur la page Sources."
+msgstr "The licenses of the displayed data (Wikidata, Wikipedia, Cliopatria, historical-basemaps, basemap) are detailed on the Sources page."
+
+#: lib/amanogawa_web/controllers/page_html/privacy.html.heex:18
+#, elixir-autogen, elixir-format
+msgid "Les pages d'information (Sources, mentions légales, cette page) ne déposent aucun cookie, y compris pour un visiteur anonyme. Aucun traceur, aucun identifiant, aucun service tiers d'analyse ou de publicité."
+msgstr "The informational pages (Sources, legal notice, this page) set no cookie, including for an anonymous visitor. No tracker, no identifier, no third-party analytics or advertising service."
+
+#: lib/amanogawa_web/controllers/page_html/sources.html.heex:27
+#, elixir-autogen, elixir-format
+msgid "Les résumés d'articles affichés dans le panneau de détail d'un événement proviennent de Wikipedia."
+msgstr "The article summaries shown in an event's detail panel come from Wikipedia."
+
+#: lib/amanogawa_web/controllers/page_html/sources.html.heex:64
+#, elixir-autogen, elixir-format
+msgid "Les zones d'influence des périodes antérieures à -3400 proviennent de historical-basemaps, un jeu de données complémentaire à Cliopatria pour la préhistoire et la protohistoire."
+msgstr "Zones of influence for periods before 3400 BCE come from historical-basemaps, a dataset complementing Cliopatria for prehistory and protohistory."
+
+#: lib/amanogawa_web/controllers/page_html/sources.html.heex:10
+#, elixir-autogen, elixir-format
+msgid "Les événements historiques (dates, coordonnées, relations entre événements) proviennent de Wikidata, la base de connaissances structurée et collaborative de la fondation Wikimedia."
+msgstr "Historical events (dates, coordinates, relations between events) come from Wikidata, the Wikimedia Foundation's structured, collaborative knowledge base."
+
+#: lib/amanogawa_web/controllers/page_html/sources.html.heex:51
+#, elixir-autogen, elixir-format
+msgid "Licence : CC BY 4.0 (paternité). Attribution aux auteurs du jeu de données."
+msgstr "License: CC BY 4.0 (attribution). Credit given to the dataset's authors."
+
+#: lib/amanogawa_web/controllers/page_html/sources.html.heex:31
+#, elixir-autogen, elixir-format
+msgid "Licence : CC BY-SA 4.0 (paternité, partage dans les mêmes conditions)."
+msgstr "License: CC BY-SA 4.0 (attribution, share-alike)."
+
+#: lib/amanogawa_web/controllers/page_html/sources.html.heex:15
+#, elixir-autogen, elixir-format
+msgid "Licence : CC0 1.0 (domaine public). Attribution donnée par bonne pratique, bien que non requise par la licence."
+msgstr "License: CC0 1.0 (public domain). Attribution given as good practice, although not required by the license."
+
+#: lib/amanogawa_web/controllers/page_html/sources.html.heex:68
+#, elixir-autogen, elixir-format
+msgid "Licence : GPL-3.0."
+msgstr "License: GPL-3.0."
+
+#: lib/amanogawa_web/controllers/page_html/legal.html.heex:21
+#, elixir-autogen, elixir-format
+msgid "Licence du code source"
+msgstr "Source code license"
+
+#: lib/amanogawa_web/components/layouts.ex:138
+#: lib/amanogawa_web/controllers/page_controller.ex:21
+#, elixir-autogen, elixir-format
+msgid "Mentions légales"
+msgstr "Legal notice"
+
+#: lib/amanogawa_web/controllers/page_html/sources.html.heex:86
+#, elixir-autogen, elixir-format
+msgid "OpenFreeMap ne requiert ni clé d'accès ni compte et ne suit pas ses utilisateurs. Les données géographiques sous-jacentes sont publiées par OpenStreetMap sous licence ODbL, qui impose la mention \"© OpenStreetMap contributors\"."
+msgstr "OpenFreeMap requires no access key or account and does not track its users. The underlying geographic data is published by OpenStreetMap under the ODbL license, which requires the notice \"© OpenStreetMap contributors\"."
+
+#: lib/amanogawa_web/controllers/page_controller.ex:27
+#, elixir-autogen, elixir-format
+msgid "Politique de confidentialité"
+msgstr "Privacy policy"
+
+#: lib/amanogawa_web/controllers/page_html/privacy.html.heex:47
+#, elixir-autogen, elixir-format
+msgid "Pour toute question relative à cette politique : thibault.santonja@gmail.com"
+msgstr "For any question about this policy: thibault.santonja@gmail.com"
+
+#: lib/amanogawa_web/controllers/page_html/legal.html.heex:37
+#, elixir-autogen, elixir-format
+msgid "Sources des données"
+msgstr "Data sources"
+
+#: lib/amanogawa_web/controllers/page_controller.ex:15
+#, elixir-autogen, elixir-format
+msgid "Sources et à propos"
+msgstr "Sources and about"
+
+#: lib/amanogawa_web/controllers/page_html/legal.html.heex:32
+#, elixir-autogen, elixir-format
+msgid "Texte de la licence AGPL-3.0"
+msgstr "AGPL-3.0 license text"
+
+#: lib/amanogawa_web/controllers/page_html/sources.html.heex:57
+#, elixir-autogen, elixir-format
+msgid "Texte de la licence CC BY 4.0"
+msgstr "CC BY 4.0 license text"
+
+#: lib/amanogawa_web/controllers/page_html/sources.html.heex:40
+#, elixir-autogen, elixir-format
+msgid "Texte de la licence CC BY-SA 4.0"
+msgstr "CC BY-SA 4.0 license text"
+
+#: lib/amanogawa_web/controllers/page_html/sources.html.heex:20
+#, elixir-autogen, elixir-format
+msgid "Texte de la licence CC0 1.0"
+msgstr "CC0 1.0 license text"
+
+#: lib/amanogawa_web/controllers/page_html/sources.html.heex:74
+#, elixir-autogen, elixir-format
+msgid "Texte de la licence GPL-3.0"
+msgstr "GPL-3.0 license text"
+
+#: lib/amanogawa_web/controllers/page_html/sources.html.heex:96
+#, elixir-autogen, elixir-format
+msgid "Texte de la licence ODbL"
+msgstr "ODbL license text"
+
+#: lib/amanogawa_web/controllers/page_html/legal.html.heex:45
+#, elixir-autogen, elixir-format
+msgid "Voir la page Sources"
+msgstr "View the Sources page"
+
+#: lib/amanogawa_web/controllers/page_html/sources.html.heex:8
+#, elixir-autogen, elixir-format
+msgid "Wikidata"
+msgstr "Wikidata"
+
+#: lib/amanogawa_web/controllers/page_html/privacy.html.heex:37
+#, elixir-autogen, elixir-format
+msgid "Wikimedia et les sources externes"
+msgstr "Wikimedia and external sources"
+
+#: lib/amanogawa_web/controllers/page_html/sources.html.heex:93
+#, elixir-autogen, elixir-format
+msgid "© OpenStreetMap contributors"
+msgstr "© OpenStreetMap contributors"
+
+#: lib/amanogawa_web/controllers/page_html/legal.html.heex:2
+#, elixir-autogen, elixir-format
+msgid "Éditeur du site"
+msgstr "Site publisher"

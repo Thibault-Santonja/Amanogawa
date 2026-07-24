@@ -42,6 +42,18 @@ npm-debug.log
 # Environment files (secrets stay out of the repo).
 .env
 
+# Kamal secrets (issue #026): the real files live only on the machine that
+# runs `kamal deploy`, never in the repository. The glob also covers
+# per-destination files (`secrets.production`, `secrets.staging`, ...);
+# `.kamal/secrets.example` (no real values) is the only committed exception.
+/.kamal/secrets*
+!/.kamal/secrets.example
+
+# Local backup restore-drill scratch data (issue #028): dumps and
+# temporary restore targets used while exercising docs/ops/restore.md
+# never belong in the repository, same rationale as *.dump below.
+/tmp/restore-drill/
+
 # Manually downloaded border datasets (Cliopatria, historical-basemaps):
 # the import mix tasks recommend keeping them here between runs, never
 # committed (see lib/mix/tasks/amanogawa.import.*.ex).

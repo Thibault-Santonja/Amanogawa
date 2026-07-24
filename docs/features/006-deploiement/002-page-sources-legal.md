@@ -88,3 +88,11 @@ Impact sur le reste du système : le footer du layout est modifié (visible part
   - Aucun tiret cadratin ni demi-cadratin dans les contenus, y compris les chaînes Gettext.
   - Ton factuel et sobre : la politique de confidentialité tient en quelques paragraphes précisément parce qu'il n'y a rien à déclarer ; ne pas gonfler artificiellement.
   - La version courte des crédits affichée sur la carte (contrôle d'attribution MapLibre) relève de #005 et #025 ; vérifier simplement la cohérence des deux niveaux d'attribution.
+
+---
+
+## Addendum (2026-07-24, revue de F06)
+
+La formulation initiale de cette issue exigeait que les réponses de `/` ne contiennent aucun en-tête `set-cookie`. Cette exigence est amendée : la page d'exploration `/` est une LiveView, et le handshake websocket de LiveView exige un jeton CSRF porté par un cookie de session signé. Supprimer ce cookie reviendrait à désactiver la protection CSRF du canal temps réel.
+
+Décision actée : les pages statiques (`/sources`, `/mentions-legales`, `/confidentialite`, `/health`) ne posent aucun cookie (vérifié par test) ; la page `/` pose exactement un cookie de session strictement nécessaire (`_amanogawa_key`, HttpOnly, SameSite=Lax, Secure en production, contenu limité au jeton CSRF, expirant avec la session). La politique de confidentialité documente ce cookie tel quel, et un test verrouille la promesse "exactement un cookie technique" sur `/`.
