@@ -8,6 +8,8 @@ defmodule Amanogawa.AccountsTest do
   alias Amanogawa.Accounts
   alias Amanogawa.Accounts.MagicLink
   alias Amanogawa.Accounts.MagicLinkToken
+  alias Amanogawa.Accounts.Session
+  alias Amanogawa.Accounts.SessionToken
   alias Amanogawa.Accounts.User
   alias Amanogawa.MagicLinkNotifierMock
   alias Amanogawa.Repo
@@ -340,6 +342,301 @@ defmodule Amanogawa.AccountsTest do
       end
     end
   end
+
+  describe "create_session_token/1 + get_user_by_session_token/1 (happy path)" do
+    test "restitute the user, and only the hash is persisted" do
+      user = user_fixture()
+
+      assert {:ok, {clear_token, %SessionToken{}}} = Accounts.create_session_token(user)
+      assert Accounts.get_user_by_session_token(clear_token).id == user.id
+
+      [row] = Repo.all(SessionToken)
+      refute row.token_hash == clear_token
+      assert row.token_hash == :crypto.hash(:sha256, clear_token)
+    end
+  end
+
+  describe "delete_session_token/1 (happy path)" do
+    test "the token no longer resolves anything (immediate server-side revocation)" do
+      user = user_fixture()
+      {:ok, {clear_token, _session_token}} = Accounts.create_session_token(user)
+
+      assert :ok = Accounts.delete_session_token(clear_token)
+      assert Accounts.get_user_by_session_token(clear_token) == nil
+      assert Repo.aggregate(SessionToken, :count) == 0
+    end
+
+    test "deleting an unknown token is a silent no-op" do
+      assert :ok = Accounts.delete_session_token("unknown")
+    end
+  end
+
+  describe "renew_session_token/1 (edge case: sliding expiration)" do
+    test "a token older than 7 days is replaced by a new one and the old one is invalidated" do
+      inserted_at = DateTime.add(DateTime.utc_now(), -8, :day)
+      {clear_token, session_token} = session_token_fixture(inserted_at: inserted_at)
+
+      assert {:ok, {new_clear_token, new_session_token}} =
+               Accounts.renew_session_token(clear_token)
+
+      refute new_clear_token == clear_token
+      refute new_session_token.id == session_token.id
+      assert Accounts.get_user_by_session_token(clear_token) == nil
+      assert Accounts.get_user_by_session_token(new_clear_token).id == session_token.user_id
+      assert Repo.aggregate(SessionToken, :count) == 1
+    end
+
+    test "a recent token is left unchanged" do
+      {clear_token, _session_token} = session_token_fixture()
+
+      assert :unchanged = Accounts.renew_session_token(clear_token)
+      assert Accounts.get_user_by_session_token(clear_token) != nil
+      assert Repo.aggregate(SessionToken, :count) == 1
+    end
+
+    test "an unknown token is left unchanged" do
+      assert :unchanged = Accounts.renew_session_token("unknown")
+    end
+  end
+
+  describe "get_user_by_session_token/1 error case: malformed or unknown tokens" do
+    test "an altered, empty, or unknown token resolves to nil without raising" do
+      {clear_token, _session_token} = session_token_fixture()
+      {:ok, bytes} = Base.url_decode64(clear_token, padding: false)
+      <<first_byte, rest::binary>> = bytes
+      altered = Base.url_encode64(<<:erlang.bxor(first_byte, 1), rest::binary>>, padding: false)
+
+      assert Accounts.get_user_by_session_token(altered) == nil
+      assert Accounts.get_user_by_session_token("") == nil
+      assert Accounts.get_user_by_session_token("not-a-real-token") == nil
+      assert Accounts.get_user_by_session_token(nil) == nil
+    end
+  end
+
+  describe "get_user_by_session_token/1 limit case: 60-day validity window" do
+    test "a token inserted just under 60 days ago is still accepted" do
+      inserted_at = DateTime.add(DateTime.utc_now(), -60 * 24 * 60 * 60 + 1, :second)
+      {clear_token, _session_token} = session_token_fixture(inserted_at: inserted_at)
+
+      assert Accounts.get_user_by_session_token(clear_token) != nil
+    end
+
+    test "a token inserted just over 60 days ago is refused" do
+      inserted_at = DateTime.add(DateTime.utc_now(), -60 * 24 * 60 * 60 - 1, :second)
+      {clear_token, _session_token} = session_token_fixture(inserted_at: inserted_at)
+
+      assert Accounts.get_user_by_session_token(clear_token) == nil
+    end
+  end
+
+  describe "current_session_token?/2" do
+    test "true for the token the session was created from, false for any other" do
+      {clear_token, session_token} = session_token_fixture()
+
+      assert Accounts.current_session_token?(session_token, clear_token)
+      refute Accounts.current_session_token?(session_token, "some-other-token")
+    end
+  end
+
+  describe "purge_expired_tokens/0" do
+    test "deletes expired magic link and session tokens, preserves valid ones" do
+      expired_at = DateTime.add(DateTime.utc_now(), -20 * 60, :second)
+      magic_link_token_fixture(inserted_at: expired_at)
+      {_valid_magic_link, _} = magic_link_token_fixture()
+
+      expired_session_at = DateTime.add(DateTime.utc_now(), -61, :day)
+      session_token_fixture(inserted_at: expired_session_at)
+      {valid_clear_token, _} = session_token_fixture()
+
+      assert Accounts.purge_expired_tokens() == 2
+      assert Repo.aggregate(MagicLinkToken, :count) == 1
+      assert Repo.aggregate(SessionToken, :count) == 1
+      assert Accounts.get_user_by_session_token(valid_clear_token) != nil
+    end
+  end
+
+  describe "Session module constants and error case: non-binary renew input" do
+    test "validity_days/0 and renewal_threshold_days/0 expose the documented windows" do
+      assert Session.validity_days() == 60
+      assert Session.renewal_threshold_days() == 7
+    end
+
+    test "renew_session_token/1 on a non-binary value is left unchanged without raising" do
+      assert :unchanged = Accounts.renew_session_token(nil)
+      assert :unchanged = Accounts.renew_session_token(123)
+    end
+  end
+
+  describe "property: session tokens never leak the user across malformation" do
+    property "for any binary distinct from an issued session token, resolution is always nil" do
+      user = user_fixture()
+      {:ok, {issued_clear_token, _}} = Accounts.create_session_token(user)
+
+      check all candidate <- StreamData.binary(max_length: 100),
+                candidate != issued_clear_token do
+        assert Accounts.get_user_by_session_token(candidate) == nil
+      end
+    end
+  end
+
+  describe "export_user_data/1 (happy path)" do
+    test "contains format_version, the email, inserted_at, and one entry per active session, never a token_hash or clear token" do
+      user = user_fixture()
+      {clear_token, _session_token} = session_token_fixture(user_id: user.id)
+
+      export = Accounts.export_user_data(user)
+
+      assert export.format_version == 1
+      assert export.account.email == user.email
+      assert export.account.inserted_at == user.inserted_at
+      assert [%{inserted_at: _}] = export.sessions
+
+      refute contains_value?(export, clear_token)
+      refute contains_key?(export, :token_hash)
+    end
+  end
+
+  describe "delete_user/1 (happy path)" do
+    test "removes the user, cascades session tokens, and removes magic link tokens for the email" do
+      user = user_fixture()
+      {_clear_token, _session_token} = session_token_fixture(user_id: user.id)
+      magic_link_token_fixture(email: user.email)
+
+      assert :ok = Accounts.delete_user(user)
+
+      assert Repo.aggregate(User, :count) == 0
+      assert Repo.aggregate(SessionToken, :count) == 0
+      assert Repo.aggregate(MagicLinkToken, :count) == 0
+    end
+  end
+
+  describe "delete_user/1 edge case: re-registration after deletion" do
+    test "requesting a magic link with the same email afterward creates a brand new account" do
+      user = user_fixture()
+      old_id = user.id
+      old_inserted_at = user.inserted_at
+
+      assert :ok = Accounts.delete_user(user)
+
+      {:ok, {clear_token, _token}} = Accounts.generate_magic_link_token(user.email)
+      assert {:ok, new_user} = Accounts.redeem_magic_link_token(clear_token)
+
+      refute new_user.id == old_id
+      assert DateTime.compare(new_user.inserted_at, old_inserted_at) in [:eq, :gt]
+    end
+  end
+
+  describe "delete_user/1 limit case: concurrent/double submission" do
+    test "deleting an already-deleted user is idempotent, never raises" do
+      user = user_fixture()
+
+      assert :ok = Accounts.delete_user(user)
+      assert :ok = Accounts.delete_user(user)
+    end
+  end
+
+  describe "list_session_tokens/1" do
+    test "lists a user's active sessions, newest first" do
+      user = user_fixture()
+
+      {_older_token, older} =
+        session_token_fixture(
+          user_id: user.id,
+          inserted_at: DateTime.add(DateTime.utc_now(), -1, :day)
+        )
+
+      {_newer_token, newer} = session_token_fixture(user_id: user.id)
+
+      assert [first, second] = Accounts.list_session_tokens(user)
+      assert first.id == newer.id
+      assert second.id == older.id
+    end
+
+    test "limit case: an expired session is never listed" do
+      user = user_fixture()
+      expired_at = DateTime.add(DateTime.utc_now(), -61, :day)
+      session_token_fixture(user_id: user.id, inserted_at: expired_at)
+
+      assert Accounts.list_session_tokens(user) == []
+    end
+
+    test "does not list another user's sessions" do
+      user = user_fixture()
+      other = user_fixture()
+      session_token_fixture(user_id: other.id)
+
+      assert Accounts.list_session_tokens(user) == []
+    end
+  end
+
+  describe "revoke_session_token/2" do
+    test "happy path: deletes the session and it no longer resolves" do
+      user = user_fixture()
+      {clear_token, session_token} = session_token_fixture(user_id: user.id)
+
+      assert :ok = Accounts.revoke_session_token(user, session_token.id)
+      assert Accounts.get_user_by_session_token(clear_token) == nil
+    end
+
+    test "error case: an id belonging to another user is refused (anti-IDOR), the other session survives" do
+      user = user_fixture()
+      other = user_fixture()
+      {other_clear_token, other_session} = session_token_fixture(user_id: other.id)
+
+      assert {:error, :not_found} = Accounts.revoke_session_token(user, other_session.id)
+      assert Accounts.get_user_by_session_token(other_clear_token) != nil
+    end
+
+    test "error case: an unknown or malformed id is refused without raising" do
+      user = user_fixture()
+      assert {:error, :not_found} = Accounts.revoke_session_token(user, Ecto.UUID.generate())
+      assert {:error, :not_found} = Accounts.revoke_session_token(user, "not-a-uuid")
+    end
+  end
+
+  describe "property: export_user_data/1 is a total serializer" do
+    property "Jason.encode! always succeeds and decoding restitutes one entry per active session" do
+      check all session_count <- StreamData.integer(0..5) do
+        user = user_fixture()
+
+        for _ <- 1..session_count//1, do: session_token_fixture(user_id: user.id)
+
+        export = Accounts.export_user_data(user)
+        assert {:ok, encoded} = Jason.encode(export)
+        assert {:ok, decoded} = Jason.decode(encoded)
+        assert length(decoded["sessions"]) == session_count
+      end
+    end
+  end
+
+  # `is_map/1` also matches structs (DateTime among them, present in every
+  # export): only a plain map (never a struct) is recursed into, structs
+  # are compared as opaque leaf values instead, exactly like `is_list/1`'s
+  # own leaf/collection split below.
+  defp contains_value?(%_struct{} = value, value), do: true
+  defp contains_value?(%_struct{}, _value), do: false
+
+  defp contains_value?(map, value) when is_map(map) do
+    Enum.any?(map, fn {_k, v} -> contains_value?(v, value) end)
+  end
+
+  defp contains_value?(list, value) when is_list(list) do
+    Enum.any?(list, &contains_value?(&1, value))
+  end
+
+  defp contains_value?(other, value), do: other == value
+
+  defp contains_key?(%_struct{}, _key), do: false
+
+  defp contains_key?(map, key) when is_map(map) do
+    Map.has_key?(map, key) or Enum.any?(Map.values(map), &contains_key?(&1, key))
+  end
+
+  defp contains_key?(list, key) when is_list(list) do
+    Enum.any?(list, &contains_key?(&1, key))
+  end
+
+  defp contains_key?(_other, _key), do: false
 
   defp unique_ip, do: "10.0.0.#{System.unique_integer([:positive, :monotonic])}"
 

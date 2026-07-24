@@ -62,10 +62,21 @@ defmodule AmanogawaWeb.FeatureCase do
   actual app, refetches far more than that across even a couple of E2E
   scenarios.
 
+  Also switches `:magic_link_notifier` (issue #032,
+  `test/e2e/auth_journey_test.exs`) from the Mox mock plain `mix test`
+  uses (`config/test.exs`) to the real `Amanogawa.Accounts.
+  MagicLinkNotifier.Mailer`: a real browser drives the actual sign-in
+  form, so the magic link must actually reach `Amanogawa.Mailer`
+  (`Swoosh.Adapters.Test`, `config :amanogawa, Amanogawa.Mailer` in
+  `config/test.exs`) for the auth journey to read it back
+  (`share_swoosh_mailbox/0`), the same "test-only env, BEAM separate from
+  plain `mix test`" reasoning as the rate limits above.
+
   `mix test.e2e` runs the E2E suite as a fully separate OS process (a
   distinct BEAM instance) from plain `mix test`, so mutating these
   `Application` env values here can never leak into, or be affected by,
-  `AmanogawaWeb.ExploreLiveTest` or `EventControllerTest`'s own runs.
+  `AmanogawaWeb.ExploreLiveTest`, `EventControllerTest`, or `Amanogawa.
+  AccountsTest`'s own runs.
   """
   @spec start_wallaby_and_raise_test_only_rate_limits() :: :ok
   def start_wallaby_and_raise_test_only_rate_limits do
@@ -87,6 +98,39 @@ defmodule AmanogawaWeb.FeatureCase do
       selection_rate_limit_scale_ms: :timer.minutes(1)
     )
 
+    # Every E2E scenario that signs in shares the same real Chrome peer
+    # (127.0.0.1): raised for the same reason as the two quotas above,
+    # so the auth journey (issue #032) is never denied by a quota meant
+    # to protect a real deployment, not a test run driving one client.
+    Application.put_env(:amanogawa, Amanogawa.Accounts.MagicLinkThrottle,
+      limit: 10_000,
+      scale_ms: :timer.hours(24)
+    )
+
+    Application.put_env(
+      :amanogawa,
+      :magic_link_notifier,
+      Amanogawa.Accounts.MagicLinkNotifier.Mailer
+    )
+
+    :ok
+  end
+
+  @doc """
+  Routes every email `Amanogawa.Mailer` (`Swoosh.Adapters.Test`) sends
+  for the rest of the calling test to the calling process's own mailbox
+  (`Application.put_env(:swoosh, :shared_test_process, self())`), so
+  `Swoosh.TestAssertions.assert_email_sent/1` can capture it even though
+  the actual delivery runs in the endpoint's request-handling process
+  (the browser triggers it, not the test process itself), not the test
+  process. Called from a per-test `setup` (never `setup_all`, unlike
+  `start_wallaby_and_raise_test_only_rate_limits/0` above): `self()` here
+  must be the exact process each `feature/3` block runs in, which
+  `setup_all`'s own dedicated case process is not.
+  """
+  @spec share_swoosh_mailbox() :: :ok
+  def share_swoosh_mailbox do
+    Application.put_env(:swoosh, :shared_test_process, self())
     :ok
   end
 end

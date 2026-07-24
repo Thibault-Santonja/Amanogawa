@@ -4,11 +4,31 @@ defmodule AmanogawaWeb.Endpoint do
   # The session will be stored in the cookie and signed,
   # this means its contents can be read but not tampered with.
   # Set :encryption_salt if you would also like to encrypt it.
+  #
+  # `secure: true` only in `:prod` (issue #032): the authenticated
+  # session cookie (`AmanogawaWeb.UserAuth`) must never transit in clear
+  # text, and `config/prod.exs`'s `force_ssl: [rewrite_on: [:x_forwarded_
+  # proto], ...]` is what makes `conn.scheme` trustworthy behind
+  # kamal-proxy for this flag to mean anything (kamal-proxy terminates
+  # TLS and forwards over the private Docker network in plain HTTP,
+  # `docs/ops/deploy.md`; only a request whose `x-forwarded-proto` header
+  # comes through a proxy listed in `TRUSTED_PROXIES`, see
+  # `trusted_proxies/0` below, is ever honored). Compile-time
+  # (`Mix.env()`, evaluated once here, not a runtime config read): unlike
+  # `force_ssl` itself, session cookie options cannot be made
+  # environment-dependent at runtime without hand-rolling a second `Plug.
+  # Session` invocation, and this project only ever has one meaningful
+  # value per build target anyway. Always `false` in `:dev`/`:test`: a
+  # `Secure` cookie set over the plain HTTP those environments actually
+  # serve would either be silently dropped by the browser or (Wallaby's
+  # real Chrome, `mix test.e2e`) make the whole authenticated E2E journey
+  # unable to stay signed in.
   @session_options [
     store: :cookie,
     key: "_amanogawa_key",
     signing_salt: "cd2EUJnA",
-    same_site: "Lax"
+    same_site: "Lax",
+    secure: Mix.env() == :prod
   ]
 
   # `:peer_data` is exposed to LiveView (`get_connect_info/2`) so

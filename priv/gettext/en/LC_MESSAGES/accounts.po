@@ -20,3 +20,9 @@ msgstr "Here is your sign-in link:\n\n%{url}\n\nThis link is valid for %{minutes
 #, elixir-autogen, elixir-format
 msgid "Votre lien de connexion Amanogawa"
 msgstr "Your Amanogawa sign-in link"
+
+#: lib/amanogawa_web/user_auth.ex:145
+#: lib/amanogawa_web/user_auth.ex:176
+#, elixir-autogen, elixir-format
+msgid "Vous devez vous connecter pour accéder à cette page."
+msgstr "You must sign in to access this page."

@@ -109,6 +109,20 @@ defmodule Amanogawa.Accounts.MagicLink do
     count
   end
 
+  @doc """
+  Deletes every magic link token issued for `email` (already normalized
+  by the caller). Used by `Amanogawa.Accounts.delete_user/1` (issue
+  #033): magic link tokens are matched by email, not foreign-keyed to a
+  user row (a token can exist before any account does, see the
+  moduledoc), so they are not covered by the `session_tokens.user_id`
+  cascade and must be deleted explicitly.
+  """
+  @spec delete_all_for_email(String.t()) :: :ok
+  def delete_all_for_email(email) do
+    invalidate_previous_tokens(email)
+    :ok
+  end
+
   defp invalidate_previous_tokens(normalized_email) do
     MagicLinkToken
     |> where([t], t.email == ^normalized_email)

@@ -2,11 +2,13 @@ defmodule Amanogawa.AccountsFixtures do
   @moduledoc """
   Canonical builder for Accounts test fixtures. The only place in the
   test suite allowed to construct `Amanogawa.Accounts.User` /
-  `MagicLinkToken` rows directly; every other test goes through
-  `user_fixture/1` and `magic_link_token_fixture/1`.
+  `MagicLinkToken` / `SessionToken` rows directly; every other test goes
+  through `user_fixture/1`, `magic_link_token_fixture/1`, and
+  `session_token_fixture/1`.
   """
 
   alias Amanogawa.Accounts.MagicLinkToken
+  alias Amanogawa.Accounts.SessionToken
   alias Amanogawa.Accounts.User
   alias Amanogawa.Repo
 
@@ -63,6 +65,43 @@ defmodule Amanogawa.AccountsFixtures do
       |> Repo.insert!()
 
     {clear_token, token}
+  end
+
+  @doc """
+  Inserts a session token row directly, bypassing `Amanogawa.Accounts.
+  Session.create/1`: returns `{clear_token, session_token}`, the same
+  shape as `magic_link_token_fixture/1`, so a test can hand `clear_token`
+  to `Amanogawa.Accounts.get_user_by_session_token/1` while also
+  controlling `:inserted_at` precisely (limit-case tests of the 60-day
+  validity window and the 7-day renewal threshold pilot the clock
+  instead of waiting on it, `.claude/rules/testing.md`).
+
+  `attrs` may override `:user_id` (defaults to a freshly inserted user),
+  `:inserted_at`, or supply an explicit `:clear_token`; `:token_hash` is
+  always derived from the effective clear token.
+  """
+  @spec session_token_fixture(map() | keyword()) :: {String.t(), SessionToken.t()}
+  def session_token_fixture(attrs \\ %{}) do
+    attrs = Map.new(attrs)
+    {clear_token, attrs} = Map.pop(attrs, :clear_token, unique_clear_token())
+    {user_id, attrs} = Map.pop_lazy(attrs, :user_id, fn -> user_fixture().id end)
+
+    default_attrs = %{
+      user_id: user_id,
+      inserted_at: DateTime.truncate(DateTime.utc_now(), :second)
+    }
+
+    merged_attrs =
+      Map.merge(default_attrs, attrs)
+      |> Map.update!(:inserted_at, &DateTime.truncate(&1, :second))
+
+    session_token =
+      %SessionToken{}
+      |> Ecto.Changeset.change(merged_attrs)
+      |> Ecto.Changeset.put_change(:token_hash, :crypto.hash(:sha256, clear_token))
+      |> Repo.insert!()
+
+    {clear_token, session_token}
   end
 
   @doc "Returns an email unique to this call."

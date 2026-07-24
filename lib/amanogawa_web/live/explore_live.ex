@@ -252,7 +252,7 @@ defmodule AmanogawaWeb.ExploreLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash}>
+    <Layouts.app flash={@flash} current_scope={@current_scope}>
       <%!-- data-i18n-* carries the labels the hover card
       (`assets/js/map/hover_card.js`) renders into its DOM, translated
       server-side (security review, i18n finding): the hook reads them off

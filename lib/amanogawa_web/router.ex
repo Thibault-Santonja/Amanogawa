@@ -1,10 +1,18 @@
 defmodule AmanogawaWeb.Router do
   use AmanogawaWeb, :router
 
+  import AmanogawaWeb.UserAuth
+
   pipeline :browser do
     plug :accepts, ["html"]
     plug AmanogawaWeb.Plugs.SetLocale
     plug :fetch_session
+    # After :fetch_session (issue #032, F07 overview): resolves
+    # @current_scope for every request on this pipeline, user possibly
+    # nil, never a bare nil assign (AmanogawaWeb.UserAuth). The :api and
+    # :health pipelines below never gain this plug: the anonymous JSON
+    # endpoints and the liveness probe carry no session and no new cost.
+    plug :fetch_current_scope_for_user
     plug :fetch_live_flash
     plug :put_root_layout, html: {AmanogawaWeb.Layouts, :root}
     plug :protect_from_forgery
@@ -48,10 +56,56 @@ defmodule AmanogawaWeb.Router do
     plug :accepts, ["json"]
   end
 
+  # Gates controller-only routes under the authenticated scope (issue
+  # #032/#033: GET /compte/export is a plain controller action, never a
+  # LiveView, so it needs the conn form of the gate rather than
+  # live_session's on_mount hook). Stacked on top of :browser, which has
+  # already resolved @current_scope by this point.
+  # Named :authenticated, not :require_authenticated_user: Phoenix.Router
+  # refuses a pipeline whose name collides with an imported function
+  # (AmanogawaWeb.UserAuth.require_authenticated_user/2 above).
+  pipeline :authenticated do
+    plug :require_authenticated_user
+  end
+
+  # Public routes (issue #032): the map stays reachable without any
+  # account, LoginLive alongside it under the same live_session since
+  # both merely need @current_scope.user, possibly nil (F07 overview:
+  # "la lecture reste 100% publique"). Never reuse this live_session name
+  # for an authenticated-only route: :require_authenticated_user below is
+  # the one live_session name reserved for that (never duplicate a
+  # live_session name, F07 overview / issue #032).
   scope "/", AmanogawaWeb do
     pipe_through :browser
 
-    live "/", ExploreLive
+    live_session :current_user, on_mount: [{AmanogawaWeb.UserAuth, :mount_current_scope}] do
+      live "/", ExploreLive
+      live "/connexion", LoginLive
+    end
+
+    get "/connexion/:token", SessionController, :confirm
+    post "/connexion/:token", SessionController, :create
+    delete "/deconnexion", SessionController, :delete
+  end
+
+  # Authenticated-only routes (first introduced by issue #033's /compte;
+  # the on_mount hook itself is written and tested in #032). The
+  # controller route below reuses the same require_authenticated_user
+  # plug (its conn form) rather than the LiveView on_mount, since GET
+  # /compte/export is a plain controller action, never a LiveView.
+  scope "/", AmanogawaWeb do
+    pipe_through :browser
+
+    live_session :require_authenticated_user,
+      on_mount: [{AmanogawaWeb.UserAuth, :require_authenticated_user}] do
+      live "/compte", AccountLive
+    end
+  end
+
+  scope "/", AmanogawaWeb do
+    pipe_through [:browser, :authenticated]
+
+    get "/compte/export", AccountController, :export
   end
 
   scope "/", AmanogawaWeb do

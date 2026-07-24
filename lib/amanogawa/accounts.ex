@@ -2,12 +2,14 @@ defmodule Amanogawa.Accounts do
   @moduledoc """
   Public API of the Accounts bounded context: passwordless, magic-link
   authentication (issue #030, F07 overview's "pas de mot de passe, pas
-  d'OAuth tiers"). Users hold nothing but an email and a creation date
-  (ADR 0008 minimal data).
+  d'OAuth tiers"), server-side revocable sessions (#032), and the RGPD
+  self-service of #033 (export, hard delete). Users hold nothing but an
+  email and a creation date (ADR 0008 minimal data).
 
   Every other context and the entire web layer call this facade only,
   never `Amanogawa.Accounts.User`, `Amanogawa.Accounts.MagicLinkToken`,
-  `Amanogawa.Accounts.MagicLink` or `Amanogawa.Repo` directly
+  `Amanogawa.Accounts.MagicLink`, `Amanogawa.Accounts.SessionToken`,
+  `Amanogawa.Accounts.Session` or `Amanogawa.Repo` directly
   (`.claude/rules/architecture.md`).
 
   ## Security invariants (#030, relied on by #031/#032 without being
@@ -50,6 +52,8 @@ defmodule Amanogawa.Accounts do
   alias Amanogawa.Accounts.MagicLink
   alias Amanogawa.Accounts.MagicLinkThrottle
   alias Amanogawa.Accounts.MagicLinkToken
+  alias Amanogawa.Accounts.Session
+  alias Amanogawa.Accounts.SessionToken
   alias Amanogawa.Accounts.User
   alias Amanogawa.Repo
 
@@ -162,6 +166,145 @@ defmodule Amanogawa.Accounts do
   """
   @spec purge_expired_magic_link_tokens() :: non_neg_integer()
   defdelegate purge_expired_magic_link_tokens, to: MagicLink, as: :purge_expired
+
+  @doc """
+  Creates a server-side session for `user` (issue #032,
+  `Amanogawa.Accounts.Session`): returns `{:ok, {clear_token,
+  session_token}}`, the clear token to store in the caller's cookie, the
+  persisted (hash-only) row otherwise. Called once, from
+  `AmanogawaWeb.UserAuth.log_in_user/2`.
+  """
+  @spec create_session_token(User.t()) :: {:ok, {String.t(), SessionToken.t()}}
+  defdelegate create_session_token(user), to: Session, as: :create
+
+  @doc """
+  Resolves a clear session token to its user, within the 60-day validity
+  window (`Amanogawa.Accounts.Session`). Never raises: an altered,
+  empty, unknown, or expired token resolves to `nil`.
+  """
+  @spec get_user_by_session_token(String.t()) :: User.t() | nil
+  defdelegate get_user_by_session_token(clear_token), to: Session, as: :get_user
+
+  @doc """
+  Deletes the session matching `clear_token`, if any (server-side
+  revocation: logout, or the account-page revocation of #033).
+  Idempotent.
+  """
+  @spec delete_session_token(String.t()) :: :ok
+  defdelegate delete_session_token(clear_token), to: Session, as: :delete
+
+  @doc """
+  Slides a session forward if it is older than 7 days (`Amanogawa.
+  Accounts.Session.renewal_threshold_days/0`): returns `{:ok,
+  {new_clear_token, new_session_token}}` when renewed, `:unchanged`
+  otherwise. Called from `AmanogawaWeb.UserAuth.
+  fetch_current_scope_for_user/2` on every authenticated request.
+  """
+  @spec renew_session_token(String.t()) :: {:ok, {String.t(), SessionToken.t()}} | :unchanged
+  defdelegate renew_session_token(clear_token), to: Session, as: :renew
+
+  @doc """
+  `true` when `clear_token` is the one `session_token` was created from,
+  determined by re-hashing `clear_token` and comparing
+  (`Plug.Crypto.secure_compare/2`, non-oracular) against the persisted
+  `token_hash`: the mechanism `AmanogawaWeb.AccountLive` (#033) uses to
+  mark the "current session" row in a session list without this facade
+  ever handing a hash to the web layer to compare itself.
+  """
+  @spec current_session_token?(SessionToken.t(), String.t()) :: boolean()
+  def current_session_token?(%SessionToken{} = session_token, clear_token)
+      when is_binary(clear_token) do
+    Plug.Crypto.secure_compare(session_token.token_hash, :crypto.hash(:sha256, clear_token))
+  end
+
+  @doc """
+  Deletes every magic link and session token older than their respective
+  validity windows. Returns the total number of rows deleted. Called
+  daily by `Amanogawa.Accounts.Workers.PurgeExpiredTokens` (Oban cron);
+  hygiene only, see the moduledocs of `Amanogawa.Accounts.MagicLink` and
+  `Amanogawa.Accounts.Session`.
+  """
+  @spec purge_expired_tokens() :: non_neg_integer()
+  def purge_expired_tokens do
+    MagicLink.purge_expired() + Session.purge_expired()
+  end
+
+  @doc """
+  Lists `user.id`'s active sessions, newest first (issue #033's account
+  page). Never includes an already-expired session: `Amanogawa.Accounts.
+  Session.list_active/1` applies the same 60-day window `get_user_by_
+  session_token/1` does.
+  """
+  @spec list_session_tokens(User.t()) :: [SessionToken.t()]
+  def list_session_tokens(%User{id: user_id}), do: Session.list_active(user_id)
+
+  @doc """
+  Revokes session `id` for `user`: deletes the row only if it belongs to
+  `user` (IDOR check, `.claude/rules/security.md`, verified before this
+  mutation): `:ok` on success, `{:error, :not_found}` for an unknown id
+  or one owned by another user (the two cases are never distinguished,
+  same anti-oracle spirit as the rest of this context).
+
+  Does not itself disconnect a live socket for the revoked session: the
+  web layer (`AmanogawaWeb.AccountLive`) does, since the
+  `"users_sessions:<id>"` broadcast topic is a web-layer convention
+  (`AmanogawaWeb.UserAuth`), not a domain concern.
+  """
+  @spec revoke_session_token(User.t(), String.t()) :: :ok | {:error, :not_found}
+  def revoke_session_token(%User{id: user_id}, id), do: Session.revoke(id, user_id)
+
+  @doc """
+  A versioned, serializable map of everything the database knows about
+  `user` (issue #033, RGPD article 20 portability): `%{format_version:
+  1, exported_at: ..., account: %{email:, inserted_at:}, sessions: [%{
+  inserted_at:}, ...]}`.
+
+  Never includes a `token_hash` or a clear token, in either the account
+  or the sessions list: an export is a right the user exercises on
+  themselves, but a credential is still not "data about the account" in
+  the sense this key means. `format_version` exists so F08 can add a
+  `contributions` key later without breaking a consumer that already
+  parsed an export under this shape.
+  """
+  @spec export_user_data(User.t()) :: map()
+  def export_user_data(%User{} = user) do
+    %{
+      format_version: 1,
+      exported_at: DateTime.utc_now(),
+      account: %{email: user.email, inserted_at: user.inserted_at},
+      sessions: Enum.map(list_session_tokens(user), &%{inserted_at: &1.inserted_at})
+    }
+  end
+
+  @doc """
+  Hard-deletes `user`: their magic link tokens (matched by email, since
+  those are not foreign-keyed to the user row, see `Amanogawa.Accounts.
+  MagicLinkToken`), then the user row itself, in one transaction; session
+  tokens are removed by the `on_delete: :delete_all` foreign key rather
+  than a third explicit query. Returns `:ok`.
+
+  No soft delete, no `deleted_at`, no retention (issue #033, ADR 0008):
+  after this returns, the email can sign up again as a brand new
+  account. This is the single point where F08's future ADR on
+  contribution attribution after account deletion will need to insert
+  itself (pseudonymization, most likely): today there is nothing to
+  attribute yet, so there is nothing else to arbitrate here.
+
+  Idempotent: a concurrent second deletion of the same account (a
+  double click, or two tabs both confirming, issue #033's own point
+  d'attention) finds the row already gone (`stale_error_field: :id`
+  turns what would otherwise be a raised `Ecto.StaleEntryError` into a
+  no-op) and still returns `:ok`, never a crash.
+  """
+  @spec delete_user(User.t()) :: :ok
+  def delete_user(%User{} = user) do
+    Repo.transaction(fn ->
+      MagicLink.delete_all_for_email(user.email)
+      Repo.delete(user, stale_error_field: :id)
+    end)
+
+    :ok
+  end
 
   defp validate_email(email) do
     changeset = User.changeset(%User{}, %{email: email})
