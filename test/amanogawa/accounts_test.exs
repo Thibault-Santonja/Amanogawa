@@ -8,6 +8,7 @@ defmodule Amanogawa.AccountsTest do
   alias Amanogawa.Accounts
   alias Amanogawa.Accounts.MagicLink
   alias Amanogawa.Accounts.MagicLinkToken
+  alias Amanogawa.Accounts.Scope
   alias Amanogawa.Accounts.Session
   alias Amanogawa.Accounts.SessionToken
   alias Amanogawa.Accounts.User
@@ -684,6 +685,64 @@ defmodule Amanogawa.AccountsTest do
         assert {:ok, decoded} = Jason.decode(encoded)
         assert length(decoded["sessions"]) == session_count
       end
+    end
+  end
+
+  describe "reviewer?/1 (issue #034)" do
+    test "true for a user with role: :reviewer, false otherwise, false for nil" do
+      assert Accounts.reviewer?(reviewer_fixture())
+      refute Accounts.reviewer?(user_fixture())
+      refute Accounts.reviewer?(nil)
+    end
+  end
+
+  describe "set_display_name/2 (issue #034)" do
+    test "happy path: sets a valid, available display name" do
+      user = user_fixture()
+
+      assert {:ok, updated} = Accounts.set_display_name(user, "Contributeur")
+      assert updated.display_name == "Contributeur"
+    end
+
+    test "edge case: length bounds (3 to 40 characters)" do
+      user = user_fixture()
+
+      assert {:error, changeset} = Accounts.set_display_name(user, "ab")
+      assert "should be at least 3 character(s)" in errors_on(changeset).display_name
+
+      assert {:error, changeset} = Accounts.set_display_name(user, String.duplicate("a", 41))
+      assert "should be at most 40 character(s)" in errors_on(changeset).display_name
+    end
+
+    test "error case: a name already taken (case-insensitively) by another account is rejected" do
+      _existing = user_fixture() |> Accounts.set_display_name("Historien") |> elem(1)
+      user = user_fixture()
+
+      assert {:error, changeset} = Accounts.set_display_name(user, "historien")
+      assert "has already been taken" in errors_on(changeset).display_name
+    end
+  end
+
+  describe "display_names_by_ids/1 (issue #034)" do
+    test "resolves every id to its display name, nil for none set and for an unknown id" do
+      user_with_name = user_fixture() |> Accounts.set_display_name("Pseudonyme") |> elem(1)
+      user_without_name = user_fixture()
+      unknown_id = Ecto.UUID.generate()
+
+      resolved =
+        Accounts.display_names_by_ids([user_with_name.id, user_without_name.id, unknown_id])
+
+      assert resolved[user_with_name.id] == "Pseudonyme"
+      assert resolved[user_without_name.id] == nil
+      refute Map.has_key?(resolved, unknown_id)
+    end
+  end
+
+  describe "Amanogawa.Accounts.Scope.for_user/1 carries the reviewer role (issue #034)" do
+    test "reviewer? mirrors the user's role" do
+      assert %{reviewer?: true} = Scope.for_user(reviewer_fixture())
+      assert %{reviewer?: false} = Scope.for_user(user_fixture())
+      assert %{reviewer?: false} = Scope.for_user(nil)
     end
   end
 

@@ -277,4 +277,89 @@ defmodule AmanogawaWeb.UserAuthTest do
       assert get_session(conn, "user_return_to") == "/compte/export"
     end
   end
+
+  describe "require_reviewer/2 (issue #035)" do
+    test "passes through a reviewer conn unchanged", %{conn: conn} do
+      conn =
+        conn
+        |> log_in_user(reviewer_fixture())
+        |> UserAuth.fetch_current_scope_for_user([])
+        |> UserAuth.require_reviewer([])
+
+      refute conn.halted
+    end
+
+    test "halts and redirects to / with a neutral flash for a connected non-reviewer", %{
+      conn: conn
+    } do
+      conn =
+        conn
+        |> log_in_user(user_fixture())
+        |> UserAuth.fetch_current_scope_for_user([])
+        |> Phoenix.Controller.fetch_flash([])
+        |> UserAuth.require_reviewer([])
+
+      assert conn.halted
+      assert redirected_to(conn) == ~p"/"
+    end
+
+    test "halts and redirects to /connexion for an anonymous conn", %{conn: conn} do
+      conn =
+        conn
+        |> init_test_session(%{})
+        |> Map.put(:path_info, ["relecture", "conflits"])
+        |> Map.put(:request_path, "/relecture/conflits")
+        |> Map.put(:method, "GET")
+        |> UserAuth.fetch_current_scope_for_user([])
+        |> Phoenix.Controller.fetch_flash([])
+        |> UserAuth.require_reviewer([])
+
+      assert conn.halted
+      assert redirected_to(conn) == ~p"/connexion"
+    end
+  end
+
+  describe "on_mount(:require_reviewer, ...) (issue #035)" do
+    test "continues for a reviewer" do
+      {:ok, {clear_token, _}} = Accounts.create_session_token(reviewer_fixture())
+
+      socket =
+        %Phoenix.LiveView.Socket{endpoint: Endpoint, assigns: %{__changed__: %{}, flash: %{}}}
+
+      assert {:cont, socket} =
+               UserAuth.on_mount(
+                 :require_reviewer,
+                 %{},
+                 %{"user_session_token" => clear_token},
+                 socket
+               )
+
+      assert socket.assigns.current_scope.reviewer?
+    end
+
+    test "halts and redirects to / for a connected non-reviewer" do
+      {:ok, {clear_token, _}} = Accounts.create_session_token(user_fixture())
+
+      socket =
+        %Phoenix.LiveView.Socket{endpoint: Endpoint, assigns: %{__changed__: %{}, flash: %{}}}
+
+      assert {:halt, socket} =
+               UserAuth.on_mount(
+                 :require_reviewer,
+                 %{},
+                 %{"user_session_token" => clear_token},
+                 socket
+               )
+
+      assert socket.redirected == {:redirect, %{status: 302, to: "/"}}
+    end
+
+    test "halts and redirects to /connexion for an anonymous socket" do
+      socket =
+        %Phoenix.LiveView.Socket{endpoint: Endpoint, assigns: %{__changed__: %{}, flash: %{}}}
+
+      assert {:halt, socket} = UserAuth.on_mount(:require_reviewer, %{}, %{}, socket)
+      assert socket.redirected == {:redirect, %{status: 302, to: "/connexion"}}
+    end
+  end
 end

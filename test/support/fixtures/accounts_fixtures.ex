@@ -104,6 +104,28 @@ defmodule Amanogawa.AccountsFixtures do
     {clear_token, session_token}
   end
 
+  @doc """
+  Inserts a user with `role: :reviewer` and a display name (issue #034):
+  a plain `Ecto.Changeset.change/2` after `user_fixture/1`, bypassing
+  `Amanogawa.Accounts.User.changeset/2` (which never casts `:role`,
+  promotion being a manual database operation, F08 overview) the same way
+  `Amanogawa.Accounts.set_display_name/2`'s underlying changeset would.
+  """
+  @spec reviewer_fixture(map() | keyword()) :: User.t()
+  def reviewer_fixture(attrs \\ %{}) do
+    attrs = Map.new(attrs)
+    {display_name, attrs} = Map.pop(attrs, :display_name, unique_display_name())
+
+    attrs
+    |> user_fixture()
+    |> Ecto.Changeset.change(role: :reviewer, display_name: display_name)
+    |> Repo.update!()
+  end
+
+  @doc "Returns a display name unique to this call."
+  @spec unique_display_name() :: String.t()
+  def unique_display_name, do: "contributeur-#{System.unique_integer([:positive])}"
+
   @doc "Returns an email unique to this call."
   @spec unique_email() :: String.t()
   def unique_email, do: "user-#{System.unique_integer([:positive])}@example.com"

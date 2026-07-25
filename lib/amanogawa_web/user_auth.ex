@@ -178,12 +178,49 @@ defmodule AmanogawaWeb.UserAuth do
   end
 
   @doc """
+  Plug: halts anonymous requests the same way `require_authenticated_user/2`
+  does, and halts a connected-but-non-reviewer request with a neutral
+  `404`-style redirect to `/` (issue #035: never reveals that a reviewer
+  role exists, the LiveView equivalent below,
+  `on_mount(:require_reviewer, ...)`, applies the same shape). Requires
+  `fetch_current_scope_for_user/2` to already have run. Backs
+  `live_session :require_reviewer`'s stacked `:authenticated` pipeline
+  (the plug is what stashes `"user_return_to"` on the initial anonymous
+  GET; the on_mount hook is what re-checks on the websocket join, which
+  never runs the plug pipeline, mirroring `require_authenticated_user/2`'s
+  own doc).
+  """
+  @spec require_reviewer(Plug.Conn.t(), keyword()) :: Plug.Conn.t()
+  def require_reviewer(conn, _opts) do
+    case conn.assigns.current_scope do
+      %{user: nil} ->
+        require_authenticated_user(conn, [])
+
+      %{reviewer?: true} ->
+        conn
+
+      %{reviewer?: false} ->
+        conn
+        |> put_flash(:error, dgettext("accounts", "Page introuvable."))
+        |> redirect(to: ~p"/")
+        |> halt()
+    end
+  end
+
+  @doc """
   `on_mount` hook assigning `@current_scope` from the socket's session
   (`user` possibly `nil`): the sole point resolving it for every
   LiveView under `live_session :current_user` and `:require_authenticated_user`.
   No database query when the session carries no token; exactly one when
   it does. Never runs from `mount/3` bodies (`.claude/rules/liveview.md`):
   this hook IS the sanctioned exception, the same one `phx.gen.auth` uses.
+
+  `:require_reviewer` (issue #035) gates `live_session :require_reviewer`
+  (`AmanogawaWeb.ConflictsLive`, `/relecture/conflits`): an anonymous
+  socket is redirected to `/connexion` (the same as
+  `:require_authenticated_user`), a connected-but-non-reviewer socket is
+  redirected to `/` with a neutral flash (never revealing that a reviewer
+  role exists, `.claude/rules/security.md`'s anti-oracle spirit).
   """
   @spec on_mount(atom(), map(), map(), Phoenix.LiveView.Socket.t()) ::
           {:cont, Phoenix.LiveView.Socket.t()} | {:halt, Phoenix.LiveView.Socket.t()}
@@ -206,6 +243,34 @@ defmodule AmanogawaWeb.UserAuth do
         |> Phoenix.LiveView.redirect(to: ~p"/connexion")
 
       {:halt, socket}
+    end
+  end
+
+  def on_mount(:require_reviewer, _params, session, socket) do
+    socket = mount_current_scope(socket, session)
+
+    case socket.assigns.current_scope do
+      %{user: nil} ->
+        socket =
+          socket
+          |> Phoenix.LiveView.put_flash(
+            :error,
+            dgettext("accounts", "Vous devez vous connecter pour accéder à cette page.")
+          )
+          |> Phoenix.LiveView.redirect(to: ~p"/connexion")
+
+        {:halt, socket}
+
+      %{reviewer?: true} ->
+        {:cont, socket}
+
+      %{reviewer?: false} ->
+        socket =
+          socket
+          |> Phoenix.LiveView.put_flash(:error, dgettext("accounts", "Page introuvable."))
+          |> Phoenix.LiveView.redirect(to: ~p"/")
+
+        {:halt, socket}
     end
   end
 

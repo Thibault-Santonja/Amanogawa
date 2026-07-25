@@ -115,7 +115,10 @@ defmodule Amanogawa.Atlas.EventTest do
       changeset = Event.changeset(%Event{}, %{@valid_attrs | qid: "not-a-qid"})
 
       refute changeset.valid?
-      assert "must be a Wikidata QID, e.g. Q12345" in errors_on(changeset).qid
+
+      assert "must be a Wikidata QID (e.g. Q12345) or a local id (e.g. L<uuid hex>)" in errors_on(
+               changeset
+             ).qid
     end
 
     test "begin_month with begin_precision 9 is truncated, not rejected (same rule as #006)" do

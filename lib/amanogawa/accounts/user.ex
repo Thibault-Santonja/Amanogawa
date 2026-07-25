@@ -32,8 +32,26 @@ defmodule Amanogawa.Accounts.User do
   # an address works is the magic link actually being delivered to it.
   @email_format ~r/\A[^\s]+@[^\s]+\z/
 
+  # Public pseudonym bounds (issue #034, F08 overview's "attribution
+  # publique sans fuite d'email"): generous enough for a real display
+  # name, small enough to keep the column and its case-insensitive unique
+  # index cheap.
+  @display_name_min_length 3
+  @display_name_max_length 40
+
   schema "users" do
     field :email, :string
+
+    # Promoted manually in the database for V1 (issue #034, F08 overview:
+    # "promue manuellement en base pour commencer"): no self-service
+    # escalation path exists anywhere in this context.
+    field :role, Ecto.Enum, values: [:user, :reviewer], default: :user
+
+    # Public pseudonym (issue #034): required before a user's first
+    # contribution proposal, never the email, which is never shown
+    # publicly (`Amanogawa.Contributions`' revisions attribute by this
+    # field alone).
+    field :display_name, :string
 
     timestamps(type: :utc_datetime, updated_at: false)
   end
@@ -54,6 +72,25 @@ defmodule Amanogawa.Accounts.User do
     |> validate_format(:email, @email_format, message: "must be a valid email address")
     |> validate_length(:email, max: @max_email_length)
     |> unique_constraint(:email)
+  end
+
+  @doc """
+  Builds and validates a changeset for `display_name` alone (issue #034,
+  `Amanogawa.Accounts.set_display_name/2`): required, #{@display_name_min_length}
+  to #{@display_name_max_length} characters, unique case-insensitively
+  (`users_display_name_lower_index`, the same `lower(...)` technique
+  `changeset/2` uses for `email`).
+  """
+  @spec display_name_changeset(t(), map()) :: Ecto.Changeset.t()
+  def display_name_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:display_name])
+    |> validate_required([:display_name])
+    |> validate_length(:display_name,
+      min: @display_name_min_length,
+      max: @display_name_max_length
+    )
+    |> unique_constraint(:display_name, name: :users_display_name_lower_index)
   end
 
   @doc """

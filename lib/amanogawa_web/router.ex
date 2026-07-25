@@ -114,6 +114,25 @@ defmodule AmanogawaWeb.Router do
     get "/compte/export", AccountController, :export
   end
 
+  # Reviewer-only routes (issue #035: reuses the :authenticated pipeline
+  # for the same "user_return_to" reason documented above, layers
+  # AmanogawaWeb.UserAuth.require_reviewer/2 on top). :require_reviewer is
+  # its own live_session name, never reused for another gate (F07's "never
+  # duplicate a live_session name" lesson applies just as much to this
+  # newer name as to :require_authenticated_user).
+  pipeline :reviewer do
+    plug :require_reviewer
+  end
+
+  scope "/", AmanogawaWeb do
+    pipe_through [:browser, :authenticated, :reviewer]
+
+    live_session :require_reviewer,
+      on_mount: [{AmanogawaWeb.UserAuth, :require_reviewer}] do
+      live "/relecture/conflits", ConflictsLive
+    end
+  end
+
   scope "/", AmanogawaWeb do
     pipe_through :static_page
 
