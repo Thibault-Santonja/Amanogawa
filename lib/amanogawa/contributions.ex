@@ -36,7 +36,7 @@ defmodule Amanogawa.Contributions do
   `Amanogawa.Repo`, never `Amanogawa.Atlas.Event` or any other internal
   Atlas module. `event_qid` and `author_id` carry no foreign key across
   the schema boundary (existence is checked at the application layer,
-  see `propose/2`). Calling `Amanogawa.Accounts.reviewer?/1` and
+  see `propose/3`). Calling `Amanogawa.Accounts.reviewer?/1` and
   `Amanogawa.Ingestion.Workers.ImportEvents` calling
   `record_sync_divergences/1` are both facade-to-facade calls, which the
   architecture rule explicitly allows.
@@ -51,10 +51,13 @@ defmodule Amanogawa.Contributions do
 
   import Ecto.Query
 
+  require Logger
+
   alias Amanogawa.Accounts
   alias Amanogawa.Atlas
   alias Amanogawa.Contributions.Conflict
   alias Amanogawa.Contributions.Override
+  alias Amanogawa.Contributions.ProposalThrottle
   alias Amanogawa.Contributions.Revision
   alias Amanogawa.Repo
 
@@ -62,13 +65,23 @@ defmodule Amanogawa.Contributions do
   @max_list_limit 200
 
   # ---------------------------------------------------------------------
-  # Proposals (issue #034)
+  # Proposals (issue #034, quota issue #036)
   # ---------------------------------------------------------------------
 
   @doc """
   Proposes a contribution: `attrs` shaped per `Amanogawa.Contributions.
   Override.propose_changeset/2` (`:kind`, plus the fields the chosen kind
-  requires, `:source`), `author_id` the proposing user's id.
+  requires, `:source`), `author_id` the proposing user's id, `ip` the
+  proposing client's address.
+
+  Checks `Amanogawa.Contributions.ProposalThrottle.allow?/2` FIRST, before
+  any database work (issue #036, `.claude/rules/security.md`): a
+  proposal from an over-quota author or client is refused with
+  `{:error, :rate_limited}` and nothing is written, whatever `attrs`
+  contains. This is the domain invariant, not a UI nicety: the only
+  public entry point this context exposes to create a proposal already
+  enforces it, so a future caller (a different LiveView, a public API)
+  cannot bypass it by construction.
 
   For `kind: :field`, `attrs.current_value` does not need to be supplied
   by the caller: it is always computed here, from the event's CURRENT
@@ -80,6 +93,26 @@ defmodule Amanogawa.Contributions do
   transaction. Returns `{:ok, override}` or `{:error, changeset}`;
   `{:error, :event_not_found}` when `attrs.event_qid` (`kind: :field` or
   `:link`) does not exist locally.
+  """
+  @spec propose(map(), Ecto.UUID.t(), String.t()) ::
+          {:ok, Override.t()}
+          | {:error, :event_not_found | :rate_limited | Ecto.Changeset.t()}
+  def propose(attrs, author_id, ip) do
+    if ProposalThrottle.allow?(author_id, ip) do
+      propose(attrs, author_id)
+    else
+      {:error, :rate_limited}
+    end
+  end
+
+  @doc """
+  The unthrottled proposal write `propose/3` guards with
+  `Amanogawa.Contributions.ProposalThrottle` before delegating here.
+  Kept public for callers that have already accounted for quota
+  themselves (this module's own tests, `Amanogawa.Contributions.
+  ProposalThrottle`'s own test suite): every WEB entry point calls
+  `propose/3`, never this arity directly, so a hostile client is always
+  behind the throttle.
   """
   @spec propose(map(), Ecto.UUID.t()) ::
           {:ok, Override.t()} | {:error, :event_not_found | Ecto.Changeset.t()}
@@ -165,6 +198,11 @@ defmodule Amanogawa.Contributions do
   RELOADED under that transaction (a concurrent second acceptance of the
   same override sees the reloaded `:accepted` status and is rejected,
   applying Atlas exactly once regardless of how many requests race).
+
+  A single sober decision email is sent to the author AFTER the
+  transaction commits (issue #037, `Amanogawa.Contributions.
+  DecisionNotifier`): never for a decision the transaction itself rolled
+  back, never a second time for the same acceptance.
   """
   @spec accept_override(Ecto.UUID.t(), Accounts.User.t(), String.t()) ::
           {:ok, Override.t()}
@@ -176,8 +214,15 @@ defmodule Amanogawa.Contributions do
              | :message_required
              | Ecto.Changeset.t()}
   def accept_override(override_id, reviewer, message) do
-    with :ok <- validate_reviewer_message(message) do
-      with_reviewer_authority(override_id, reviewer, &do_accept_override(&1, reviewer, message))
+    with :ok <- validate_reviewer_message(message),
+         {:ok, updated} <-
+           with_reviewer_authority(
+             override_id,
+             reviewer,
+             &do_accept_override(&1, reviewer, message)
+           ) do
+      notify_decision(updated, :accepted, message)
+      {:ok, updated}
     end
   end
 
@@ -194,7 +239,8 @@ defmodule Amanogawa.Contributions do
   Rejects a `:pending` override: same reviewer/self-review/message
   contract as `accept_override/3`, but writes nothing to `Amanogawa.Atlas`
   (a rejected proposal never touched the map). Moves the override to
-  `:rejected` and journals a `:rejected` revision.
+  `:rejected` and journals a `:rejected` revision. Same post-commit
+  decision email as `accept_override/3`.
   """
   @spec reject_override(Ecto.UUID.t(), Accounts.User.t(), String.t()) ::
           {:ok, Override.t()}
@@ -206,8 +252,15 @@ defmodule Amanogawa.Contributions do
              | :message_required
              | Ecto.Changeset.t()}
   def reject_override(override_id, reviewer, message) do
-    with :ok <- validate_reviewer_message(message) do
-      with_reviewer_authority(override_id, reviewer, &do_reject_override(&1, reviewer, message))
+    with :ok <- validate_reviewer_message(message),
+         {:ok, updated} <-
+           with_reviewer_authority(
+             override_id,
+             reviewer,
+             &do_reject_override(&1, reviewer, message)
+           ) do
+      notify_decision(updated, :rejected, message)
+      {:ok, updated}
     end
   end
 
@@ -217,6 +270,236 @@ defmodule Amanogawa.Contributions do
       {:ok, updated}
     end
   end
+
+  # ---------------------------------------------------------------------
+  # Appeals (issue #037)
+  # ---------------------------------------------------------------------
+
+  @appeal_text_min_length 5
+  @appeal_text_max_length 1000
+
+  @doc """
+  Appeals a `:rejected` override: `author` must be the override's own
+  author (anti-IDOR, `.claude/rules/security.md`), and this can only ever
+  happen ONCE per override (a second call, even by the same author,
+  fails with `:already_appealed`). `text` is the author's public reply,
+  mandatory, #{@appeal_text_min_length}-#{@appeal_text_max_length}
+  characters.
+
+  Moves the override to `:appealed` (a state `Amanogawa.Contributions.
+  list_review_queue/1` surfaces alongside `:pending`, at its ORIGINAL
+  proposal date: an appeal never "jumps the queue") and journals an
+  `:appealed` revision carrying `text`. No email is sent here (issue
+  #037: notifications happen at a decision, an appeal is the author
+  speaking, not a reviewer deciding).
+  """
+  @spec appeal_override(Ecto.UUID.t(), Accounts.User.t(), String.t()) ::
+          {:ok, Override.t()}
+          | {:error,
+             :not_found
+             | :forbidden
+             | :not_rejected
+             | :already_appealed
+             | :text_required
+             | Ecto.Changeset.t()}
+  def appeal_override(override_id, author, text) do
+    with :ok <- validate_appeal_text(text) do
+      Repo.transaction(fn -> do_appeal_override(override_id, author, text) end)
+    end
+  end
+
+  defp do_appeal_override(override_id, author, text) do
+    case locked_override(override_id) do
+      nil ->
+        Repo.rollback(:not_found)
+
+      override ->
+        authorize_and_run(
+          override,
+          author,
+          &do_appeal_write(&1, author, text),
+          &authorize_appeal/2
+        )
+    end
+  end
+
+  defp do_appeal_write(override, author, text) do
+    with {:ok, updated} <- override |> Override.appeal_changeset() |> Repo.update(),
+         {:ok, _revision} <- create_revision(updated, :appealed, author.id, text) do
+      {:ok, updated}
+    end
+  end
+
+  defp authorize_appeal(override, author) do
+    cond do
+      override.status != :rejected -> {:error, :not_rejected}
+      override.author_id != author.id -> {:error, :forbidden}
+      already_appealed?(override.id) -> {:error, :already_appealed}
+      true -> :ok
+    end
+  end
+
+  @doc """
+  The final decision on an appealed (`:appealed`) override: `reviewer`
+  must hold the `:reviewer` role and must not be the override's own
+  author (same anti self-review contract as `accept_override/3`; the
+  SAME reviewer who made the original decision is explicitly allowed to
+  also decide the appeal, F08 overview's "en V1 le même est accepté :
+  projet solo"). `attrs` carries `:decision` (`:accepted` applies the
+  override exactly like `accept_override/3`, `:rejected` leaves
+  `Amanogawa.Atlas` untouched) and `:message` (mandatory, bounded public
+  motive).
+
+  Journals an `:appeal_reviewed` revision. After this, the override is
+  terminal: `appeal_override/3` never accepts a second appeal on it
+  (`already_appealed?/1` finds this very `:appealed` revision). Same
+  post-commit decision email as `accept_override/3` (`:appeal_accepted`
+  or `:appeal_rejected`).
+  """
+  @spec review_appeal(Ecto.UUID.t(), Accounts.User.t(), map()) ::
+          {:ok, Override.t()}
+          | {:error,
+             :not_found
+             | :forbidden
+             | :self_review
+             | :not_appealed
+             | :message_required
+             | Ecto.Changeset.t()}
+  def review_appeal(override_id, reviewer, attrs) do
+    decision = Map.fetch!(attrs, :decision)
+    message = Map.fetch!(attrs, :message)
+
+    with :ok <- validate_reviewer_message(message),
+         {:ok, updated} <-
+           with_appeal_authority(
+             override_id,
+             reviewer,
+             &do_review_appeal(&1, reviewer, decision, message)
+           ) do
+      notify_decision(updated, appeal_outcome(decision), message)
+      {:ok, updated}
+    end
+  end
+
+  defp with_appeal_authority(override_id, reviewer, fun) do
+    Repo.transaction(fn -> do_with_appeal_authority(override_id, reviewer, fun) end)
+  end
+
+  defp do_with_appeal_authority(override_id, reviewer, fun) do
+    case locked_override(override_id) do
+      nil -> Repo.rollback(:not_found)
+      override -> authorize_and_run(override, reviewer, fun, &authorize_appeal_reviewer/2)
+    end
+  end
+
+  defp authorize_appeal_reviewer(override, reviewer) do
+    cond do
+      override.status != :appealed -> {:error, :not_appealed}
+      not Accounts.reviewer?(reviewer) -> {:error, :forbidden}
+      override.author_id == reviewer.id -> {:error, :self_review}
+      true -> :ok
+    end
+  end
+
+  defp do_review_appeal(override, reviewer, :accepted, message) do
+    with {:ok, wikidata_value} <- current_field_snapshot(override),
+         {:ok, _applied} <- apply_override(override),
+         {:ok, updated} <- override |> Override.accept_changeset(wikidata_value) |> Repo.update(),
+         {:ok, _revision} <- create_revision(updated, :appeal_reviewed, reviewer.id, message) do
+      {:ok, updated}
+    end
+  end
+
+  defp do_review_appeal(override, reviewer, :rejected, message) do
+    with {:ok, updated} <- override |> Override.reject_changeset() |> Repo.update(),
+         {:ok, _revision} <- create_revision(updated, :appeal_reviewed, reviewer.id, message) do
+      {:ok, updated}
+    end
+  end
+
+  defp appeal_outcome(:accepted), do: :appeal_accepted
+  defp appeal_outcome(:rejected), do: :appeal_rejected
+
+  @doc """
+  The review queue (issue #037): every `:pending` or `:appealed`
+  override, STRICTLY chronological by proposal date (`inserted_at`
+  ascending, FIFO: the oldest proposal first, no algorithmic
+  prioritization, F08 overview's anti-dark-patterns principle). An appeal
+  keeps its override's ORIGINAL `inserted_at`, so it never jumps ahead of
+  older still-pending proposals.
+
+  `opts` accepts the purely factual filters `:kind`, `:event_qid`, plus
+  keyset pagination (`:after`, `:limit`), same shape as `list_overrides/1`.
+  """
+  @spec list_review_queue(map()) :: [Override.t()]
+  def list_review_queue(opts \\ %{}) do
+    Override
+    |> where([o], o.status in [:pending, :appealed])
+    |> filter_eq(:kind, Map.get(opts, :kind))
+    |> filter_eq(:event_qid, Map.get(opts, :event_qid))
+    |> review_queue_order(Map.get(opts, :after))
+    |> limit(^list_limit(opts))
+    |> Repo.all()
+  end
+
+  defp review_queue_order(query, nil) do
+    order_by(query, [o], asc: o.inserted_at, asc: o.id)
+  end
+
+  defp review_queue_order(query, %{inserted_at: inserted_at, id: id}) do
+    query
+    |> where([o], o.inserted_at > ^inserted_at or (o.inserted_at == ^inserted_at and o.id > ^id))
+    |> order_by([o], asc: o.inserted_at, asc: o.id)
+  end
+
+  defp already_appealed?(override_id) do
+    Revision
+    |> where([r], r.override_id == ^override_id and r.action == :appealed)
+    |> Repo.exists?()
+  end
+
+  defp validate_appeal_text(text) do
+    if is_binary(text) and String.length(String.trim(text)) >= @appeal_text_min_length and
+         String.length(text) <= @appeal_text_max_length do
+      :ok
+    else
+      {:error, :text_required}
+    end
+  end
+
+  # ---------------------------------------------------------------------
+  # Private: decision notifications (issue #037)
+  # ---------------------------------------------------------------------
+
+  # `override.author_id` is `nil` only after issue #038's account
+  # anonymization ships: no email exists to reach, so notification is a
+  # silent no-op, never an error (the decision itself already committed).
+  defp notify_decision(%Override{author_id: nil}, _outcome, _message), do: :ok
+
+  defp notify_decision(override, outcome, message) do
+    user = Accounts.get_user!(override.author_id)
+    path = contribution_path(override.id)
+
+    case notifier().deliver(user.email, outcome, message, path, "fr") do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        # Bounded tag only, same rationale as `Amanogawa.Accounts.
+        # send_magic_link/3`: never log a raw SMTP error, which can embed
+        # the whole outgoing message.
+        Logger.error("decision notification delivery failed: #{delivery_error_tag(reason)}")
+        :ok
+    end
+  end
+
+  defp contribution_path(override_id), do: "/contributions/" <> override_id
+
+  defp delivery_error_tag(reason) when is_atom(reason), do: inspect(reason)
+  defp delivery_error_tag(%struct{}), do: inspect(struct)
+  defp delivery_error_tag(_reason), do: "unexpected error"
+
+  defp notifier, do: Application.get_env(:amanogawa, :decision_notifier)
 
   # ---------------------------------------------------------------------
   # Sync coexistence and conflicts (issue #035)
@@ -337,14 +620,26 @@ defmodule Amanogawa.Contributions do
     end
   end
 
-  defp put_current_value(%{kind: :link, event_qid: qid} = attrs) when not is_nil(qid) do
-    case Atlas.get_event_by_qid(qid) do
-      nil -> {:error, :event_not_found}
-      _event -> {:ok, attrs}
+  # Both endpoints must exist locally (issue #036's own "existence
+  # vérifiée via Atlas.get_event_by_qid/1"): a link naming an unknown
+  # target is rejected here, before any write, exactly like an unknown
+  # source `event_qid` above.
+  defp put_current_value(%{kind: :link, event_qid: qid, target_qid: target_qid} = attrs)
+       when not is_nil(qid) do
+    with {:ok, _event} <- fetch_local_event(qid),
+         {:ok, _target} <- fetch_local_event(target_qid) do
+      {:ok, attrs}
     end
   end
 
   defp put_current_value(attrs), do: {:ok, attrs}
+
+  defp fetch_local_event(qid) do
+    case Atlas.get_event_by_qid(qid) do
+      nil -> {:error, :event_not_found}
+      event -> {:ok, event}
+    end
+  end
 
   defp create_revision(override, action, actor_id, message) do
     %Revision{}
@@ -368,7 +663,7 @@ defmodule Amanogawa.Contributions do
   defp do_with_reviewer_authority(override_id, reviewer, fun) do
     case locked_override(override_id) do
       nil -> Repo.rollback(:not_found)
-      override -> authorize_and_run(override, reviewer, fun)
+      override -> authorize_and_run(override, reviewer, fun, &authorize_reviewer/2)
     end
   end
 
@@ -379,8 +674,8 @@ defmodule Amanogawa.Contributions do
     |> Repo.one()
   end
 
-  defp authorize_and_run(override, reviewer, fun) do
-    with :ok <- authorize_reviewer(override, reviewer),
+  defp authorize_and_run(override, actor, fun, authorize_fun) do
+    with :ok <- authorize_fun.(override, actor),
          {:ok, result} <- fun.(override) do
       result
     else

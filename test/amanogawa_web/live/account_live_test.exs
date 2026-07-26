@@ -22,6 +22,39 @@ defmodule AmanogawaWeb.AccountLiveTest do
       assert has_element?(lv, "li", "Session courante")
     end
 
+    test "issue #036: setting a display name persists it, editable at any time", %{conn: conn} do
+      user = user_fixture()
+      conn = log_in_user(conn, user)
+
+      {:ok, lv, _html} = live(conn, ~p"/compte")
+
+      lv
+      |> form("#display-name-form", %{"display_name" => %{"display_name" => "Contributeur"}})
+      |> render_submit()
+
+      assert Accounts.get_user!(user.id).display_name == "Contributeur"
+      assert render(lv) =~ "Pseudonyme enregistré"
+    end
+
+    test "issue #036: a display name already taken by another account is rejected", %{conn: conn} do
+      user_fixture(display_name: nil)
+      taken = unique_display_name()
+      _other = user_fixture() |> Accounts.set_display_name(taken) |> then(fn {:ok, u} -> u end)
+
+      user = user_fixture()
+      conn = log_in_user(conn, user)
+
+      {:ok, lv, _html} = live(conn, ~p"/compte")
+
+      html =
+        lv
+        |> form("#display-name-form", %{"display_name" => %{"display_name" => taken}})
+        |> render_submit()
+
+      assert html =~ "has already been taken"
+      assert Accounts.get_user!(user.id).display_name == nil
+    end
+
     test "anonymous, /compte redirects to /connexion", %{conn: conn} do
       assert {:error, {:redirect, %{to: "/connexion"}}} = live(conn, ~p"/compte")
     end
@@ -102,10 +135,10 @@ defmodule AmanogawaWeb.AccountLiveTest do
       {:ok, lv, _html} = live(conn, ~p"/compte")
 
       lv |> element("button", "Supprimer mon compte") |> render_click()
-      assert has_element?(lv, "form")
+      assert has_element?(lv, "#delete-account-form")
 
       lv
-      |> form("form", %{"confirmation" => user.email})
+      |> form("#delete-account-form", %{"confirmation" => user.email})
       |> render_submit()
 
       assert_redirect(lv, "/")
@@ -132,7 +165,7 @@ defmodule AmanogawaWeb.AccountLiveTest do
       lv |> element("button", "Supprimer mon compte") |> render_click()
 
       lv
-      |> form("form", %{"confirmation" => "  Person@Example.COM  "})
+      |> form("#delete-account-form", %{"confirmation" => "  Person@Example.COM  "})
       |> render_submit()
 
       assert_redirect(lv, "/")
@@ -148,7 +181,7 @@ defmodule AmanogawaWeb.AccountLiveTest do
 
       html =
         lv
-        |> form("form", %{"confirmation" => "wrong@example.com"})
+        |> form("#delete-account-form", %{"confirmation" => "wrong@example.com"})
         |> render_submit()
 
       assert html =~ "ne correspond pas"

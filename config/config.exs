@@ -143,6 +143,19 @@ config :amanogawa, Amanogawa.Accounts.MagicLinkThrottle,
   limit: 5,
   scale_ms: :timer.minutes(15)
 
+# Contribution proposal double rate limit (issue #036, `.claude/rules/
+# security.md`): 10 proposals per hour, per author and independently per
+# client IP (Amanogawa.Contributions.ProposalThrottle), read at call time
+# so config/runtime.exs can override it per environment.
+config :amanogawa, Amanogawa.Contributions.ProposalThrottle,
+  limit: 10,
+  scale_ms: :timer.hours(1)
+
+# Default outbound port for contribution decision emails (issue #037): a
+# Mox mock in test (config/test.exs), the real Swoosh-backed adapter
+# everywhere else. Same pattern as :magic_link_notifier.
+config :amanogawa, :decision_notifier, Amanogawa.Contributions.DecisionNotifier.Email
+
 # Configure the endpoint
 config :amanogawa, AmanogawaWeb.Endpoint,
   url: [host: "localhost"],

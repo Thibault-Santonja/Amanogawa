@@ -81,6 +81,11 @@ defmodule AmanogawaWeb.Router do
     live_session :current_user, on_mount: [{AmanogawaWeb.UserAuth, :mount_current_scope}] do
       live "/", ExploreLive
       live "/connexion", LoginLive
+
+      # Minimal public detail page (issue #037, completed in #038): every
+      # visitor may read it, only its own author (if signed in) sees the
+      # appeal form on a `:rejected` proposal with no appeal yet.
+      live "/contributions/:id", ContributionLive
     end
 
     get "/connexion/:token", SessionController, :confirm
@@ -112,6 +117,12 @@ defmodule AmanogawaWeb.Router do
     pipe_through [:browser, :authenticated]
 
     get "/compte/export", AccountController, :export
+
+    # Anonymous-visitor entry point for "Proposer une correction"/"Proposer
+    # un événement" (issue #036, `AmanogawaWeb.ProposalController`'s own
+    # moduledoc): reuses the `:authenticated` pipeline's `user_return_to`
+    # mechanic, never duplicated here.
+    get "/proposer", ProposalController, :new
   end
 
   # Reviewer-only routes (issue #035: reuses the :authenticated pipeline
@@ -129,6 +140,7 @@ defmodule AmanogawaWeb.Router do
 
     live_session :require_reviewer,
       on_mount: [{AmanogawaWeb.UserAuth, :require_reviewer}] do
+      live "/relecture", ReviewQueueLive
       live "/relecture/conflits", ConflictsLive
     end
   end

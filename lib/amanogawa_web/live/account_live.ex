@@ -17,6 +17,11 @@ defmodule AmanogawaWeb.AccountLive do
   collections belong in streams, not assigns), never re-fetched by any
   `handle_event` below (each mutates the stream/assign it already holds
   in place instead of reloading from the database).
+
+  Also carries the public pseudonym editor (issue #036,
+  `Amanogawa.Accounts.set_display_name/2`): the same field
+  `AmanogawaWeb.Live.ProposalFormComponent` requires before a first
+  proposal, editable here at any time.
   """
 
   use AmanogawaWeb, :live_view
@@ -35,6 +40,12 @@ defmodule AmanogawaWeb.AccountLive do
      |> assign(:current_session_id, nil)
      |> assign(:confirm_delete?, false)
      |> assign(:delete_error, nil)
+     |> assign(
+       :display_name_form,
+       to_form(%{"display_name" => socket.assigns.current_scope.user.display_name || ""},
+         as: "display_name"
+       )
+     )
      |> stream(:sessions, [])}
   end
 
@@ -111,6 +122,22 @@ defmodule AmanogawaWeb.AccountLive do
       end)
 
     {:noreply, put_flash(socket, :info, gettext("Les autres sessions ont été révoquées."))}
+  end
+
+  def handle_event("set_display_name", %{"display_name" => %{"display_name" => name}}, socket) do
+    case Accounts.set_display_name(socket.assigns.current_scope.user, name) do
+      {:ok, user} ->
+        current_scope = %{socket.assigns.current_scope | user: user}
+
+        {:noreply,
+         socket
+         |> assign(:current_scope, current_scope)
+         |> assign(:display_name_form, to_form(%{"display_name" => name}, as: "display_name"))
+         |> put_flash(:info, gettext("Pseudonyme enregistré."))}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, :display_name_form, to_form(changeset, as: "display_name"))}
+    end
   end
 
   def handle_event("toggle_delete_confirmation", _params, socket) do
@@ -194,6 +221,23 @@ defmodule AmanogawaWeb.AccountLive do
         {Calendar.strftime(@current_scope.user.inserted_at, gettext("%d/%m/%Y"))}
       </p>
 
+      <.section title={gettext("Pseudonyme public")}>
+        <p class="text-text-muted">
+          {gettext(
+            "Ce pseudonyme attribue publiquement vos contributions (issue #036) : jamais votre adresse email."
+          )}
+        </p>
+        <.form
+          for={@display_name_form}
+          id="display-name-form"
+          phx-submit="set_display_name"
+          class="mt-2 max-w-sm"
+        >
+          <.input field={@display_name_form[:display_name]} label={gettext("Pseudonyme")} required />
+          <.button variant="primary" type="submit">{gettext("Enregistrer")}</.button>
+        </.form>
+      </.section>
+
       <.section title={gettext("Sessions actives")}>
         <ul id="sessions" phx-update="stream" class="space-y-2">
           <li
@@ -236,7 +280,12 @@ defmodule AmanogawaWeb.AccountLive do
           {gettext("Supprimer mon compte")}
         </.button>
 
-        <form :if={@confirm_delete?} phx-submit="confirm_delete_account" class="mt-2 max-w-sm">
+        <form
+          :if={@confirm_delete?}
+          id="delete-account-form"
+          phx-submit="confirm_delete_account"
+          class="mt-2 max-w-sm"
+        >
           <label for="delete-confirmation" class="mb-1 block text-sm text-text-muted">
             {gettext("Pour confirmer, saisissez votre adresse email :")}
           </label>

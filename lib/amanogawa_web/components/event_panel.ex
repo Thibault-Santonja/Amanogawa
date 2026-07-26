@@ -28,6 +28,23 @@ defmodule AmanogawaWeb.Components.EventPanel do
   otherwise an interactive element) so a keyboard/screen-reader user
   selecting a marker lands inside the panel rather than the focus staying
   stranded on the map.
+
+  ## Proposing a correction (issue #036)
+
+  A discrete disclosure (`<details>`, no aggressive call-to-action,
+  F08 overview's anti-dark-patterns principle: the panel is first a
+  consultation sheet) lists the six correctable targets (the five
+  `Amanogawa.Contributions.Override.field_names/0` plus a new typed
+  link). The contribution is a right displayed to EVERY visitor
+  (`.claude/rules/security.md`'s "droit affiché, pas un privilège
+  caché"): a signed-in visitor's entry `patch`es straight into
+  `AmanogawaWeb.Live.ProposalFormComponent` (state survives a refresh,
+  the query string is the source of truth); an anonymous visitor's entry
+  is a real link to `AmanogawaWeb.ProposalController`, which stashes the
+  return path (`AmanogawaWeb.UserAuth.require_authenticated_user/2`'s
+  `"user_return_to"`, F07's own mechanic) before bouncing to
+  `/connexion`, so signing in comes back to this exact event with the
+  chosen field already selected.
   """
 
   use AmanogawaWeb, :html
@@ -35,9 +52,19 @@ defmodule AmanogawaWeb.Components.EventPanel do
   alias Amanogawa.Atlas.Event
   alias Amanogawa.HistoricalDate.Formatter
 
+  # The five `:field` overridable business names, plus the literal
+  # `"link"` (issue #036): mirrors, but never calls,
+  # `Amanogawa.Contributions.Override.field_names/0` (a web component
+  # reaching into another context's internal enum would itself be a
+  # boundary violation, `.claude/rules/architecture.md`).
+  @correction_fields ~w(label_fr label_en begin_date end_date position link)
+
   attr :event, Event, required: true
+  attr :current_scope, Amanogawa.Accounts.Scope, required: true
 
   def event_panel(assigns) do
+    assigns = assign(assigns, :correction_fields, @correction_fields)
+
     ~H"""
     <aside
       id="event-panel"
@@ -85,6 +112,30 @@ defmodule AmanogawaWeb.Components.EventPanel do
         {gettext("Lire sur Wikipédia")}
         <.icon name="hero-arrow-top-right-on-square" class="size-4" />
       </a>
+
+      <details class="mt-4 border-t border-border pt-3" id="propose-correction">
+        <summary class="cursor-pointer text-sm text-text-muted hover:text-text">
+          {gettext("Proposer une correction")}
+        </summary>
+        <ul class="mt-2 space-y-1 text-sm">
+          <li :for={field <- @correction_fields}>
+            <.link
+              :if={@current_scope.user}
+              patch={correction_patch(@event.qid, field)}
+              class="text-accent hover:underline"
+            >
+              {correction_label(field)}
+            </.link>
+            <.link
+              :if={!@current_scope.user}
+              href={correction_href(@event.qid, field)}
+              class="text-accent hover:underline"
+            >
+              {correction_label(field)}
+            </.link>
+          </li>
+        </ul>
+      </details>
     </aside>
     """
   end
@@ -92,4 +143,17 @@ defmodule AmanogawaWeb.Components.EventPanel do
   defp label(event), do: event.label_fr || event.label_en || event.qid
   defp extract(event), do: event.extract_fr || event.extract_en
   defp wiki_url(event), do: event.wiki_url_fr || event.wiki_url_en
+
+  defp correction_label("label_fr"), do: gettext("Libellé (français)")
+  defp correction_label("label_en"), do: gettext("Libellé (anglais)")
+  defp correction_label("begin_date"), do: gettext("Date de début")
+  defp correction_label("end_date"), do: gettext("Date de fin")
+  defp correction_label("position"), do: gettext("Position")
+  defp correction_label("link"), do: gettext("Lien vers un autre événement")
+
+  defp correction_patch(qid, field),
+    do: "/?sel=#{URI.encode_www_form(qid)}&propose_field=#{field}"
+
+  defp correction_href(qid, field),
+    do: "/proposer?sel=#{URI.encode_www_form(qid)}&field=#{field}"
 end

@@ -22,7 +22,14 @@ msgid "Votre lien de connexion Amanogawa"
 msgstr "Votre lien de connexion Amanogawa"
 
 #: lib/amanogawa_web/user_auth.ex:172
-#: lib/amanogawa_web/user_auth.ex:204
+#: lib/amanogawa_web/user_auth.ex:241
+#: lib/amanogawa_web/user_auth.ex:258
 #, elixir-autogen, elixir-format
 msgid "Vous devez vous connecter pour accéder à cette page."
 msgstr "Vous devez vous connecter pour accéder à cette page."
+
+#: lib/amanogawa_web/user_auth.ex:204
+#: lib/amanogawa_web/user_auth.ex:270
+#, elixir-autogen, elixir-format
+msgid "Page introuvable."
+msgstr "Page introuvable."

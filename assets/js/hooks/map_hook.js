@@ -176,6 +176,14 @@ const MapHook = {
     // guard).
     this.programmaticMove = false
 
+    // Position-picking mode for the proposal form (issue #036):
+    // `pickingPosition` suspends the normal select/deselect click
+    // handling while a contributor is asked to click the map to choose a
+    // position; `pickerMarker` is the temporary preview marker, cleaned
+    // up on cancellation, on a fresh pick, and in `destroyed()`.
+    this.pickingPosition = false
+    this.pickerMarker = null
+
     // Hover card state (issue #016): `hoveringQid` is the feature currently
     // under the cursor (or `null`), `hoverTimer` the single reärmed timer
     // behind `HOVER_DELAY_MS`, `hoverSummaryCache` a client-side cache by
@@ -289,6 +297,11 @@ const MapHook = {
     // pushed back by the LiveView drive the stroke highlight (below), the
     // relation lines (#017), and clear any lingering hover card.
     this.onMarkerClick = event => {
+      // Picking a position takes over every map click (issue #036): a
+      // click on a marker while picking must still report a coordinate,
+      // never select that marker's own event.
+      if (this.pickingPosition) return
+
       const feature = event.features && event.features[0]
       if (!feature) return
 
@@ -298,6 +311,11 @@ const MapHook = {
     this.map.on("click", EVENTS_CIRCLE_LAYER_ID, this.onMarkerClick)
 
     this.onMapClick = event => {
+      if (this.pickingPosition) {
+        this.pickPosition(event.lngLat)
+        return
+      }
+
       const features = this.map.queryRenderedFeatures(event.point, {
         layers: [EVENTS_CIRCLE_LAYER_ID]
       })
@@ -444,6 +462,29 @@ const MapHook = {
       this.clearEventLinks()
     })
 
+    // Position-picking mode (issue #036, `AmanogawaWeb.Live.
+    // ProposalFormComponent`'s position sub-form): the server asks for a
+    // pick, the next map click (`onMapClick` above) reports `{lng, lat}`
+    // back and stays in picking mode (the form may show the coordinates
+    // and let the contributor click again to adjust before submitting);
+    // the server explicitly turns it back off once the form closes or the
+    // field changes.
+    this.handleEvent("enable_position_picking", () => this.enterPickingMode())
+    this.handleEvent("disable_position_picking", () => this.exitPickingMode())
+
+    // Escape cancels picking without touching the event panel (issue
+    // #036's own point d'attention): reports the cancellation so the form
+    // can clear any "choosing..." state, but never closes the panel
+    // itself (`AmanogawaWeb.Components.EventPanel`'s own Escape handler
+    // is bound on the aside, unaffected by this window-level listener).
+    this.onPickerKeyDown = event => {
+      if (event.key === "Escape" && this.pickingPosition) {
+        this.exitPickingMode()
+        this.pushEvent("position_picking_cancelled", {})
+      }
+    }
+    window.addEventListener("keydown", this.onPickerKeyDown)
+
     // Test-only witness (issue #029): `data-e2e-test-api="true"` is only
     // ever rendered by `AmanogawaWeb.ExploreLive` when `config :amanogawa,
     // :expose_e2e_test_api` is `true`, itself only set in `config/
@@ -468,6 +509,43 @@ const MapHook = {
         mapLoaded: () => this.map.loaded()
       }
     }
+  },
+
+  // Enters position-picking mode (issue #036): a dedicated cursor signals
+  // the map is waiting for a click, distinct from the normal pointer
+  // cursor a hovered marker gets (`onMarkerEnter`/`onMarkerLeave` above,
+  // untouched: they still run, but `pickingPosition` wins visually since
+  // this class is applied last and stays until picking ends).
+  enterPickingMode() {
+    this.pickingPosition = true
+    this.map.getCanvas().style.cursor = "crosshair"
+  },
+
+  // Leaves position-picking mode: restores the default cursor and clears
+  // any preview marker. Idempotent (safe to call when never picking).
+  exitPickingMode() {
+    this.pickingPosition = false
+    this.map.getCanvas().style.cursor = ""
+    this.clearPickerMarker()
+  },
+
+  clearPickerMarker() {
+    if (this.pickerMarker) {
+      this.pickerMarker.remove()
+      this.pickerMarker = null
+    }
+  },
+
+  // Reports the picked coordinate to the server and previews it with a
+  // temporary marker (replacing any earlier preview: only the LATEST
+  // click counts, issue #036's "aperçu des coordonnées choisies").
+  // Stays in picking mode: the contributor can click again to adjust
+  // before the form is submitted, `exitPickingMode()` is only called
+  // explicitly (submit, cancel, Escape, field change, or unmount).
+  pickPosition(lngLat) {
+    this.clearPickerMarker()
+    this.pickerMarker = new maplibregl.Marker().setLngLat(lngLat).addTo(this.map)
+    this.pushEvent("position_picked", {lng: lngLat.lng, lat: lngLat.lat})
   },
 
   setupEventsLayer() {
@@ -977,6 +1055,8 @@ const MapHook = {
     this.darkScheme.removeEventListener("change", this.onSchemeChange)
     this.motionQuery.removeEventListener("change", this.onMotionChange)
     window.removeEventListener(TIME_WINDOW_PREVIEW_EVENT, this.onWindowPreview)
+    window.removeEventListener("keydown", this.onPickerKeyDown)
+    this.clearPickerMarker()
 
     if (this.el.dataset.e2eTestApi === "true") delete window.__amanogawaE2E__
 

@@ -56,7 +56,7 @@ defmodule Amanogawa.Contributions.Override do
 
   @type t :: %__MODULE__{}
   @type kind :: :field | :link | :new_event
-  @type status :: :pending | :accepted | :rejected | :superseded
+  @type status :: :pending | :accepted | :rejected | :superseded | :appealed
   @type field_name :: :label_fr | :label_en | :begin_date | :end_date | :position
   @type link_type :: :part_of | :follows | :cause | :effect | :significant
 
@@ -93,7 +93,7 @@ defmodule Amanogawa.Contributions.Override do
     field :source, :string
 
     field :status, Ecto.Enum,
-      values: [:pending, :accepted, :rejected, :superseded],
+      values: [:pending, :accepted, :rejected, :superseded, :appealed],
       default: :pending
 
     field :author_id, Ecto.UUID
@@ -164,9 +164,25 @@ defmodule Amanogawa.Contributions.Override do
     |> unique_constraint([:event_qid, :field], name: :overrides_one_accepted_per_event_field)
   end
 
-  @doc "Builds the changeset that moves a `:pending` override to `:rejected`."
+  @doc """
+  Builds the changeset that moves a `:pending` override to `:rejected`,
+  also reused by `Amanogawa.Contributions.review_appeal/3` for the
+  "appeal denied, definitively" outcome (an `:appealed` override moving
+  back to `:rejected`): the resulting state is the same terminal
+  `:rejected` either way, the caller's own transaction is what decides
+  which precondition applied.
+  """
   @spec reject_changeset(t()) :: Ecto.Changeset.t()
   def reject_changeset(override), do: change(override, status: :rejected)
+
+  @doc """
+  Builds the changeset that moves a `:rejected` override to `:appealed`
+  (issue #037, `Amanogawa.Contributions.appeal_override/3`): the author's
+  own single reply to a rejection, journalled separately as an
+  `:appealed` revision.
+  """
+  @spec appeal_changeset(t()) :: Ecto.Changeset.t()
+  def appeal_changeset(override), do: change(override, status: :appealed)
 
   @doc """
   Builds the changeset that moves an `:accepted` override to `:superseded`

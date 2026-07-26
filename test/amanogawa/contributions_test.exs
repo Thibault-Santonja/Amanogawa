@@ -6,14 +6,30 @@ defmodule Amanogawa.ContributionsTest do
   import Amanogawa.AtlasFixtures
   import Amanogawa.ContributionsFixtures
   import Amanogawa.HistoricalDateGenerators
+  import Mox
 
   alias Amanogawa.Atlas
   alias Amanogawa.Atlas.Event
   alias Amanogawa.Contributions
   alias Amanogawa.Contributions.Conflict
+  alias Amanogawa.Contributions.DecisionNotifierMock
   alias Amanogawa.Contributions.Override
+  alias Amanogawa.Contributions.ProposalThrottle
   alias Amanogawa.HistoricalDate
   alias Amanogawa.Repo
+
+  setup :verify_on_exit!
+
+  # A lenient default so every pre-existing accept/reject test (most of
+  # which predate issue #037 and have no reason to care about
+  # notifications) keeps compiling and passing: `expect/3` in a specific
+  # test always takes priority over this stub (Mox's own contract), so
+  # the "decision notifications" describe block below still asserts on
+  # the exact email sent where it matters.
+  setup do
+    stub(DecisionNotifierMock, :deliver, fn _email, _outcome, _message, _path, _locale -> :ok end)
+    :ok
+  end
 
   # ---------------------------------------------------------------------
   # propose/2 (issue #034)
@@ -891,6 +907,393 @@ defmodule Amanogawa.ContributionsTest do
   end
 
   defp field_generator, do: StreamData.member_of([:label_fr, :label_en, :begin_date])
+
+  # ---------------------------------------------------------------------
+  # propose/3 quota (issue #036)
+  # ---------------------------------------------------------------------
+
+  describe "propose/3" do
+    test "happy path: under quota, delegates to propose/2" do
+      event = event_fixture(label_fr: "Ancien nom")
+      author = user_fixture()
+
+      assert {:ok, override} =
+               Contributions.propose(
+                 %{
+                   kind: :field,
+                   event_qid: event.qid,
+                   field: :label_fr,
+                   proposed_value: %{"value" => "Nouveau nom"},
+                   source: "https://example.org/source"
+                 },
+                 author.id,
+                 unique_ip()
+               )
+
+      assert override.status == :pending
+    end
+
+    test "error case: over quota (author and IP shared across calls), nothing further is written" do
+      # Exhausts the default config-wide quota by call count rather than
+      # lowering it via `Application.put_env/3`: this file is `async:
+      # true`, and the throttle's Hammer table is a single, shared,
+      # process-wide ETS table (mirrors `Amanogawa.Accounts.
+      # MagicLinkThrottleTest`'s own rationale) - mutating the global
+      # config here would race every other async test proposing at the
+      # same moment.
+      limit =
+        Application.get_env(:amanogawa, ProposalThrottle, limit: 10) |> Keyword.fetch!(:limit)
+
+      event = event_fixture()
+      author = user_fixture()
+      ip = unique_ip()
+
+      attrs = fn n ->
+        %{
+          kind: :field,
+          event_qid: event.qid,
+          field: :label_fr,
+          proposed_value: %{"value" => "X#{n}"},
+          source: "https://example.org/source"
+        }
+      end
+
+      for n <- 1..limit do
+        assert {:ok, _override} = Contributions.propose(attrs.(n), author.id, ip)
+      end
+
+      assert {:error, :rate_limited} = Contributions.propose(attrs.(limit + 1), author.id, ip)
+      assert Contributions.list_overrides(%{author_id: author.id}) |> length() == limit
+    end
+  end
+
+  # ---------------------------------------------------------------------
+  # appeal_override/3, review_appeal/3, list_review_queue/1 (issue #037)
+  # ---------------------------------------------------------------------
+
+  describe "appeal_override/3" do
+    test "happy path: the author appeals their own rejected proposal, once" do
+      event = event_fixture()
+      author = user_fixture()
+      reviewer = reviewer_fixture()
+      override = propose_fixture(event, author)
+
+      {:ok, rejected} = Contributions.reject_override(override.id, reviewer, "motif")
+
+      assert {:ok, appealed} = Contributions.appeal_override(rejected.id, author, "Je conteste")
+      assert appealed.status == :appealed
+
+      assert Enum.map(Contributions.list_revisions(appealed.id), & &1.action) == [
+               :proposed,
+               :rejected,
+               :appealed
+             ]
+    end
+
+    test "edge case: a second appeal on the same override is refused" do
+      author = user_fixture()
+      reviewer = reviewer_fixture()
+      override = override_fixture(author_id: author.id)
+
+      expect(DecisionNotifierMock, :deliver, fn _email, :rejected, _msg, _path, _locale -> :ok end)
+
+      {:ok, rejected} = Contributions.reject_override(override.id, reviewer, "motif")
+      {:ok, appealed} = Contributions.appeal_override(rejected.id, author, "Je conteste")
+
+      assert {:error, :not_rejected} =
+               Contributions.appeal_override(appealed.id, author, "Encore")
+    end
+
+    test "edge case: an appeal on a :pending or :accepted override is refused" do
+      author = user_fixture()
+      reviewer = reviewer_fixture()
+      pending = override_fixture(author_id: author.id)
+
+      assert {:error, :not_rejected} =
+               Contributions.appeal_override(pending.id, author, "Je conteste")
+
+      expect(DecisionNotifierMock, :deliver, fn _email, :accepted, _msg, _path, _locale -> :ok end)
+
+      accepted = override_fixture(author_id: author.id)
+      {:ok, accepted} = Contributions.accept_override(accepted.id, reviewer, "motif")
+
+      assert {:error, :not_rejected} =
+               Contributions.appeal_override(accepted.id, author, "Je conteste")
+    end
+
+    test "error case: another user than the author cannot appeal; nothing is journalled" do
+      event = event_fixture()
+      author = user_fixture()
+      other = user_fixture()
+      reviewer = reviewer_fixture()
+      override = propose_fixture(event, author)
+
+      {:ok, rejected} = Contributions.reject_override(override.id, reviewer, "motif")
+
+      assert {:error, :forbidden} =
+               Contributions.appeal_override(rejected.id, other, "Ce n'est pas moi")
+
+      assert Enum.map(Contributions.list_revisions(rejected.id), & &1.action) == [
+               :proposed,
+               :rejected
+             ]
+    end
+
+    test "limit case: an appeal text of 5 and 1000 characters is accepted, 4 and 1001 rejected" do
+      author = user_fixture()
+      reviewer = reviewer_fixture()
+
+      short = String.duplicate("a", 4)
+      min_ok = String.duplicate("a", 5)
+      max_ok = String.duplicate("a", 1000)
+      long = String.duplicate("a", 1001)
+
+      make_rejected = fn ->
+        override = override_fixture(author_id: author.id)
+        expect(DecisionNotifierMock, :deliver, fn _e, :rejected, _m, _p, _l -> :ok end)
+        {:ok, rejected} = Contributions.reject_override(override.id, reviewer, "motif")
+        rejected
+      end
+
+      assert {:error, :text_required} =
+               Contributions.appeal_override(make_rejected.().id, author, short)
+
+      assert {:ok, _} = Contributions.appeal_override(make_rejected.().id, author, min_ok)
+      assert {:ok, _} = Contributions.appeal_override(make_rejected.().id, author, max_ok)
+
+      assert {:error, :text_required} =
+               Contributions.appeal_override(make_rejected.().id, author, long)
+    end
+  end
+
+  describe "review_appeal/3" do
+    test "happy path: an accepted appeal applies the override through Atlas" do
+      event = event_fixture(label_fr: "Ancien nom")
+      author = user_fixture()
+      reviewer = reviewer_fixture()
+
+      override =
+        propose_fixture(event, author,
+          field: :label_fr,
+          proposed_value: %{"value" => "Nouveau nom"}
+        )
+
+      {:ok, rejected} = Contributions.reject_override(override.id, reviewer, "motif initial")
+      {:ok, appealed} = Contributions.appeal_override(rejected.id, author, "Je conteste")
+
+      expect(DecisionNotifierMock, :deliver, fn email, :appeal_accepted, message, path, "fr" ->
+        assert email == author.email
+        assert message == "Vu, j'accepte"
+        assert path == "/contributions/#{appealed.id}"
+        :ok
+      end)
+
+      assert {:ok, resolved} =
+               Contributions.review_appeal(appealed.id, reviewer, %{
+                 decision: :accepted,
+                 message: "Vu, j'accepte"
+               })
+
+      assert resolved.status == :accepted
+      assert Atlas.get_event_by_qid(event.qid).label_fr == override.proposed_value["value"]
+
+      assert Enum.map(Contributions.list_revisions(resolved.id), & &1.action) == [
+               :proposed,
+               :rejected,
+               :appealed,
+               :appeal_reviewed
+             ]
+    end
+
+    test "happy path: a rejected appeal is terminal, Atlas untouched" do
+      event = event_fixture(label_fr: "Ancien nom")
+      author = user_fixture()
+      reviewer = reviewer_fixture()
+      override = override_fixture(event_qid: event.qid, author_id: author.id)
+
+      expect(DecisionNotifierMock, :deliver, fn _e, :rejected, _m, _p, _l -> :ok end)
+      {:ok, rejected} = Contributions.reject_override(override.id, reviewer, "motif")
+      {:ok, appealed} = Contributions.appeal_override(rejected.id, author, "Je conteste")
+
+      expect(DecisionNotifierMock, :deliver, fn _e, :appeal_rejected, _m, _p, _l -> :ok end)
+
+      assert {:ok, resolved} =
+               Contributions.review_appeal(appealed.id, reviewer, %{
+                 decision: :rejected,
+                 message: "Confirmé"
+               })
+
+      assert resolved.status == :rejected
+      assert Atlas.get_event_by_qid(event.qid).label_fr == "Ancien nom"
+
+      # Terminal: no further appeal possible (the override is `:rejected`
+      # again, the same status a never-appealed rejection carries, but the
+      # `:appealed` revision already on record is what `already_appealed?/1`
+      # finds, not the status alone).
+      assert {:error, :already_appealed} =
+               Contributions.appeal_override(resolved.id, author, "Encore une fois")
+    end
+
+    test "error case: a non-reviewer, the author, or a missing message is rejected" do
+      author = user_fixture()
+      other = user_fixture()
+      reviewer = reviewer_fixture()
+      override = override_fixture(author_id: author.id)
+
+      expect(DecisionNotifierMock, :deliver, fn _e, :rejected, _m, _p, _l -> :ok end)
+      {:ok, rejected} = Contributions.reject_override(override.id, reviewer, "motif")
+      {:ok, appealed} = Contributions.appeal_override(rejected.id, author, "Je conteste")
+
+      assert {:error, :forbidden} =
+               Contributions.review_appeal(appealed.id, other, %{
+                 decision: :accepted,
+                 message: "motif"
+               })
+
+      assert {:error, :message_required} =
+               Contributions.review_appeal(appealed.id, reviewer, %{
+                 decision: :accepted,
+                 message: ""
+               })
+
+      assert Repo.get!(Override, appealed.id).status == :appealed
+    end
+  end
+
+  describe "list_review_queue/1" do
+    test "limit case: lists :pending and :appealed overrides, chronological by proposal date, an appeal keeps its original date" do
+      author = user_fixture()
+      reviewer = reviewer_fixture()
+
+      old = override_fixture(author_id: author.id)
+
+      old
+      |> Ecto.Changeset.change(inserted_at: DateTime.add(old.inserted_at, -60, :second))
+      |> Repo.update!()
+
+      middle = override_fixture(author_id: author.id)
+      _accepted = accepted_override_fixture()
+
+      expect(DecisionNotifierMock, :deliver, fn _e, :rejected, _m, _p, _l -> :ok end)
+      {:ok, rejected} = Contributions.reject_override(old.id, reviewer, "motif")
+      {:ok, appealed} = Contributions.appeal_override(rejected.id, author, "Je conteste")
+
+      assert Contributions.list_review_queue() |> Enum.map(& &1.id) ==
+               [appealed.id, middle.id]
+    end
+
+    test "limit case: filters by kind and event_qid" do
+      event = event_fixture()
+      field_override = override_fixture(event_qid: event.qid, field: :label_fr)
+      _other = override_fixture()
+
+      assert Contributions.list_review_queue(%{event_qid: event.qid}) |> Enum.map(& &1.id) ==
+               [field_override.id]
+
+      assert Contributions.list_review_queue(%{kind: :field}) |> length() >= 1
+    end
+  end
+
+  # ---------------------------------------------------------------------
+  # Decision notifications (issue #037)
+  # ---------------------------------------------------------------------
+
+  describe "decision notifications" do
+    test "propose/2 never sends a notification (no engagement email)" do
+      # No `expect/3` set up: `verify_on_exit!` fails the test if the mock
+      # is called at all.
+      event = event_fixture()
+      author = user_fixture()
+
+      {:ok, _override} =
+        Contributions.propose(
+          %{
+            kind: :field,
+            event_qid: event.qid,
+            field: :label_fr,
+            proposed_value: %{"value" => "X"},
+            source: "https://example.org/source"
+          },
+          author.id
+        )
+    end
+
+    test "accept_override/3 sends exactly one notification with the motive, after commit" do
+      author = user_fixture()
+      reviewer = reviewer_fixture()
+      override = override_fixture(author_id: author.id)
+
+      expect(DecisionNotifierMock, :deliver, fn email, :accepted, message, path, "fr" ->
+        assert email == author.email
+        assert message == "Bien vu"
+        assert path == "/contributions/#{override.id}"
+        :ok
+      end)
+
+      assert {:ok, _} = Contributions.accept_override(override.id, reviewer, "Bien vu")
+    end
+
+    test "reject_override/3 sends exactly one notification with the motive" do
+      author = user_fixture()
+      reviewer = reviewer_fixture()
+      override = override_fixture(author_id: author.id)
+
+      expect(DecisionNotifierMock, :deliver, fn email, :rejected, message, _path, "fr" ->
+        assert email == author.email
+        assert message == "Source insuffisante"
+        :ok
+      end)
+
+      assert {:ok, _} =
+               Contributions.reject_override(override.id, reviewer, "Source insuffisante")
+    end
+
+    test "a notifier failure is logged and never fails the decision" do
+      author = user_fixture()
+      reviewer = reviewer_fixture()
+      override = override_fixture(author_id: author.id)
+
+      expect(DecisionNotifierMock, :deliver, fn _e, :accepted, _m, _p, _l ->
+        {:error, :timeout}
+      end)
+
+      assert {:ok, accepted} = Contributions.accept_override(override.id, reviewer, "motif")
+      assert accepted.status == :accepted
+    end
+
+    test "no notification is sent for a decision the transaction rolled back" do
+      # No `expect/3`: the message is blank, so the transaction never even
+      # opens (`validate_reviewer_message/1` runs before any write).
+      override = override_fixture()
+      reviewer = reviewer_fixture()
+
+      assert {:error, :message_required} =
+               Contributions.accept_override(override.id, reviewer, "")
+    end
+  end
+
+  defp unique_ip do
+    n = System.unique_integer([:positive, :monotonic])
+    "10.#{rem(div(n, 65_536), 256)}.#{rem(div(n, 256), 256)}.#{rem(n, 256)}"
+  end
+
+  # A `:field`/`label_fr` proposal through the real facade (unlike
+  # `override_fixture/1`, which bypasses it): the ONLY way to get the
+  # `:proposed` revision a full state-machine assertion needs.
+  defp propose_fixture(event, author, attrs \\ []) do
+    attrs = Map.new(attrs)
+
+    base = %{
+      kind: :field,
+      event_qid: event.qid,
+      field: :label_fr,
+      proposed_value: %{"value" => "Nouveau nom"},
+      source: "https://example.org/source"
+    }
+
+    {:ok, override} = Contributions.propose(Map.merge(base, attrs), author.id, unique_ip())
+    override
+  end
 
   # ---------------------------------------------------------------------
   # helpers

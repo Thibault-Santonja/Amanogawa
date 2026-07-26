@@ -39,6 +39,10 @@ config :amanogawa, Amanogawa.Mailer, adapter: Swoosh.Adapters.Test
 # mailer_test.exs).
 config :amanogawa, :magic_link_notifier, Amanogawa.MagicLinkNotifierMock
 
+# Decision notification delivery (issue #037): stubbed with Mox by
+# default, same rationale as :magic_link_notifier above.
+config :amanogawa, :decision_notifier, Amanogawa.Contributions.DecisionNotifierMock
+
 # A real HTTP listener is required for the E2E suite (issue #029): Chrome,
 # driven through Wallaby/chromedriver, is an actual browser process that
 # connects over the network, unlike `Phoenix.ConnTest`'s in-process conn.

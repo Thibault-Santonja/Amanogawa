@@ -1,5 +1,15 @@
 defmodule Amanogawa.Ingestion.WikipediaClient.RestTest do
-  use ExUnit.Case, async: true
+  # async: false: one test in this file temporarily raises the GLOBAL
+  # primary `Logger` level (`Logger.configure/1`, restored via `on_exit`)
+  # to observe a debug-level log line under `capture_log/1`. That level
+  # is process-wide, not scoped to this file's own tests, so it would
+  # otherwise race `Amanogawa.Ingestion.SparqlClient.QLeverTest`'s own
+  # identical pattern (and `AmanogawaWeb.EndpointRequestLogTest`'s, itself
+  # already `async: false` for the same reason): whichever test's
+  # `on_exit` restore fires first can silently undo a sibling's still-in-
+  # flight raised level, making that sibling's own debug log never emit
+  # (observed flaky, not any test in this file's own fault).
+  use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog
   import Amanogawa.WikipediaFixtures
