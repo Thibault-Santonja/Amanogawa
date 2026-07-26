@@ -14,7 +14,20 @@ defmodule AmanogawaWeb.ProposalControllerTest do
 
       conn = get(conn, ~p"/proposer?sel=#{event.qid}&field=label_fr")
 
-      assert redirected_to(conn) == "/?sel=#{event.qid}&propose_field=label_fr"
+      assert redirected_to(conn) == "/?propose_field=label_fr&sel=#{event.qid}"
+    end
+
+    test "window and camera params are forwarded, so the round trip keeps the view", %{
+      conn: conn
+    } do
+      user = user_fixture()
+      conn = log_in_user(conn, user)
+      event = event_fixture()
+
+      conn = get(conn, ~p"/proposer?sel=#{event.qid}&field=label_fr&from=-500&to=500&z=4.5")
+
+      assert redirected_to(conn) ==
+               "/?from=-500&propose_field=label_fr&sel=#{event.qid}&to=500&z=4.5"
     end
 
     test "an invalid qid redirects to /", %{conn: conn} do

@@ -86,6 +86,12 @@ defmodule AmanogawaWeb.Components.EventPanel do
   attr :current_scope, Amanogawa.Accounts.Scope, required: true
   attr :contribution_summary, :map, required: true
 
+  # The current window/camera/selection as query params (built by
+  # `AmanogawaWeb.ExploreLive.view_query/1`): merged into every correction
+  # link below so opening the proposal form never resets the time window
+  # or the camera the visitor was looking at (quality review m-finding).
+  attr :view_query, :map, default: %{}
+
   def event_panel(assigns) do
     assigns = assign(assigns, :correction_fields, @correction_fields)
 
@@ -145,14 +151,14 @@ defmodule AmanogawaWeb.Components.EventPanel do
           <li :for={field <- @correction_fields}>
             <.link
               :if={@current_scope.user}
-              patch={correction_patch(@event.qid, field)}
+              patch={correction_patch(@view_query, @event.qid, field)}
               class="text-accent hover:underline"
             >
               {correction_label(field)}
             </.link>
             <.link
               :if={!@current_scope.user}
-              href={correction_href(@event.qid, field)}
+              href={correction_href(@view_query, @event.qid, field)}
               class="text-accent hover:underline"
             >
               {correction_label(field)}
@@ -207,9 +213,18 @@ defmodule AmanogawaWeb.Components.EventPanel do
   defp correction_label("position"), do: gettext("Position")
   defp correction_label("link"), do: gettext("Lien vers un autre événement")
 
-  defp correction_patch(qid, field),
-    do: "/?sel=#{URI.encode_www_form(qid)}&propose_field=#{field}"
+  # Both links carry the whole current view (`@view_query`, window and
+  # camera included) on top of the selection and the chosen field: the
+  # signed-in patch keeps the map exactly where it is, and the anonymous
+  # `/proposer` round trip (`AmanogawaWeb.ProposalController` forwards
+  # these params) comes back from `/connexion` to the same view too.
+  defp correction_patch(view_query, qid, field) do
+    query = view_query |> Map.put("sel", qid) |> Map.put("propose_field", field)
+    "/?" <> URI.encode_query(query)
+  end
 
-  defp correction_href(qid, field),
-    do: "/proposer?sel=#{URI.encode_www_form(qid)}&field=#{field}"
+  defp correction_href(view_query, qid, field) do
+    query = view_query |> Map.put("sel", qid) |> Map.put("field", field)
+    "/proposer?" <> URI.encode_query(query)
+  end
 end

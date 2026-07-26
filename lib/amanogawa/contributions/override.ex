@@ -80,6 +80,7 @@ defmodule Amanogawa.Contributions.Override do
   @source_min_length 5
   @source_max_length 1000
   @label_max_length 500
+  @description_max_length 4000
 
   schema "overrides" do
     field :kind, Ecto.Enum, values: [:field, :link, :new_event]
@@ -136,6 +137,7 @@ defmodule Amanogawa.Contributions.Override do
     |> validate_required([:kind, :source])
     |> validate_length(:source, min: @source_min_length, max: @source_max_length)
     |> normalize_payload_keys()
+    |> round_position_payload()
     |> validate_kind_shape()
   end
 
@@ -198,8 +200,13 @@ defmodule Amanogawa.Contributions.Override do
   `resolve_conflict(:keep_override)`: the same divergence must not
   re-signal on the next sync, so the snapshot moves forward to the value
   Wikidata now carries).
+
+  `nil` when Wikidata now carries no value at all for the field (the
+  conflict stored the reserved absent marker, see
+  `Amanogawa.Contributions.Conflict`): the snapshot moves forward to
+  "absent", so the next sync compares `nil` to `nil` and stays silent.
   """
-  @spec refresh_snapshot_changeset(t(), map()) :: Ecto.Changeset.t()
+  @spec refresh_snapshot_changeset(t(), map() | nil) :: Ecto.Changeset.t()
   def refresh_snapshot_changeset(override, wikidata_value) do
     change(override, wikidata_value_at_acceptance: stringify(wikidata_value))
   end
@@ -215,6 +222,38 @@ defmodule Amanogawa.Contributions.Override do
   defp stringify(map) when is_map(map) do
     Map.new(map, fn {key, value} -> {to_string(key), value} end)
   end
+
+  # Rounds coordinates to 6 decimal digits at PROPOSAL time, symmetrically
+  # with `Amanogawa.Contributions`' own snapshot rounding (its
+  # `round_coord/1`, ~11cm at the equator): without it, a stored proposed
+  # position never compares equal to the sync's rounded incoming value,
+  # making the `:superseded` outcome unreachable for `:position` and
+  # falsely lighting the review queue's "reference changed" badge.
+  defp round_position_payload(changeset) do
+    case {get_field(changeset, :kind), get_field(changeset, :field)} do
+      {:field, :position} ->
+        update_change(changeset, :proposed_value, &round_position/1)
+
+      {:new_event, _field} ->
+        update_change(changeset, :proposed_value, &round_new_event_position/1)
+
+      _other ->
+        changeset
+    end
+  end
+
+  defp round_position(%{"lon" => lon, "lat" => lat} = payload)
+       when is_number(lon) and is_number(lat) do
+    %{payload | "lon" => Float.round(lon / 1, 6), "lat" => Float.round(lat / 1, 6)}
+  end
+
+  defp round_position(payload), do: payload
+
+  defp round_new_event_position(%{"position" => %{} = position} = payload) do
+    %{payload | "position" => round_position(position)}
+  end
+
+  defp round_new_event_position(payload), do: payload
 
   defp validate_kind_shape(changeset) do
     case get_field(changeset, :kind) do
@@ -301,17 +340,26 @@ defmodule Amanogawa.Contributions.Override do
          "precision" => precision,
          "calendar" => calendar
        }) do
-    attrs = %{
-      year: year,
-      month: month,
-      day: day,
-      precision: precision,
-      calendar: calendar_atom(calendar)
-    }
+    if calendar in ["gregorian", "julian", nil] do
+      attrs = %{
+        year: year,
+        month: month,
+        day: day,
+        precision: precision,
+        calendar: calendar_atom(calendar)
+      }
 
-    case HistoricalDate.new(attrs) do
-      {:ok, _date} -> nil
-      {:error, date_changeset} -> "invalid date: #{inspect(errors_on(date_changeset))}"
+      case HistoricalDate.new(attrs) do
+        {:ok, _date} -> nil
+        {:error, date_changeset} -> "invalid date: #{inspect(errors_on(date_changeset))}"
+      end
+    else
+      # A forged calendar is REJECTED, never coerced to `nil` (security
+      # review, calendar finding): coercing would validate the payload as
+      # calendar-less, then store the hostile string verbatim in jsonb,
+      # where every later replay through `String.to_existing_atom/1`
+      # used to crash the public pages and the review queue.
+      "calendar must be \"gregorian\" or \"julian\""
     end
   end
 
@@ -345,7 +393,9 @@ defmodule Amanogawa.Contributions.Override do
     errors =
       [
         {"label_fr", &optional_label_error/1},
-        {"label_en", &optional_label_error/1}
+        {"label_en", &optional_label_error/1},
+        {"description_fr", &optional_description_error/1},
+        {"description_en", &optional_description_error/1}
       ]
       |> Enum.map(fn {key, validator} -> validator.(Map.get(payload, key)) end)
       |> Enum.reject(&is_nil/1)
@@ -359,6 +409,20 @@ defmodule Amanogawa.Contributions.Override do
   defp optional_label_error(nil), do: nil
   defp optional_label_error(value) when is_binary(value), do: label_error(%{"value" => value})
   defp optional_label_error(_value), do: "label must be a string"
+
+  # Optional free text, but bounded (security review, minor 2): a hostile
+  # multi-megabyte description must never reach jsonb storage nor, once
+  # accepted, `Amanogawa.Atlas.Event`'s own columns (which enforce the
+  # same bound in `Amanogawa.Atlas.Event.changeset/2`).
+  defp optional_description_error(nil), do: nil
+
+  defp optional_description_error(value) when is_binary(value) do
+    if String.length(value) > @description_max_length do
+      "description is too long (max #{@description_max_length})"
+    end
+  end
+
+  defp optional_description_error(_value), do: "description must be a string"
 
   # `Map.get/2`, not a `%{"label_fr" => fr, "label_en" => en}` pattern:
   # a strict map pattern would require BOTH keys to be present at all

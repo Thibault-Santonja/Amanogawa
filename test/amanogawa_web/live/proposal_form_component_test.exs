@@ -5,7 +5,12 @@ defmodule AmanogawaWeb.Live.ProposalFormComponentTest do
   `LiveComponent` has no route of its own.
   """
 
-  use AmanogawaWeb.ConnCase, async: true
+  # `async: false` (flaky finding F1): the quota test below lowers the
+  # process-global `Amanogawa.Contributions.ProposalThrottle` config with
+  # `Application.put_env/3`, which would race every concurrently running
+  # async test proposing at the same moment. Sync modules run after the
+  # async ones, alone, so the temporary low limit can never bleed.
+  use AmanogawaWeb.ConnCase, async: false
 
   import Amanogawa.AccountsFixtures
   import Amanogawa.AtlasFixtures
@@ -173,8 +178,14 @@ defmodule AmanogawaWeb.Live.ProposalFormComponentTest do
   describe "quotas (issue #036)" do
     test "beyond the configured quota, submission is refused with a neutral message, nothing further is written",
          %{conn: conn} do
+      # 24h fixed window (flaky finding F1): Hammer's fixed windows are
+      # aligned on the wall clock, so a short scale could silently reset
+      # the counter between the two submissions below when a boundary is
+      # crossed mid-test (same rationale as AmanogawaWeb.RateLimit's own
+      # test config). The module is async: false, so this temporary
+      # global config cannot race any concurrently running test.
       original = Application.get_env(:amanogawa, ProposalThrottle, [])
-      Application.put_env(:amanogawa, ProposalThrottle, limit: 1, scale_ms: :timer.minutes(15))
+      Application.put_env(:amanogawa, ProposalThrottle, limit: 1, scale_ms: :timer.hours(24))
       on_exit(fn -> Application.put_env(:amanogawa, ProposalThrottle, original) end)
 
       # Its own fake peer IP (mirrors `AmanogawaWeb.ExploreLiveTest`'s own
@@ -233,6 +244,58 @@ defmodule AmanogawaWeb.Live.ProposalFormComponentTest do
 
       assert_patch(lv, ~p"/?sel=#{event.qid}")
       refute has_element?(lv, "#proposal-form")
+    end
+
+    test "cancelling preserves the current window and camera (quality review m-finding)", %{
+      conn: conn
+    } do
+      event = event_fixture()
+
+      {:ok, lv, _html} =
+        live(conn, ~p"/?sel=#{event.qid}&propose_field=label_fr&from=-500&to=500")
+
+      lv |> element("#proposal-form button", "Annuler") |> render_click()
+
+      assert_patch(lv, "/?from=-500&sel=#{event.qid}&to=500")
+      refute has_element?(lv, "#proposal-form")
+    end
+  end
+
+  describe "Escape while picking a position (quality review, Escape finding)" do
+    test "the first Escape only cancels the picking, the second closes the form", %{conn: conn} do
+      event = event_fixture()
+      {:ok, lv, _html} = live(conn, ~p"/?sel=#{event.qid}&propose_field=position")
+
+      lv |> element("#proposal-form button", "Choisir sur la carte") |> render_click()
+      assert render(lv) =~ "Cliquez sur la carte"
+
+      # The window-level Escape binding fires the component's "cancel":
+      # with picking in progress, the server-side guard cancels ONLY the
+      # picking, the panel stays open.
+      lv |> element("#proposal-form") |> render_keydown(%{"key" => "Escape"})
+
+      assert has_element?(lv, "#proposal-form")
+      refute render(lv) =~ "Cliquez sur la carte"
+
+      # Picking over: Escape now closes the form, as before.
+      lv |> element("#proposal-form") |> render_keydown(%{"key" => "Escape"})
+
+      assert_patch(lv, ~p"/?sel=#{event.qid}")
+      refute has_element?(lv, "#proposal-form")
+    end
+
+    test "an already-picked position survives the picking cancellation", %{conn: conn} do
+      event = event_fixture()
+      {:ok, lv, _html} = live(conn, ~p"/?sel=#{event.qid}&propose_field=position")
+
+      lv |> element("#map") |> render_hook("position_picked", %{"lng" => 2.35, "lat" => 48.85})
+      assert render(lv) =~ "48.85"
+
+      lv |> element("#proposal-form button", "Choisir sur la carte") |> render_click()
+      lv |> element("#proposal-form") |> render_keydown(%{"key" => "Escape"})
+
+      assert has_element?(lv, "#proposal-form")
+      assert render(lv) =~ "48.85"
     end
   end
 

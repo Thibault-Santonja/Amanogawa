@@ -33,6 +33,43 @@ defmodule AmanogawaWeb.ContributionLiveTest do
 
       assert html =~ "introuvable"
     end
+
+    test "a malformed id (not a UUID) shows the same neutral error, never a 500", %{conn: conn} do
+      {:ok, _lv, html} = live(conn, ~p"/contributions/not-a-uuid")
+
+      assert html =~ "introuvable"
+    end
+
+    test "security: a forged calendar in stored data renders the page instead of crashing it", %{
+      conn: conn
+    } do
+      # Forged/legacy data written straight past the changeset (the
+      # changeset itself now rejects this at proposal): the PUBLIC page
+      # must degrade to "no value", never crash.
+      override =
+        override_fixture(field: :end_date, current_value: nil, proposed_value: nil)
+        |> Ecto.Changeset.change(
+          current_value: %{
+            "year" => 1800,
+            "month" => nil,
+            "day" => nil,
+            "precision" => 9,
+            "calendar" => "banana"
+          },
+          proposed_value: %{
+            "year" => 1750,
+            "month" => nil,
+            "day" => nil,
+            "precision" => 9,
+            "calendar" => "not_a_calendar"
+          }
+        )
+        |> Repo.update!()
+
+      {:ok, _lv, html} = live(conn, ~p"/contributions/#{override.id}")
+
+      assert html =~ override.source
+    end
   end
 
   describe "appeal form visibility (anti-IDOR)" do
@@ -336,6 +373,27 @@ defmodule AmanogawaWeb.ContributionLiveTest do
 
       assert html =~ "Conflit résolu"
       assert html =~ "Correction confirmée par une seconde source"
+    end
+
+    test "an :adopted_wikidata resolution attributes the deciding reviewer, never the sync", %{
+      conn: conn
+    } do
+      reviewer = reviewer_fixture()
+      override = accepted_override_fixture()
+      conflict = conflict_fixture(override: override)
+
+      assert {:ok, _resolved} =
+               Contributions.resolve_conflict(conflict.id, reviewer, %{
+                 resolution: :adopted_wikidata,
+                 message: "Wikidata porte la bonne valeur"
+               })
+
+      {:ok, _lv, html} = live(conn, ~p"/contributions/#{override.id}")
+
+      assert html =~ "Valeur Wikidata adoptée"
+      assert html =~ reviewer.display_name
+      assert html =~ "Wikidata porte la bonne valeur"
+      refute html =~ reviewer.email
     end
 
     test "an event whose reference no longer resolves falls back to its raw qid", %{conn: conn} do

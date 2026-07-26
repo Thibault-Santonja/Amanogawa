@@ -21,10 +21,11 @@ defmodule AmanogawaWeb.Live.ProposalFormComponent do
   component's own `redirected` field up through the diff (`Phoenix.
   LiveView.Channel`), so calling it here, from the component that already
   holds every assign the closing path needs, is the direct and correct
-  way, not a workaround. Never re-adds `propose_field`/`propose_new_event`
-  to the URL (`AmanogawaWeb.ExploreLive`'s own `patch_path/2` never
-  carries them either): closing simply keeps whatever selection was
-  already there.
+  way, not a workaround. The closing path itself is the `@close_path`
+  assign `AmanogawaWeb.ExploreLive` computes from the CURRENT URL state
+  (window, camera and selection preserved, quality review m-finding),
+  never re-adding `propose_field`/`propose_new_event`: closing keeps the
+  visitor exactly where they were.
 
   First proposal without a public pseudonym (issue #034's `display_name`):
   this component asks for one FIRST, blocking the rest of the form
@@ -53,23 +54,28 @@ defmodule AmanogawaWeb.Live.ProposalFormComponent do
   @field_names ~w(label_fr label_en begin_date end_date position)
   @link_types ~w(part_of follows cause effect significant)
 
-  @precision_labels [
-    {"0", "Milliard d'années"},
-    {"1", "Cent millions d'années"},
-    {"2", "Dizaine de millions d'années"},
-    {"3", "Million d'années"},
-    {"4", "Centaine de milliers d'années"},
-    {"5", "Dizaine de milliers d'années"},
-    {"6", "Millénaire"},
-    {"7", "Siècle"},
-    {"8", "Décennie"},
-    {"9", "Année"},
-    {"10", "Mois"},
-    {"11", "Jour"}
-  ]
-
   @source_min_length 5
   @source_max_length 1000
+
+  # A function, not a module attribute (i18n review finding): `gettext/1`
+  # resolves against the CALLER's locale at runtime, which a value frozen
+  # at compile time cannot do.
+  defp precision_labels do
+    [
+      {"0", gettext("Milliard d'années")},
+      {"1", gettext("Cent millions d'années")},
+      {"2", gettext("Dizaine de millions d'années")},
+      {"3", gettext("Million d'années")},
+      {"4", gettext("Centaine de milliers d'années")},
+      {"5", gettext("Dizaine de milliers d'années")},
+      {"6", gettext("Millénaire")},
+      {"7", gettext("Siècle")},
+      {"8", gettext("Décennie")},
+      {"9", gettext("Année")},
+      {"10", gettext("Mois")},
+      {"11", gettext("Jour")}
+    ]
+  end
 
   # ---------------------------------------------------------------------
   # update/2
@@ -78,10 +84,6 @@ defmodule AmanogawaWeb.Live.ProposalFormComponent do
   @impl true
   def update(%{picked_position: position}, socket) do
     {:ok, assign(socket, picked_position: position, picking?: false)}
-  end
-
-  def update(%{position_picking_cancelled: true}, socket) do
-    {:ok, assign(socket, picking?: false)}
   end
 
   def update(assigns, socket) do
@@ -183,11 +185,23 @@ defmodule AmanogawaWeb.Live.ProposalFormComponent do
      |> push_event("disable_position_picking", %{})}
   end
 
+  # Escape (or the close button) while the map is in position-picking
+  # mode only cancels the PICKING, never the whole form (quality review,
+  # Escape finding): the server-side `picking?` flag is the guard, so the
+  # decision is deterministic whatever the client races. The next
+  # cancel, with picking over, closes the form as before.
+  def handle_event("cancel", _params, %{assigns: %{picking?: true}} = socket) do
+    {:noreply,
+     socket
+     |> assign(:picking?, false)
+     |> push_event("disable_position_picking", %{})}
+  end
+
   def handle_event("cancel", _params, socket) do
     {:noreply,
      socket
      |> push_event("disable_position_picking", %{})
-     |> push_patch(to: close_path(socket.assigns))}
+     |> push_patch(to: socket.assigns.close_path)}
   end
 
   def handle_event("submit", %{"proposal" => params}, socket) do
@@ -201,7 +215,7 @@ defmodule AmanogawaWeb.Live.ProposalFormComponent do
          socket
          |> push_event("disable_position_picking", %{})
          |> put_flash(:info, gettext("Proposition envoyée, elle sera relue."))
-         |> push_patch(to: close_path(socket.assigns))}
+         |> push_patch(to: socket.assigns.close_path)}
 
       {:error, :event_not_found} ->
         {:noreply, assign(socket, :error, gettext("Cet événement est introuvable."))}
@@ -218,12 +232,6 @@ defmodule AmanogawaWeb.Live.ProposalFormComponent do
         {:noreply, assign(socket, :form, to_form(changeset, as: "proposal", action: :validate))}
     end
   end
-
-  # Keeps whatever selection was already there (issue #036): never
-  # re-adds `propose_field`/`propose_new_event`, `AmanogawaWeb.ExploreLive`'s
-  # own `patch_path/2` never carries them either.
-  defp close_path(%{event: %{qid: qid}}), do: "/?sel=#{URI.encode_www_form(qid)}"
-  defp close_path(%{event: nil}), do: "/"
 
   defp maybe_resolve_target_event(%{assigns: %{kind: :link}} = socket, params) do
     case Map.get(params, "target_qid") do
@@ -348,7 +356,7 @@ defmodule AmanogawaWeb.Live.ProposalFormComponent do
 
   @impl true
   def render(assigns) do
-    assigns = assign_new(assigns, :precision_labels, fn -> @precision_labels end)
+    assigns = assign_new(assigns, :precision_labels, fn -> precision_labels() end)
 
     ~H"""
     <div

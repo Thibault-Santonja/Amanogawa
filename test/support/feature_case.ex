@@ -107,6 +107,15 @@ defmodule AmanogawaWeb.FeatureCase do
       scale_ms: :timer.hours(24)
     )
 
+    # Same single shared Chrome peer for every contribution proposal the
+    # E2E journeys submit (issue #039, flaky finding): the proposal
+    # quota's IP counter must never deny a scenario partway through a
+    # run that legitimately proposes many times from 127.0.0.1.
+    Application.put_env(:amanogawa, Amanogawa.Contributions.ProposalThrottle,
+      limit: 10_000,
+      scale_ms: :timer.hours(24)
+    )
+
     Application.put_env(
       :amanogawa,
       :magic_link_notifier,

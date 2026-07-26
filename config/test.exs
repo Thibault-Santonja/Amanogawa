@@ -272,3 +272,20 @@ config :amanogawa, AmanogawaWeb.ExploreLive,
 # "has_more?" and exercise "charger plus" with a handful of fixtures
 # instead of twenty.
 config :amanogawa, AmanogawaWeb.ContributionsLive, page_size: 2
+
+# Same mechanic for the review queue's own "charger plus".
+config :amanogawa, AmanogawaWeb.ReviewQueueLive, page_size: 2
+
+# High proposal quota with a 24h fixed window (flaky findings F1/F2/F3):
+# LiveView tests submitting proposals all share the default 127.0.0.1
+# peer, so the production default (10/hour) could be collectively
+# exhausted by an unlucky async schedule, and a short Hammer fixed window
+# can silently reset across a wall-clock boundary mid-test (see
+# AmanogawaWeb.RateLimit's own comment above). Tests that need the
+# over-quota path exhaust their own unique author/IP keys by call count
+# (Amanogawa.ContributionsTest) or run sync with a locally lowered limit
+# (AmanogawaWeb.Live.ProposalFormComponentTest, async: false): NEVER
+# `Application.put_env/3` on this key under `async: true`.
+config :amanogawa, Amanogawa.Contributions.ProposalThrottle,
+  limit: 1000,
+  scale_ms: :timer.hours(24)

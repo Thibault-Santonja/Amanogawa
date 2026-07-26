@@ -137,6 +137,13 @@ defmodule Amanogawa.Atlas.Event do
   # sync can never touch it.
   @qid_regex ~r/\A(Q\d+|L[0-9a-f]{32})\z/
 
+  # Bound on the free-text descriptions (security review, minor 2): the
+  # community write path (`Amanogawa.Atlas.create_contributed_event/1`,
+  # fed by an accepted `:new_event` proposal) goes through `changeset/2`,
+  # so the invariant is enforced here too, not only on the proposal
+  # payload (`Amanogawa.Contributions.Override`).
+  @description_max_length 4000
+
   @doc """
   Builds and validates a changeset.
 
@@ -169,6 +176,8 @@ defmodule Amanogawa.Atlas.Event do
       message: "must be a Wikidata QID (e.g. Q12345) or a local id (e.g. L<uuid hex>)"
     )
     |> unique_constraint(:qid)
+    |> validate_length(:description_fr, max: @description_max_length)
+    |> validate_length(:description_en, max: @description_max_length)
     |> apply_historical_date_invariants(:begin)
     |> apply_historical_date_invariants(:end)
     |> validate_geom_srid()

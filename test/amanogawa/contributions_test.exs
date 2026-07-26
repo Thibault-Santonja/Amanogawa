@@ -736,6 +736,216 @@ defmodule Amanogawa.ContributionsTest do
       assert counts == %{unchanged: 0, superseded: 0, conflicts_opened: 0, conflicts_refreshed: 0}
       assert queries == 1
     end
+
+    test "conflict lifecycle: a supersede closes the open conflict with the system :obsolete resolution" do
+      event =
+        event_fixture(
+          begin_year: 1800,
+          begin_precision: 9,
+          begin_month: nil,
+          begin_day: nil,
+          begin_calendar: :gregorian
+        )
+
+      override = accept_begin_date_override(event, 1750)
+
+      # First sync: a real divergence opens a conflict.
+      assert %{conflicts_opened: 1} =
+               Contributions.record_sync_divergences([lot_entry(event, begin_year: 1900)])
+
+      # Second sync: Wikidata rejoined the correction. The override is
+      # superseded AND the stale conflict is closed, never left open.
+      assert %{superseded: 1} =
+               Contributions.record_sync_divergences([lot_entry(event, begin_year: 1750)])
+
+      assert Contributions.list_open_conflicts() == []
+
+      [conflict] = Repo.all(where(Conflict, override_id: ^override.id))
+      assert conflict.status == :resolved
+      assert conflict.resolution == :obsolete
+      assert conflict.resolved_by == nil
+    end
+
+    test "conflict lifecycle: Wikidata coming back to the snapshot closes the open conflict as :obsolete" do
+      event =
+        event_fixture(
+          begin_year: 1800,
+          begin_precision: 9,
+          begin_month: nil,
+          begin_day: nil,
+          begin_calendar: :gregorian
+        )
+
+      override = accept_begin_date_override(event, 1750)
+
+      assert %{conflicts_opened: 1} =
+               Contributions.record_sync_divergences([lot_entry(event, begin_year: 1900)])
+
+      # Wikidata moved back to the value snapshotted at acceptance: the
+      # divergence no longer exists, the conflict must not stay open.
+      assert %{unchanged: 1} =
+               Contributions.record_sync_divergences([lot_entry(event, begin_year: 1800)])
+
+      assert Contributions.list_open_conflicts() == []
+
+      [conflict] = Repo.all(where(Conflict, override_id: ^override.id))
+      assert conflict.status == :resolved
+      assert conflict.resolution == :obsolete
+      assert conflict.resolved_by == nil
+      assert Repo.get!(Override, override.id).status == :accepted
+    end
+
+    test "M2: Wikidata removing the end date under an accepted override opens a conflict instead of crashing" do
+      event =
+        event_fixture(
+          end_year: 1850,
+          end_precision: 9,
+          end_month: nil,
+          end_day: nil,
+          end_calendar: :gregorian
+        )
+
+      override = accept_end_date_override(event, 1840)
+
+      # Wikidata now carries NO end date at all: the sync must journal
+      # the divergence, never raise on the NOT NULL wikidata_value.
+      assert %{conflicts_opened: 1} =
+               Contributions.record_sync_divergences([
+                 lot_entry(event,
+                   end_year: nil,
+                   end_month: nil,
+                   end_day: nil,
+                   end_precision: nil,
+                   end_calendar: nil
+                 )
+               ])
+
+      assert [conflict] = Contributions.list_open_conflicts()
+      assert conflict.override_id == override.id
+      assert conflict.wikidata_value == %{"absent" => true}
+
+      # The corrected end date is still what the event shows.
+      assert Atlas.get_event_by_qid(event.qid).end_year == 1840
+    end
+
+    test "M2: adopting Wikidata's absent end date releases the field to no end date at all" do
+      event =
+        event_fixture(
+          end_year: 1850,
+          end_precision: 9,
+          end_month: nil,
+          end_day: nil,
+          end_calendar: :gregorian
+        )
+
+      override = accept_end_date_override(event, 1840)
+      reviewer = reviewer_fixture()
+
+      Contributions.record_sync_divergences([
+        lot_entry(event,
+          end_year: nil,
+          end_month: nil,
+          end_day: nil,
+          end_precision: nil,
+          end_calendar: nil
+        )
+      ])
+
+      [conflict] = Contributions.list_open_conflicts()
+
+      assert {:ok, resolved} =
+               Contributions.resolve_conflict(conflict.id, reviewer, %{
+                 resolution: :adopted_wikidata,
+                 message: "Wikidata a retiré cette date"
+               })
+
+      assert resolved.status == :resolved
+
+      updated_event = Atlas.get_event_by_qid(event.qid)
+      assert updated_event.end_year == nil
+      assert updated_event.overridden_fields == []
+      assert Repo.get!(Override, override.id).status == :superseded
+    end
+
+    test "M2: keeping the override against an absent Wikidata value refreshes the snapshot to nil, no re-signal" do
+      event =
+        event_fixture(
+          end_year: 1850,
+          end_precision: 9,
+          end_month: nil,
+          end_day: nil,
+          end_calendar: :gregorian
+        )
+
+      override = accept_end_date_override(event, 1840)
+      reviewer = reviewer_fixture()
+
+      absent_lot = [
+        lot_entry(event,
+          end_year: nil,
+          end_month: nil,
+          end_day: nil,
+          end_precision: nil,
+          end_calendar: nil
+        )
+      ]
+
+      Contributions.record_sync_divergences(absent_lot)
+      [conflict] = Contributions.list_open_conflicts()
+
+      assert {:ok, _resolved} =
+               Contributions.resolve_conflict(conflict.id, reviewer, %{
+                 resolution: :kept_override,
+                 message: "La date de fin est attestée"
+               })
+
+      assert Repo.get!(Override, override.id).wikidata_value_at_acceptance == nil
+
+      # The same absent value again: unchanged, no new conflict.
+      assert %{unchanged: 1} = Contributions.record_sync_divergences(absent_lot)
+      assert Contributions.list_open_conflicts() == []
+    end
+
+    test "M3/M1: a position override is reachable by :superseded (symmetric rounding at proposal)" do
+      event =
+        event_fixture(
+          geom: %Geo.Point{coordinates: {2.0, 48.0}, srid: 4326},
+          location_source: :direct
+        )
+
+      author = user_fixture()
+      reviewer = reviewer_fixture()
+
+      # More decimals than the 6 the sync's own snapshots carry: the
+      # proposal-side rounding is what makes the comparison symmetric.
+      {:ok, override} =
+        Contributions.propose(
+          %{
+            kind: :field,
+            event_qid: event.qid,
+            field: :position,
+            proposed_value: %{"lon" => 2.352222177777, "lat" => 48.856614999999},
+            source: "https://example.org/source"
+          },
+          author.id
+        )
+
+      assert override.proposed_value == %{"lon" => 2.352222, "lat" => 48.856615}
+
+      {:ok, _accepted} = Contributions.accept_override(override.id, reviewer, "motif")
+
+      # Wikidata rejoins the correction (its own coordinates land within
+      # the same 6-decimal rounding): superseded, not a conflict.
+      lot = [
+        lot_entry(event,
+          geom: %Geo.Point{coordinates: {2.3522221, 48.8566149}, srid: 4326},
+          location_source: :direct
+        )
+      ]
+
+      assert %{superseded: 1, conflicts_opened: 0} = Contributions.record_sync_divergences(lot)
+      assert Repo.get!(Override, override.id).status == :superseded
+    end
   end
 
   describe "list_open_conflicts/1 and resolve_conflict/3" do
@@ -832,6 +1042,38 @@ defmodule Amanogawa.ContributionsTest do
                  message: "motif"
                })
     end
+
+    test "error case: a conflict whose override is no longer :accepted is refused, nothing changes" do
+      override = accepted_override_fixture()
+      conflict = conflict_fixture(override: override)
+      reviewer = reviewer_fixture()
+
+      # The override left :accepted between the sync and the reviewer's
+      # decision (e.g. a direct release then supersede elsewhere).
+      override |> Ecto.Changeset.change(status: :superseded) |> Repo.update!()
+
+      assert {:error, :override_not_accepted} =
+               Contributions.resolve_conflict(conflict.id, reviewer, %{
+                 resolution: :adopted_wikidata,
+                 message: "motif"
+               })
+
+      assert Repo.get!(Conflict, conflict.id).status == :open
+    end
+
+    test "limit case: list_open_conflicts/1 honors keyset pagination (:after, :limit)" do
+      first = conflict_fixture(detected_at: ~U[2026-07-01 10:00:00Z])
+      second = conflict_fixture(detected_at: ~U[2026-07-02 10:00:00Z])
+      third = conflict_fixture(detected_at: ~U[2026-07-03 10:00:00Z])
+
+      assert [page_1] = Contributions.list_open_conflicts(%{limit: 1})
+      assert page_1.id == first.id
+
+      cursor = %{detected_at: page_1.detected_at, id: page_1.id}
+
+      assert Contributions.list_open_conflicts(%{after: cursor}) |> Enum.map(& &1.id) ==
+               [second.id, third.id]
+    end
   end
 
   # ---------------------------------------------------------------------
@@ -849,7 +1091,14 @@ defmodule Amanogawa.ContributionsTest do
           begin_year: 1000,
           begin_precision: 9,
           begin_month: nil,
-          begin_day: nil
+          begin_day: nil,
+          end_year: 1100,
+          end_precision: 9,
+          end_month: nil,
+          end_day: nil,
+          end_calendar: :gregorian,
+          geom: %Geo.Point{coordinates: {1.0, 2.0}, srid: 4326},
+          location_source: :direct
         )
 
       event
@@ -870,13 +1119,13 @@ defmodule Amanogawa.ContributionsTest do
         begin_day: nil,
         begin_precision: 9,
         begin_calendar: :gregorian,
-        end_year: nil,
+        end_year: 1600,
         end_month: nil,
         end_day: nil,
-        end_precision: nil,
-        end_calendar: nil,
+        end_precision: 9,
+        end_calendar: :gregorian,
         geom: %Geo.Point{coordinates: {10.0, 10.0}, srid: 4326},
-        location_source: :direct,
+        location_source: :place,
         sitelink_count: 99
       }
 
@@ -901,12 +1150,29 @@ defmodule Amanogawa.ContributionsTest do
         assert result.begin_year == 1500
       end
 
+      # The end_* and geom/location_source CASE branches of the upsert
+      # (quality review, residual defense: previously uncovered).
+      if :end_date in marked_fields do
+        assert result.end_year == 1100
+      else
+        assert result.end_year == 1600
+      end
+
+      if :position in marked_fields do
+        assert %Geo.Point{coordinates: {1.0, 2.0}} = result.geom
+        assert result.location_source == :direct
+      else
+        assert %Geo.Point{coordinates: {10.0, 10.0}} = result.geom
+        assert result.location_source == :place
+      end
+
       # Never-overridable columns always replaced.
       assert result.sitelink_count == 99
     end
   end
 
-  defp field_generator, do: StreamData.member_of([:label_fr, :label_en, :begin_date])
+  defp field_generator,
+    do: StreamData.member_of([:label_fr, :label_en, :begin_date, :end_date, :position])
 
   # ---------------------------------------------------------------------
   # propose/3 quota (issue #036)
@@ -934,13 +1200,17 @@ defmodule Amanogawa.ContributionsTest do
     end
 
     test "error case: over quota (author and IP shared across calls), nothing further is written" do
-      # Exhausts the default config-wide quota by call count rather than
-      # lowering it via `Application.put_env/3`: this file is `async:
-      # true`, and the throttle's Hammer table is a single, shared,
-      # process-wide ETS table (mirrors `Amanogawa.Accounts.
-      # MagicLinkThrottleTest`'s own rationale) - mutating the global
-      # config here would race every other async test proposing at the
-      # same moment.
+      # Exhausts the config-wide quota by CALL COUNT on this test's own
+      # unique author/IP keys, never by lowering the global config via
+      # `Application.put_env/3`: this file is `async: true`, and the
+      # throttle's Hammer table is a single, shared, process-wide ETS
+      # table (mirrors `Amanogawa.Accounts.MagicLinkThrottleTest`'s own
+      # rationale) - mutating the global config here would race every
+      # other async test proposing at the same moment. The exhaustion
+      # itself goes through cheap `ProposalThrottle.allow?/2` hits (pure
+      # ETS, no database write per hit) since config/test.exs
+      # deliberately sets a high limit; one real proposal before and one
+      # after prove the domain behavior at each side of the quota.
       limit =
         Application.get_env(:amanogawa, ProposalThrottle, limit: 10) |> Keyword.fetch!(:limit)
 
@@ -958,12 +1228,14 @@ defmodule Amanogawa.ContributionsTest do
         }
       end
 
-      for n <- 1..limit do
-        assert {:ok, _override} = Contributions.propose(attrs.(n), author.id, ip)
+      assert {:ok, _override} = Contributions.propose(attrs.(1), author.id, ip)
+
+      for _n <- 2..limit//1 do
+        assert ProposalThrottle.allow?(author.id, ip)
       end
 
       assert {:error, :rate_limited} = Contributions.propose(attrs.(limit + 1), author.id, ip)
-      assert Contributions.list_overrides(%{author_id: author.id}) |> length() == limit
+      assert Contributions.list_overrides(%{author_id: author.id}) |> length() == 1
     end
   end
 
@@ -1514,6 +1786,23 @@ defmodule Amanogawa.ContributionsTest do
 
       assert :ok = Contributions.anonymize_user(author)
     end
+
+    test "M5: a resolved conflict's resolved_by is anonymized too" do
+      reviewer = reviewer_fixture()
+      conflict = conflict_fixture()
+
+      assert {:ok, resolved} =
+               Contributions.resolve_conflict(conflict.id, reviewer, %{
+                 resolution: :kept_override,
+                 message: "motif"
+               })
+
+      assert resolved.resolved_by == reviewer.id
+
+      assert :ok = Contributions.anonymize_user(reviewer)
+
+      assert Repo.get!(Conflict, conflict.id).resolved_by == nil
+    end
   end
 
   # ---------------------------------------------------------------------
@@ -1571,6 +1860,14 @@ defmodule Amanogawa.ContributionsTest do
   # ---------------------------------------------------------------------
 
   defp accept_begin_date_override(event, proposed_year) do
+    accept_date_override(event, :begin_date, proposed_year)
+  end
+
+  defp accept_end_date_override(event, proposed_year) do
+    accept_date_override(event, :end_date, proposed_year)
+  end
+
+  defp accept_date_override(event, field, proposed_year) do
     author = user_fixture()
     reviewer = reviewer_fixture()
 
@@ -1579,7 +1876,7 @@ defmodule Amanogawa.ContributionsTest do
         %{
           kind: :field,
           event_qid: event.qid,
-          field: :begin_date,
+          field: field,
           proposed_value: %{
             "year" => proposed_year,
             "month" => nil,

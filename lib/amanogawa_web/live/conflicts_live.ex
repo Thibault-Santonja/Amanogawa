@@ -26,6 +26,8 @@ defmodule AmanogawaWeb.ConflictsLive do
 
   alias Amanogawa.Atlas
   alias Amanogawa.Contributions
+  alias Amanogawa.HistoricalDate
+  alias Amanogawa.HistoricalDate.Formatter
 
   @impl true
   def mount(_params, _session, socket) do
@@ -51,18 +53,71 @@ defmodule AmanogawaWeb.ConflictsLive do
       event_qid: conflict.event_qid,
       event_label: event && (event.label_fr || event.label_en),
       field: conflict.field,
-      override_value: override && override.proposed_value,
-      wikidata_value: conflict.wikidata_value,
+      field_label: field_label(conflict.field),
+      override_value: format_value(conflict.field, override && override.proposed_value),
+      wikidata_value: format_value(conflict.field, conflict.wikidata_value),
       detected_at: conflict.detected_at
     }
   end
 
+  # ---------------------------------------------------------------------
+  # Human-readable values (i18n review finding: never `inspect/1`'s raw
+  # Elixir terms in a UI), formatted per the conflict's own field, with
+  # `Amanogawa.Contributions.Conflict`'s reserved absent marker and any
+  # forged/legacy payload both degrading to an honest label instead of a
+  # crash.
+  # ---------------------------------------------------------------------
+
+  defp format_value(_field, nil), do: gettext("aucune valeur")
+  defp format_value(_field, %{"absent" => true}), do: gettext("aucune valeur")
+
+  defp format_value(field, %{"value" => value}) when field in [:label_fr, :label_en],
+    do: value
+
+  defp format_value(field, %{"year" => _year} = payload) when field in [:begin_date, :end_date],
+    do: format_date_payload(payload)
+
+  defp format_value(:position, %{"lon" => lon, "lat" => lat}), do: "#{lat}, #{lon}"
+  defp format_value(_field, _payload), do: gettext("valeur illisible")
+
+  defp format_date_payload(payload) do
+    attrs = %{
+      year: payload["year"],
+      month: payload["month"],
+      day: payload["day"],
+      precision: payload["precision"],
+      calendar: calendar_atom(payload["calendar"])
+    }
+
+    case HistoricalDate.new(attrs) do
+      {:ok, date} -> Formatter.format(date)
+      {:error, _changeset} -> gettext("valeur illisible")
+    end
+  end
+
+  # Total conversion (security review, calendar finding): stored jsonb,
+  # never fed to `String.to_existing_atom/1`.
+  defp calendar_atom("gregorian"), do: :gregorian
+  defp calendar_atom("julian"), do: :julian
+  defp calendar_atom(_other), do: nil
+
+  defp field_label(:label_fr), do: gettext("Libellé (français)")
+  defp field_label(:label_en), do: gettext("Libellé (anglais)")
+  defp field_label(:begin_date), do: gettext("Date de début")
+  defp field_label(:end_date), do: gettext("Date de fin")
+  defp field_label(:position), do: gettext("Position")
+
+  # `resolution` is allowlisted BEFORE any atom conversion (security
+  # review, minor 4): a forged form payload never reaches
+  # `String.to_existing_atom/1`, and the system-only `:obsolete`
+  # resolution is unreachable from this form by construction.
   @impl true
   def handle_event(
         "resolve",
         %{"conflict_id" => id, "resolution" => resolution, "message" => message},
         socket
-      ) do
+      )
+      when resolution in ["kept_override", "adopted_wikidata"] do
     reviewer = socket.assigns.current_scope.user
     attrs = %{resolution: String.to_existing_atom(resolution), message: message}
 
@@ -79,6 +134,10 @@ defmodule AmanogawaWeb.ConflictsLive do
       {:error, _reason} ->
         {:noreply, put_flash(socket, :error, gettext("Impossible de résoudre ce conflit."))}
     end
+  end
+
+  def handle_event("resolve", _params, socket) do
+    {:noreply, put_flash(socket, :error, gettext("Impossible de résoudre ce conflit."))}
   end
 
   @impl true
@@ -100,15 +159,15 @@ defmodule AmanogawaWeb.ConflictsLive do
           <p class="font-semibold text-text">
             {row.event_label || row.event_qid} <span class="text-text-muted">({row.event_qid})</span>
           </p>
-          <p class="text-sm text-text-muted">{gettext("Champ :")} {row.field}</p>
+          <p class="text-sm text-text-muted">{gettext("Champ :")} {row.field_label}</p>
           <div class="mt-2 grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
             <p>
               <span class="font-semibold text-text">{gettext("Correction locale :")}</span>
-              {inspect(row.override_value)}
+              {row.override_value}
             </p>
             <p>
               <span class="font-semibold text-text">{gettext("Wikidata :")}</span>
-              {inspect(row.wikidata_value)}
+              {row.wikidata_value}
             </p>
           </div>
           <p class="mt-1 text-xs text-text-muted">

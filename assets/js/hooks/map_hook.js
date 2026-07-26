@@ -472,15 +472,19 @@ const MapHook = {
     this.handleEvent("enable_position_picking", () => this.enterPickingMode())
     this.handleEvent("disable_position_picking", () => this.exitPickingMode())
 
-    // Escape cancels picking without touching the event panel (issue
-    // #036's own point d'attention): reports the cancellation so the form
-    // can clear any "choosing..." state, but never closes the panel
-    // itself (`AmanogawaWeb.Components.EventPanel`'s own Escape handler
-    // is bound on the aside, unaffected by this window-level listener).
+    // Escape while picking: only the LOCAL exit happens here, for
+    // instant cursor feedback. The authoritative decision is
+    // server-side (issue #036's own point d'attention): the proposal
+    // form's window-level Escape binding fires its "cancel" event, and
+    // the component's `picking?` guard turns that into "cancel the
+    // picking only, keep the form open", pushing
+    // "disable_position_picking" back (idempotent after this local
+    // exit). This listener deliberately pushes NOTHING: a separate
+    // cancellation event used to race the form's own "cancel" and could
+    // flip the server-side guard before it ran.
     this.onPickerKeyDown = event => {
       if (event.key === "Escape" && this.pickingPosition) {
         this.exitPickingMode()
-        this.pushEvent("position_picking_cancelled", {})
       }
     }
     window.addEventListener("keydown", this.onPickerKeyDown)

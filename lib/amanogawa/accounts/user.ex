@@ -39,6 +39,14 @@ defmodule Amanogawa.Accounts.User do
   @display_name_min_length 3
   @display_name_max_length 40
 
+  # Minimal reserved-terms list (security review): a pseudonym is the
+  # ONLY public identity in the contribution history, so one that
+  # impersonates the moderation, the system, or the project itself would
+  # lend false authority to its revisions. Matched after trimming,
+  # downcasing and stripping accents, so casing or accent variants
+  # ("Modérateur", "SYSTÈME") are caught too.
+  @reserved_display_names ~w(relecteur reviewer moderateur moderator admin amanogawa systeme system)
+
   schema "users" do
     field :email, :string
 
@@ -79,7 +87,9 @@ defmodule Amanogawa.Accounts.User do
   `Amanogawa.Accounts.set_display_name/2`): required, #{@display_name_min_length}
   to #{@display_name_max_length} characters, unique case-insensitively
   (`users_display_name_lower_index`, the same `lower(...)` technique
-  `changeset/2` uses for `email`).
+  `changeset/2` uses for `email`), and never one of the reserved
+  moderation/system terms (`#{Enum.join(@reserved_display_names, ", ")}`,
+  casing and accent variants included).
   """
   @spec display_name_changeset(t(), map()) :: Ecto.Changeset.t()
   def display_name_changeset(user, attrs) do
@@ -90,7 +100,32 @@ defmodule Amanogawa.Accounts.User do
       min: @display_name_min_length,
       max: @display_name_max_length
     )
+    |> validate_not_reserved(:display_name)
     |> unique_constraint(:display_name, name: :users_display_name_lower_index)
+  end
+
+  defp validate_not_reserved(changeset, field) do
+    case get_change(changeset, field) do
+      nil ->
+        changeset
+
+      value ->
+        if normalize_for_reservation(value) in @reserved_display_names do
+          add_error(changeset, field, "is reserved")
+        else
+          changeset
+        end
+    end
+  end
+
+  # Trim + downcase + strip combining accents (NFD decomposition), so
+  # "Modérateur" and "SYSTÈME" normalize to their reserved base terms.
+  defp normalize_for_reservation(value) do
+    value
+    |> String.trim()
+    |> String.downcase()
+    |> String.normalize(:nfd)
+    |> String.replace(~r/\p{Mn}/u, "")
   end
 
   @doc """

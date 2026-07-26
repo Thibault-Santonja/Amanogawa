@@ -100,6 +100,65 @@ defmodule Amanogawa.Contributions.OverrideTest do
       assert errors_on(changeset).proposed_value == ["must be a date payload"]
     end
 
+    test "security: a forged calendar is REJECTED, never coerced and stored verbatim" do
+      attrs =
+        Map.merge(@base_attrs, %{
+          kind: :field,
+          event_qid: "Q123",
+          field: :begin_date,
+          proposed_value: %{
+            "year" => 1900,
+            "month" => nil,
+            "day" => nil,
+            "precision" => 9,
+            "calendar" => "banana"
+          }
+        })
+
+      changeset = Override.propose_changeset(%Override{}, attrs)
+      refute changeset.valid?
+
+      assert errors_on(changeset).proposed_value == [
+               "calendar must be \"gregorian\" or \"julian\""
+             ]
+    end
+
+    test "a nil calendar is still accepted (calendar unknown)" do
+      attrs =
+        Map.merge(@base_attrs, %{
+          kind: :field,
+          event_qid: "Q123",
+          field: :begin_date,
+          proposed_value: %{
+            "year" => 1900,
+            "month" => nil,
+            "day" => nil,
+            "precision" => 9,
+            "calendar" => nil
+          }
+        })
+
+      assert %Ecto.Changeset{valid?: true} = Override.propose_changeset(%Override{}, attrs)
+    end
+
+    test "M3: a position payload is rounded to 6 decimals at proposal, symmetric with the sync's snapshots" do
+      attrs =
+        Map.merge(@base_attrs, %{
+          kind: :field,
+          event_qid: "Q123",
+          field: :position,
+          proposed_value: %{"lon" => 2.352222177777, "lat" => 48.856614999999}
+        })
+
+      changeset = Override.propose_changeset(%Override{}, attrs)
+      assert changeset.valid?
+
+      assert Ecto.Changeset.get_field(changeset, :proposed_value) == %{
+               "lon" => 2.352222,
+               "lat" => 48.856615
+             }
+    end
+
     test "happy path: a julian calendar date payload is accepted" do
       attrs =
         Map.merge(@base_attrs, %{
@@ -267,6 +326,78 @@ defmodule Amanogawa.Contributions.OverrideTest do
       errors = errors_on(changeset).proposed_value
       assert "begin_date is required" in errors
       assert "position is required" in errors
+    end
+
+    test "error: a description longer than 4000 characters is rejected" do
+      attrs =
+        Map.merge(@base_attrs, %{
+          kind: :new_event,
+          proposed_value: %{
+            "label_fr" => "X",
+            "description_fr" => String.duplicate("a", 4001),
+            "begin_date" => %{
+              "year" => 1900,
+              "month" => nil,
+              "day" => nil,
+              "precision" => 9,
+              "calendar" => "gregorian"
+            },
+            "position" => %{"lon" => 2.0, "lat" => 48.0}
+          }
+        })
+
+      changeset = Override.propose_changeset(%Override{}, attrs)
+      refute changeset.valid?
+      assert "description is too long (max 4000)" in errors_on(changeset).proposed_value
+    end
+
+    test "error: a non-string description is rejected" do
+      attrs =
+        Map.merge(@base_attrs, %{
+          kind: :new_event,
+          proposed_value: %{
+            "label_fr" => "X",
+            "description_en" => %{"nested" => "map"},
+            "begin_date" => %{
+              "year" => 1900,
+              "month" => nil,
+              "day" => nil,
+              "precision" => 9,
+              "calendar" => "gregorian"
+            },
+            "position" => %{"lon" => 2.0, "lat" => 48.0}
+          }
+        })
+
+      changeset = Override.propose_changeset(%Override{}, attrs)
+      refute changeset.valid?
+      assert "description must be a string" in errors_on(changeset).proposed_value
+    end
+
+    test "a new_event position is rounded to 6 decimals at proposal too" do
+      attrs =
+        Map.merge(@base_attrs, %{
+          kind: :new_event,
+          proposed_value: %{
+            "label_fr" => "X",
+            "begin_date" => %{
+              "year" => 1900,
+              "month" => nil,
+              "day" => nil,
+              "precision" => 9,
+              "calendar" => "gregorian"
+            },
+            "position" => %{"lon" => 2.352222177777, "lat" => 48.856614999999}
+          }
+        })
+
+      changeset = Override.propose_changeset(%Override{}, attrs)
+      assert changeset.valid?
+
+      assert Ecto.Changeset.get_field(changeset, :proposed_value)["position"] == %{
+               "lon" => 2.352222,
+               "lat" => 48.856615
+             }
     end
 
     test "error: a malformed nested begin_date or position is rejected with a prefixed message" do

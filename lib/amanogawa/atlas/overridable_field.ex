@@ -61,8 +61,26 @@ defmodule Amanogawa.Atlas.OverridableField do
   def to_released_attrs(:end_date, payload), do: date_attrs(payload, :end)
 
   def to_released_attrs(:position, %{"location_source" => source} = payload) do
-    payload |> position_geom() |> Map.put(:location_source, String.to_existing_atom(source))
+    payload |> position_geom() |> Map.put(:location_source, location_source_atom(source))
   end
+
+  # `nil` means "Wikidata carries no value at all for this field"
+  # (`Amanogawa.Contributions`' own absent-value convention, e.g. an
+  # event that never had a geometry when its position override was
+  # accepted): releasing restores that absence instead of crashing on a
+  # payload shape no clause matches.
+  def to_released_attrs(:label_fr, nil), do: %{label_fr: nil}
+  def to_released_attrs(:label_en, nil), do: %{label_en: nil}
+  def to_released_attrs(:position, nil), do: %{geom: nil, location_source: nil}
+
+  # Total conversion of a stored provenance string (defense in depth: the
+  # payload round-tripped through jsonb, so its content is data, never a
+  # value `String.to_existing_atom/1` may be trusted with).
+  defp location_source_atom("direct"), do: :direct
+  defp location_source_atom("place"), do: :place
+  defp location_source_atom("country"), do: :country
+  defp location_source_atom("contribution"), do: :contribution
+  defp location_source_atom(_other), do: nil
 
   # `nil` means "no date at all" (`Amanogawa.Contributions`' own
   # "absent value" convention, its moduledoc): the only business field
@@ -88,11 +106,19 @@ defmodule Amanogawa.Atlas.OverridableField do
         month: month,
         day: day,
         precision: precision,
-        calendar: calendar && String.to_existing_atom(calendar)
+        calendar: calendar_atom(calendar)
       })
 
     Event.flatten_date(date, group)
   end
+
+  # Total conversion (security review, calendar finding): the payload is
+  # stored jsonb, so a forged/legacy calendar string must degrade to
+  # `nil` (calendar unknown) instead of feeding
+  # `String.to_existing_atom/1` a crash.
+  defp calendar_atom("gregorian"), do: :gregorian
+  defp calendar_atom("julian"), do: :julian
+  defp calendar_atom(_other), do: nil
 
   # `/ 1` promotes a jsonb integer (a whole-number coordinate, e.g. `48`)
   # to a float: `Geo.Point` coordinates are always floats regardless of

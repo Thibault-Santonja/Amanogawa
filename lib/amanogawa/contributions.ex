@@ -170,6 +170,21 @@ defmodule Amanogawa.Contributions do
     |> Repo.all()
   end
 
+  @doc """
+  The batched read of `list_revisions/1` (quality review, N+1 finding):
+  every revision of every override in `override_ids`, ONE query for the
+  whole page, grouped by override id (each group oldest first). An
+  override with no revision is simply absent from the result.
+  """
+  @spec list_revisions_by_override_ids([Ecto.UUID.t()]) :: %{Ecto.UUID.t() => [Revision.t()]}
+  def list_revisions_by_override_ids(override_ids) when is_list(override_ids) do
+    Revision
+    |> where([r], r.override_id in ^override_ids)
+    |> order_by([r], asc: r.inserted_at)
+    |> Repo.all()
+    |> Enum.group_by(& &1.override_id)
+  end
+
   @doc "Counts overrides by status (`/moderation`'s aggregate, public, factual statistics only)."
   @spec count_by_status() :: %{Override.status() => non_neg_integer()}
   def count_by_status do
@@ -516,18 +531,23 @@ defmodule Amanogawa.Contributions do
   For each matching override, the incoming value for its field is
   compared, on a normalized payload, against `wikidata_value_at_acceptance`:
 
-    * equal: nothing (Wikidata has not moved on this field since
-      acceptance).
+    * equal: counted `unchanged`; any conflict still open from an earlier
+      divergence is closed by the system (`:obsolete`), the divergence it
+      described no longer exists.
     * equal to the override's own `proposed_value` (`:position` compared
       on coordinates alone, `location_source` excluded: a resolution
       method changing alone is not "Wikidata rejoining the correction"):
       Wikidata rejoined the correction. The override moves to
       `:superseded`, `Amanogawa.Atlas.release_field_override/3` restores
       the (now-identical) value and lifts the marker, a `:superseded`
-      revision is journalled.
+      revision is journalled, and any open conflict is closed
+      (`:obsolete`) in the SAME transaction.
     * anything else: an open conflict for this override is created or, if
       one is already open, refreshed (`wikidata_value`, `detected_at`)
-      instead of duplicated (`conflicts_one_open_per_override`).
+      instead of duplicated (`conflicts_one_open_per_override`). An
+      incoming value that is ABSENT on Wikidata's side is stored as the
+      reserved `%{"absent" => true}` marker
+      (`Amanogawa.Contributions.Conflict`'s moduledoc).
 
   Returns `%{unchanged:, superseded:, conflicts_opened:,
   conflicts_refreshed:}`, folded into the calling `Amanogawa.Ingestion.
@@ -554,15 +574,27 @@ defmodule Amanogawa.Contributions do
   @doc """
   Lists conflicts still `:open`, strictly chronological
   (`Amanogawa.Contributions.Conflict.detected_at` ascending: the oldest
-  divergence is examined first).
+  divergence is examined first). `opts` accepts keyset pagination, same
+  shape as `list_overrides/1` (`:after` - the `{detected_at, id}` cursor
+  of the last row already seen, `:limit`).
   """
   @spec list_open_conflicts(map()) :: [Conflict.t()]
   def list_open_conflicts(opts \\ %{}) do
     Conflict
     |> where([c], c.status == :open)
-    |> order_by([c], asc: c.detected_at)
+    |> open_conflicts_order(Map.get(opts, :after))
     |> limit(^list_limit(opts))
     |> Repo.all()
+  end
+
+  defp open_conflicts_order(query, nil) do
+    order_by(query, [c], asc: c.detected_at, asc: c.id)
+  end
+
+  defp open_conflicts_order(query, %{detected_at: detected_at, id: id}) do
+    query
+    |> where([c], c.detected_at > ^detected_at or (c.detected_at == ^detected_at and c.id > ^id))
+    |> order_by([c], asc: c.detected_at, asc: c.id)
   end
 
   @doc """
@@ -576,36 +608,61 @@ defmodule Amanogawa.Contributions do
   `Amanogawa.Contributions.Conflict.reason_max_length/0`).
 
   Transactional: the conflict, the override (when relevant) and the
-  revision are all written together. Rejected, with no effect on any
-  table, for an unknown or already-resolved conflict
-  (`{:error, :not_found}` / `{:error, :already_resolved}`), a non-reviewer
-  (`{:error, :forbidden}`), or a missing/blank/oversized message
-  (`{:error, :message_required}`).
+  revision are all written together, the conflict AND its override loaded
+  `FOR UPDATE` (quality review, M1: two reviewers racing the same
+  resolution serialize here, the loser sees `:already_resolved`).
+  Rejected, with no effect on any table, for an unknown or
+  already-resolved conflict (`{:error, :not_found}` /
+  `{:error, :already_resolved}`), a non-reviewer (`{:error, :forbidden}`),
+  a missing/blank/oversized message (`{:error, :message_required}`), or an
+  override that is no longer `:accepted`
+  (`{:error, :override_not_accepted}`: a conflict only ever talks about
+  an accepted override's snapshot, resolving it against a superseded one
+  would release or re-snapshot a field the override no longer holds).
   """
   @spec resolve_conflict(Ecto.UUID.t(), Accounts.User.t(), map()) ::
           {:ok, Conflict.t()}
-          | {:error, :not_found | :already_resolved | :forbidden | :message_required}
+          | {:error,
+             :not_found
+             | :already_resolved
+             | :forbidden
+             | :message_required
+             | :override_not_accepted}
   def resolve_conflict(conflict_id, reviewer, attrs) do
     resolution = Map.fetch!(attrs, :resolution)
     message = Map.fetch!(attrs, :message)
 
     with :ok <- validate_reviewer_message(message) do
-      Conflict
-      |> Repo.get(conflict_id)
-      |> resolve_open_conflict(resolution, reviewer, message)
+      Repo.transaction(fn ->
+        resolve_locked_conflict(locked_conflict(conflict_id), resolution, reviewer, message)
+      end)
     end
   end
 
-  defp resolve_open_conflict(nil, _resolution, _reviewer, _message), do: {:error, :not_found}
+  defp locked_conflict(conflict_id) do
+    Conflict
+    |> where([c], c.id == ^conflict_id)
+    |> lock("FOR UPDATE")
+    |> Repo.one()
+  end
 
-  defp resolve_open_conflict(%Conflict{status: :resolved}, _resolution, _reviewer, _message),
-    do: {:error, :already_resolved}
+  defp resolve_locked_conflict(nil, _resolution, _reviewer, _message),
+    do: Repo.rollback(:not_found)
 
-  defp resolve_open_conflict(conflict, resolution, reviewer, message) do
+  defp resolve_locked_conflict(%Conflict{status: :resolved}, _resolution, _reviewer, _message),
+    do: Repo.rollback(:already_resolved)
+
+  defp resolve_locked_conflict(conflict, resolution, reviewer, message) do
     if Accounts.reviewer?(reviewer) do
-      do_resolve_conflict(conflict, resolution, reviewer, message)
+      case locked_override(conflict.override_id) do
+        %Override{status: :accepted} = override ->
+          do_resolve_conflict(conflict, override, resolution, reviewer, message)
+
+        _not_accepted ->
+          Repo.rollback(:override_not_accepted)
+      end
     else
-      {:error, :forbidden}
+      Repo.rollback(:forbidden)
     end
   end
 
@@ -805,6 +862,13 @@ defmodule Amanogawa.Contributions do
       Revision
       |> where([r], r.actor_id == ^user_id)
       |> Repo.update_all(set: [actor_id: nil])
+
+      # Same transaction (quality review, M5): a resolved conflict's
+      # `resolved_by` is the reviewer's user id too, the last place a
+      # deleted account's identifier could otherwise survive.
+      Conflict
+      |> where([c], c.resolved_by == ^user_id)
+      |> Repo.update_all(set: [resolved_by: nil])
     end)
 
     :ok
@@ -967,6 +1031,11 @@ defmodule Amanogawa.Contributions do
 
     cond do
       incoming == override.wikidata_value_at_acceptance ->
+        # Wikidata came back to the accepted snapshot: an open conflict
+        # from an earlier divergence is now moot, closed by the system
+        # rather than left to haunt the reviewers' list (quality review,
+        # M1).
+        Repo.transaction(fn -> close_open_conflict(override.id) end)
         Map.update!(counts, :unchanged, &(&1 + 1))
 
       matches_proposed?(override.field, incoming, override.proposed_value) ->
@@ -978,8 +1047,8 @@ defmodule Amanogawa.Contributions do
     end
   end
 
-  defp matches_proposed?(:position, incoming, proposed) do
-    Map.take(incoming, ["lon", "lat"]) == Map.take(proposed, ["lon", "lat"])
+  defp matches_proposed?(:position, incoming, proposed) when is_map(incoming) do
+    is_map(proposed) and Map.take(incoming, ["lon", "lat"]) == Map.take(proposed, ["lon", "lat"])
   end
 
   defp matches_proposed?(_field, incoming, proposed), do: incoming == proposed
@@ -988,9 +1057,37 @@ defmodule Amanogawa.Contributions do
     Repo.transaction(fn ->
       {:ok, _event} = Atlas.release_field_override(override.event_qid, override.field, incoming)
       updated = override |> Override.supersede_changeset() |> Repo.update!()
+      # Same transaction (quality review, M1): once the override leaves
+      # `:accepted`, an open conflict about its snapshot is unresolvable
+      # by a reviewer (`resolve_conflict/3` now refuses it) and must not
+      # linger open.
+      close_open_conflict(override.id)
       {:ok, _revision} = create_revision(updated, :superseded, nil, nil)
       updated
     end)
+  end
+
+  # Closes the override's open conflict, if any, with the SYSTEM
+  # resolution `:obsolete` (`Amanogawa.Contributions.Conflict`'s own
+  # moduledoc): `resolved_by` stays `nil`, no revision is journalled (the
+  # override's own `:superseded` revision, or the absence of any change
+  # at all, already tells the story). Always called inside a transaction.
+  defp close_open_conflict(override_id) do
+    Conflict
+    |> where([c], c.override_id == ^override_id and c.status == :open)
+    |> lock("FOR UPDATE")
+    |> Repo.one()
+    |> case do
+      nil ->
+        :ok
+
+      conflict ->
+        conflict
+        |> Conflict.resolve_changeset(%{resolution: :obsolete})
+        |> Repo.update!()
+
+        :ok
+    end
   end
 
   defp open_or_refresh_conflict(override, incoming, counts) do
@@ -1003,7 +1100,7 @@ defmodule Amanogawa.Contributions do
           override_id: override.id,
           event_qid: override.event_qid,
           field: override.field,
-          wikidata_value: incoming,
+          wikidata_value: to_conflict_value(incoming),
           detected_at: now
         })
         |> Repo.insert!()
@@ -1012,48 +1109,59 @@ defmodule Amanogawa.Contributions do
 
       conflict ->
         conflict
-        |> Conflict.refresh_changeset(%{wikidata_value: incoming, detected_at: now})
+        |> Conflict.refresh_changeset(%{
+          wikidata_value: to_conflict_value(incoming),
+          detected_at: now
+        })
         |> Repo.update!()
 
         Map.update!(counts, :conflicts_refreshed, &(&1 + 1))
     end
   end
 
-  defp do_resolve_conflict(conflict, :kept_override, reviewer, message) do
-    Repo.transaction(fn ->
-      override = Repo.get!(Override, conflict.override_id)
+  # `Amanogawa.Contributions.Conflict.wikidata_value` is NOT NULL: an
+  # absent Wikidata value (e.g. Wikidata removed the end date an accepted
+  # override still corrects, quality review M2) is stored as the reserved
+  # `%{"absent" => true}` marker and resolved back to `nil` on read.
+  @absent_conflict_value %{"absent" => true}
 
-      override
-      |> Override.refresh_snapshot_changeset(conflict.wikidata_value)
+  defp to_conflict_value(nil), do: @absent_conflict_value
+  defp to_conflict_value(value), do: value
+
+  defp from_conflict_value(@absent_conflict_value), do: nil
+  defp from_conflict_value(value), do: value
+
+  defp do_resolve_conflict(conflict, override, :kept_override, reviewer, message) do
+    wikidata_value = from_conflict_value(conflict.wikidata_value)
+
+    override
+    |> Override.refresh_snapshot_changeset(wikidata_value)
+    |> Repo.update!()
+
+    resolved =
+      conflict
+      |> Conflict.resolve_changeset(%{resolution: :kept_override, resolved_by: reviewer.id})
       |> Repo.update!()
 
-      resolved =
-        conflict
-        |> Conflict.resolve_changeset(%{resolution: :kept_override, resolved_by: reviewer.id})
-        |> Repo.update!()
-
-      {:ok, _revision} = create_revision(override, :conflict_resolved, reviewer.id, message)
-      resolved
-    end)
+    {:ok, _revision} = create_revision(override, :conflict_resolved, reviewer.id, message)
+    resolved
   end
 
-  defp do_resolve_conflict(conflict, :adopted_wikidata, reviewer, message) do
-    Repo.transaction(fn ->
-      override = Repo.get!(Override, conflict.override_id)
+  defp do_resolve_conflict(conflict, override, :adopted_wikidata, reviewer, message) do
+    wikidata_value = from_conflict_value(conflict.wikidata_value)
 
-      {:ok, _event} =
-        Atlas.release_field_override(override.event_qid, override.field, conflict.wikidata_value)
+    {:ok, _event} =
+      Atlas.release_field_override(override.event_qid, override.field, wikidata_value)
 
-      updated_override = override |> Override.supersede_changeset() |> Repo.update!()
+    updated_override = override |> Override.supersede_changeset() |> Repo.update!()
 
-      resolved =
-        conflict
-        |> Conflict.resolve_changeset(%{resolution: :adopted_wikidata, resolved_by: reviewer.id})
-        |> Repo.update!()
+    resolved =
+      conflict
+      |> Conflict.resolve_changeset(%{resolution: :adopted_wikidata, resolved_by: reviewer.id})
+      |> Repo.update!()
 
-      {:ok, _revision} = create_revision(updated_override, :superseded, reviewer.id, message)
-      resolved
-    end)
+    {:ok, _revision} = create_revision(updated_override, :superseded, reviewer.id, message)
+    resolved
   end
 
   # ---------------------------------------------------------------------
@@ -1108,9 +1216,14 @@ defmodule Amanogawa.Contributions do
   defp calendar_string(nil), do: nil
   defp calendar_string(calendar) when is_atom(calendar), do: Atom.to_string(calendar)
 
+  # Total conversion (security review, calendar finding): the payload
+  # round-tripped through jsonb, so a forged/legacy calendar string
+  # degrades to `nil` (calendar unknown) instead of crashing the sync or
+  # an acceptance replaying it.
   defp calendar_atom(nil), do: nil
   defp calendar_atom("gregorian"), do: :gregorian
   defp calendar_atom("julian"), do: :julian
+  defp calendar_atom(_other), do: nil
 
   # No geometry at all (an event ingested without a resolvable position):
   # represented as `nil`, mirroring `build_date_payload/5`'s "absent

@@ -33,7 +33,7 @@ Rétrograder un relecteur suit le chemin inverse :
 
 ```sql
 update accounts.users
-set role = null
+set role = 'user'
 where email = 'ancien-relecteur@exemple.org';
 ```
 

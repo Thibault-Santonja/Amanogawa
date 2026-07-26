@@ -25,17 +25,30 @@ defmodule AmanogawaWeb.ReviewQueueLive do
 
   use AmanogawaWeb, :live_view
 
-  alias Amanogawa.Accounts
   alias Amanogawa.Atlas
   alias Amanogawa.Contributions
   alias Amanogawa.HistoricalDate
   alias Amanogawa.HistoricalDate.Formatter
+  alias AmanogawaWeb.Contributions.Attribution
+
+  # Overridable via `config :amanogawa, #{inspect(__MODULE__)}, page_size:`
+  # (same mechanic as `AmanogawaWeb.ContributionsLive`): lets tests reach
+  # "has_more?" with a handful of rows instead of twenty.
+  @default_page_size 20
+
+  # The `kind` filter's closed allowlist (security review, minor 4, the
+  # `Amanogawa.Contributions.list_public/1` pattern): a raw query-string
+  # value outside it is simply DROPPED, never handed to
+  # `String.to_existing_atom/1`.
+  @kinds ~w(field link new_event)
 
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
      socket
      |> assign(:page_title, gettext("File de relecture"))
+     |> assign(:has_more?, false)
+     |> assign(:cursor, nil)
      |> stream(:queue, [])}
   end
 
@@ -46,48 +59,105 @@ defmodule AmanogawaWeb.ReviewQueueLive do
       |> put_filter(:kind, params["kind"])
       |> put_filter(:event_qid, params["event_qid"])
 
-    rows = filters |> Contributions.list_review_queue() |> Enum.map(&build_row/1)
+    {:noreply,
+     socket
+     |> assign(:filters, filters)
+     |> load_page(filters, nil, reset: true)}
+  end
 
-    {:noreply, stream(socket, :queue, rows, reset: true)}
+  # One page of the FIFO queue ("charger plus", quality review m-finding:
+  # the queue used to hard-stop at the domain's default limit with no way
+  # to reach older rows): keyset pagination on the queue's own
+  # `{inserted_at, id}` ascending order.
+  defp load_page(socket, filters, cursor, opts) do
+    page_size = page_size()
+
+    fetch_opts =
+      filters
+      |> Map.put(:after, cursor)
+      |> Map.put(:limit, page_size + 1)
+
+    overrides = Contributions.list_review_queue(fetch_opts)
+    {page, has_more?} = split_page(overrides, page_size)
+    rows = build_rows(page)
+
+    next_cursor =
+      case List.last(page) do
+        nil -> cursor
+        override -> %{inserted_at: override.inserted_at, id: override.id}
+      end
+
+    socket
+    |> stream(:queue, rows, reset: Keyword.fetch!(opts, :reset))
+    |> assign(:has_more?, has_more?)
+    |> assign(:cursor, next_cursor)
+  end
+
+  defp page_size do
+    Application.get_env(:amanogawa, __MODULE__, []) |> Keyword.get(:page_size, @default_page_size)
+  end
+
+  defp split_page(rows, page_size) do
+    case Enum.split(rows, page_size) do
+      {page, []} -> {page, false}
+      {page, _rest} -> {page, true}
+    end
   end
 
   defp put_filter(filters, _key, nil), do: filters
   defp put_filter(filters, _key, ""), do: filters
 
-  defp put_filter(filters, :kind, value),
+  defp put_filter(filters, :kind, value) when value in @kinds,
     do: Map.put(filters, :kind, String.to_existing_atom(value))
 
+  defp put_filter(filters, :kind, _value), do: filters
   defp put_filter(filters, key, value), do: Map.put(filters, key, value)
 
-  defp build_row(override) do
-    author_name = Accounts.display_names_by_ids([override.author_id])[override.author_id]
-    appeal_text = appeal_text(override)
+  # Attribution and appeal texts resolved once per PAGE (quality review,
+  # N+1 finding): one `Amanogawa.Accounts` query for every author name
+  # (`AmanogawaWeb.Contributions.Attribution`) and one
+  # `Amanogawa.Contributions.list_revisions_by_override_ids/1` query for
+  # every appealed row's text, never one of either per row.
+  defp build_rows(overrides) do
+    names = overrides |> Enum.map(& &1.author_id) |> Attribution.resolve_names()
 
+    appeal_texts =
+      overrides
+      |> Enum.filter(&(&1.status == :appealed))
+      |> Enum.map(& &1.id)
+      |> appeal_texts_by_override_id()
+
+    Enum.map(overrides, &build_row(&1, names, appeal_texts))
+  end
+
+  defp appeal_texts_by_override_id([]), do: %{}
+
+  defp appeal_texts_by_override_id(override_ids) do
+    override_ids
+    |> Contributions.list_revisions_by_override_ids()
+    |> Map.new(fn {override_id, revisions} ->
+      last_appeal =
+        revisions
+        |> Enum.reverse()
+        |> Enum.find(&(&1.action == :appealed))
+
+      {override_id, last_appeal && last_appeal.message}
+    end)
+  end
+
+  defp build_row(override, names, appeal_texts) do
     %{
       id: override.id,
       override: override,
       kind: override.kind,
       status: override.status,
-      author_name: author_name || gettext("compte supprimé"),
+      author_name: Attribution.name(names, override.author_id, gettext("compte supprimé")),
       source: override.source,
       inserted_at: override.inserted_at,
-      appeal_text: appeal_text,
+      appeal_text: Map.get(appeal_texts, override.id),
       diff: build_diff(override)
     }
   end
-
-  defp appeal_text(%{status: :appealed} = override) do
-    override.id
-    |> Contributions.list_revisions()
-    |> Enum.reverse()
-    |> Enum.find(&(&1.action == :appealed))
-    |> case do
-      nil -> nil
-      revision -> revision.message
-    end
-  end
-
-  defp appeal_text(_override), do: nil
 
   # ---------------------------------------------------------------------
   # Typed diff (issue #037)
@@ -165,7 +235,7 @@ defmodule AmanogawaWeb.ReviewQueueLive do
       month: payload["month"],
       day: payload["day"],
       precision: payload["precision"],
-      calendar: payload["calendar"] && String.to_existing_atom(payload["calendar"])
+      calendar: calendar_atom(payload["calendar"])
     }
 
     case HistoricalDate.new(attrs) do
@@ -173,6 +243,13 @@ defmodule AmanogawaWeb.ReviewQueueLive do
       {:error, _changeset} -> nil
     end
   end
+
+  # Total conversion (security review, calendar finding): the payload is
+  # stored jsonb, so forged/legacy data must render as "no value", never
+  # crash the queue through `String.to_existing_atom/1`.
+  defp calendar_atom("gregorian"), do: :gregorian
+  defp calendar_atom("julian"), do: :julian
+  defp calendar_atom(_other), do: nil
 
   defp format_position(nil), do: nil
   defp format_position(%{"lon" => lon, "lat" => lat}), do: "#{lat}, #{lon}"
@@ -200,17 +277,23 @@ defmodule AmanogawaWeb.ReviewQueueLive do
 
   defp deg2rad(degrees), do: degrees * :math.pi() / 180
 
-  # A reviewer's decision motive is mandatory (`Amanogawa.Contributions.
-  # accept_override/3` already enforces this in the domain; re-validated
-  # here only to render a targeted error rather than a generic one).
+  # "Reference value changed since proposal": the event's CURRENT state,
+  # read live, no longer matches the snapshot taken at proposal time. The
+  # comparison is on the SAME keys on both sides (quality review, M3):
+  # the snapshot for `:position` also carries `"location_source"`, which
+  # `field_current_value/2` deliberately does not rebuild, so a naive
+  # whole-map comparison lit the badge on every position row.
   defp reference_changed?(%{kind: :field, event_qid: qid, field: field, current_value: snapshot}) do
     case Atlas.get_event_by_qid(qid) do
       nil -> false
-      event -> field_current_value(field, event) != snapshot
+      event -> comparable(field, field_current_value(field, event)) != comparable(field, snapshot)
     end
   end
 
   defp reference_changed?(_override), do: false
+
+  defp comparable(:position, %{} = payload), do: Map.take(payload, ["lon", "lat"])
+  defp comparable(_field, payload), do: payload
 
   defp field_current_value(:label_fr, event), do: %{"value" => event.label_fr}
   defp field_current_value(:label_en, event), do: %{"value" => event.label_en}
@@ -264,7 +347,8 @@ defmodule AmanogawaWeb.ReviewQueueLive do
         "decide",
         %{"override_id" => id, "decision" => decision, "message" => message},
         socket
-      ) do
+      )
+      when decision in ["accept", "reject"] do
     reviewer = socket.assigns.current_scope.user
 
     decide(decision, id, reviewer, message)
@@ -280,11 +364,20 @@ defmodule AmanogawaWeb.ReviewQueueLive do
     end
   end
 
+  def handle_event("decide", _params, socket) do
+    {:noreply, put_flash(socket, :error, decision_error(:invalid_decision))}
+  end
+
+  # `decision` is allowlisted BEFORE any atom conversion (security
+  # review, minor 4): a forged form payload outside the two decisions is
+  # answered with the same neutral error as any other undecidable
+  # request, never handed to `String.to_existing_atom/1`.
   def handle_event(
         "review_appeal",
         %{"override_id" => id, "decision" => decision, "message" => message},
         socket
-      ) do
+      )
+      when decision in ["accepted", "rejected"] do
     reviewer = socket.assigns.current_scope.user
     attrs = %{decision: String.to_existing_atom(decision), message: message}
 
@@ -298,6 +391,14 @@ defmodule AmanogawaWeb.ReviewQueueLive do
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, decision_error(reason))}
     end
+  end
+
+  def handle_event("review_appeal", _params, socket) do
+    {:noreply, put_flash(socket, :error, decision_error(:invalid_decision))}
+  end
+
+  def handle_event("load_more", _params, socket) do
+    {:noreply, load_page(socket, socket.assigns.filters, socket.assigns.cursor, reset: false)}
   end
 
   defp decide("accept", id, reviewer, message),
@@ -399,6 +500,10 @@ defmodule AmanogawaWeb.ReviewQueueLive do
           </form>
         </li>
       </ul>
+
+      <.button :if={@has_more?} phx-click="load_more" class="mt-4">
+        {gettext("Charger plus")}
+      </.button>
     </Layouts.page>
     """
   end

@@ -210,6 +210,19 @@ defmodule Amanogawa.Atlas do
   end
 
   @doc """
+  The batched read of `get_event_by_qid/1` (quality review, N+1 finding:
+  a page of contributions resolves every referenced event in ONE query):
+  a map keyed by QID, an unknown QID simply absent from it.
+  """
+  @spec list_events_by_qids([String.t()]) :: %{String.t() => Event.t()}
+  def list_events_by_qids(qids) when is_list(qids) do
+    Event
+    |> where([e], e.qid in ^qids)
+    |> Repo.all()
+    |> Map.new(&{&1.qid, &1})
+  end
+
+  @doc """
   Fetches the hover card / summary of `qid` (issue #016): `{:ok, summary}`
   with `qid`, `label` (fr, falling back to en), `extract` (fr, falling back
   to en, plain text as stored by #012, `nil` when neither exists yet),

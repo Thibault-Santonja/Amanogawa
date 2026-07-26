@@ -80,4 +80,85 @@ defmodule AmanogawaWeb.ConflictsLiveTest do
       assert {:error, {:redirect, %{to: "/connexion"}}} = live(conn, ~p"/relecture/conflits")
     end
   end
+
+  describe "human-readable values (i18n finding: no raw inspect)" do
+    test "both values render formatted per the field, never as raw Elixir terms", %{conn: conn} do
+      reviewer = reviewer_fixture()
+
+      override =
+        accepted_override_fixture(
+          field: :begin_date,
+          proposed_value: %{
+            "year" => 1750,
+            "month" => nil,
+            "day" => nil,
+            "precision" => 9,
+            "calendar" => "gregorian"
+          }
+        )
+
+      conflict_fixture(
+        override: override,
+        wikidata_value: %{
+          "year" => 1900,
+          "month" => nil,
+          "day" => nil,
+          "precision" => 9,
+          "calendar" => "gregorian"
+        }
+      )
+
+      conn = log_in_user(conn, reviewer)
+      {:ok, _lv, html} = live(conn, ~p"/relecture/conflits")
+
+      assert html =~ "1750"
+      assert html =~ "1900"
+      assert html =~ "Date de début"
+      refute html =~ "%{"
+    end
+
+    test "an absent Wikidata value renders an honest \"aucune valeur\"", %{conn: conn} do
+      reviewer = reviewer_fixture()
+
+      override =
+        accepted_override_fixture(
+          field: :end_date,
+          proposed_value: %{
+            "year" => 1840,
+            "month" => nil,
+            "day" => nil,
+            "precision" => 9,
+            "calendar" => "gregorian"
+          }
+        )
+
+      conflict_fixture(override: override, wikidata_value: %{"absent" => true})
+
+      conn = log_in_user(conn, reviewer)
+      {:ok, _lv, html} = live(conn, ~p"/relecture/conflits")
+
+      assert html =~ "aucune valeur"
+      refute html =~ "%{"
+    end
+  end
+
+  describe "hostile payloads" do
+    test "a forged resolution is refused with a neutral error, nothing resolved", %{conn: conn} do
+      reviewer = reviewer_fixture()
+      conflict = conflict_fixture()
+
+      conn = log_in_user(conn, reviewer)
+      {:ok, lv, _html} = live(conn, ~p"/relecture/conflits")
+
+      html =
+        render_hook(lv, "resolve", %{
+          "conflict_id" => conflict.id,
+          "resolution" => "obsolete",
+          "message" => "motif"
+        })
+
+      assert html =~ "Impossible de résoudre ce conflit"
+      assert [_still_open] = Contributions.list_open_conflicts()
+    end
+  end
 end

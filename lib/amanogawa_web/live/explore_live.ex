@@ -91,6 +91,8 @@ defmodule AmanogawaWeb.ExploreLive do
      |> assign(:selected_event, nil)
      |> assign(:contribution_summary, nil)
      |> assign(:proposal_mode, nil)
+     |> assign(:view_query, %{})
+     |> assign(:proposal_close_path, "/")
      |> assign(:expose_e2e_test_api, Application.get_env(:amanogawa, :expose_e2e_test_api, false))}
   end
 
@@ -137,6 +139,14 @@ defmodule AmanogawaWeb.ExploreLive do
           socket.assigns.current_scope.user
         )
       )
+
+    # Derived from the assigns just written, recomputed on every URL
+    # change: the panel's correction links and the proposal form's close
+    # path both preserve the current window/camera (see `view_query/1`).
+    socket =
+      socket
+      |> assign(:view_query, view_query(socket))
+      |> assign(:proposal_close_path, form_close_path(socket))
 
     {:noreply, push_view_state(socket, state, previous)}
   end
@@ -239,7 +249,18 @@ defmodule AmanogawaWeb.ExploreLive do
 
   def handle_event("select_event", _params, socket), do: {:noreply, socket}
 
+  # Deselecting also drops an open CORRECTION form (issue #036: a
+  # correction targets the selected event, so `propose_field` without a
+  # `sel` would be an orphan query param that `parse_proposal_mode/3`
+  # ignores but every later patch would keep dragging along); a
+  # `propose_new_event` form is selection-independent and survives.
   def handle_event("deselect_event", _params, socket) do
+    socket =
+      case socket.assigns.proposal_mode do
+        {:correction, _field} -> assign(socket, :proposal_mode, nil)
+        _other -> socket
+      end
+
     {:noreply, push_patch(socket, to: patch_path(socket, selected_qid: nil))}
   end
 
@@ -295,17 +316,6 @@ defmodule AmanogawaWeb.ExploreLive do
 
   def handle_event("position_picked", _params, socket), do: {:noreply, socket}
 
-  def handle_event("position_picking_cancelled", _params, socket) do
-    if socket.assigns.proposal_mode do
-      send_update(AmanogawaWeb.Live.ProposalFormComponent,
-        id: "proposal-form",
-        position_picking_cancelled: true
-      )
-    end
-
-    {:noreply, socket}
-  end
-
   defp valid_lng_lat?(lng, lat) when is_number(lng) and is_number(lat) do
     lng >= -180 and lng <= 180 and lat >= -90 and lat <= 90
   end
@@ -345,14 +355,14 @@ defmodule AmanogawaWeb.ExploreLive do
       <div class="pointer-events-none absolute inset-x-0 top-14 flex justify-end p-2">
         <.link
           :if={@current_scope.user}
-          patch={~p"/?propose_new_event=1"}
+          patch={new_event_patch(@view_query)}
           class="pointer-events-auto rounded-md bg-surface/90 px-3 py-1.5 text-sm text-text shadow hover:bg-surface"
         >
           {gettext("Proposer un événement")}
         </.link>
         <.link
           :if={!@current_scope.user}
-          href={~p"/proposer?new_event=1"}
+          href={new_event_href(@view_query)}
           class="pointer-events-auto rounded-md bg-surface/90 px-3 py-1.5 text-sm text-text shadow hover:bg-surface"
         >
           {gettext("Proposer un événement")}
@@ -364,6 +374,7 @@ defmodule AmanogawaWeb.ExploreLive do
         event={@selected_event}
         current_scope={@current_scope}
         contribution_summary={@contribution_summary}
+        view_query={@view_query}
       />
       <.live_component
         :if={@proposal_mode}
@@ -373,6 +384,7 @@ defmodule AmanogawaWeb.ExploreLive do
         event={@selected_event}
         current_scope={@current_scope}
         peer_ip={peer_ip_string(@peer_ip)}
+        close_path={@proposal_close_path}
       />
       <:timeline>
         <%!-- phx-update="ignore": LiveView never touches this subtree, d3
@@ -461,7 +473,19 @@ defmodule AmanogawaWeb.ExploreLive do
   # justification) used to `push_patch` a URL with no `propose_field` at
   # all, silently closing the form out from under them mid-edit.
   defp patch_path(socket, changes) do
-    state = %{
+    updated =
+      Enum.reduce(changes, explore_state(socket), fn {key, value}, acc ->
+        Map.put(acc, key, value)
+      end)
+
+    updated
+    |> ExploreParams.to_query()
+    |> Map.merge(proposal_mode_query(socket))
+    |> query_to_path()
+  end
+
+  defp explore_state(socket) do
+    %{
       from: socket.assigns.from,
       to: socket.assigns.to,
       selected_qid: socket.assigns.selected_qid,
@@ -469,14 +493,34 @@ defmodule AmanogawaWeb.ExploreLive do
       lat: socket.assigns.lat,
       lng: socket.assigns.lng
     }
+  end
 
-    updated = Enum.reduce(changes, state, fn {key, value}, acc -> Map.put(acc, key, value) end)
-    query = updated |> ExploreParams.to_query() |> Map.merge(proposal_mode_query(socket))
+  defp query_to_path(query) when query == %{}, do: ~p"/"
+  defp query_to_path(query), do: "/?" <> URI.encode_query(query)
 
-    case query do
-      empty when empty == %{} -> ~p"/"
-      query -> "/?" <> URI.encode_query(query)
-    end
+  # The current window/camera/selection as query params, WITHOUT any
+  # proposal param (quality review m-finding, same production concern as
+  # `patch_path/2`'s own comment above): handed to `AmanogawaWeb.
+  # Components.EventPanel` (correction links) and `AmanogawaWeb.Live.
+  # ProposalFormComponent` (its own close path), so opening or closing
+  # the proposal form never resets the time window or the camera.
+  defp view_query(socket) do
+    socket |> explore_state() |> ExploreParams.to_query()
+  end
+
+  defp form_close_path(socket) do
+    socket |> view_query() |> query_to_path()
+  end
+
+  # Same view preservation for the "Proposer un événement" entry points
+  # (header links): the signed-in patch and the anonymous `/proposer`
+  # round trip both keep the current window/camera.
+  defp new_event_patch(view_query) do
+    "/?" <> URI.encode_query(Map.put(view_query, "propose_new_event", "1"))
+  end
+
+  defp new_event_href(view_query) do
+    "/proposer?" <> URI.encode_query(Map.put(view_query, "new_event", "1"))
   end
 
   defp proposal_mode_query(%{assigns: %{proposal_mode: {:correction, field}}}) do

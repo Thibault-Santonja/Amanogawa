@@ -240,7 +240,7 @@ defmodule AmanogawaWeb.AccountLive do
       <.section title={gettext("Pseudonyme public")}>
         <p class="text-text-muted">
           {gettext(
-            "Ce pseudonyme attribue publiquement vos contributions (issue #036) : jamais votre adresse email."
+            "Ce pseudonyme attribue publiquement vos contributions : jamais votre adresse email."
           )}
         </p>
         <.form

@@ -603,7 +603,7 @@ defmodule AmanogawaWeb.ExploreLiveTest do
 
       assert has_element?(
                lv,
-               ~s(a[href="/proposer?sel=#{event.qid}&field=label_fr"]),
+               ~s(a[href="/proposer?field=label_fr&sel=#{event.qid}"]),
                "Libellé (français)"
              )
     end
@@ -616,7 +616,32 @@ defmodule AmanogawaWeb.ExploreLiveTest do
 
       assert has_element?(
                lv,
-               ~s(a[href="/?sel=#{event.qid}&propose_field=label_fr"]),
+               ~s(a[href="/?propose_field=label_fr&sel=#{event.qid}"]),
+               "Libellé (français)"
+             )
+    end
+
+    test "correction links preserve the current window and camera (quality review m-finding)", %{
+      conn: conn
+    } do
+      user = user_fixture()
+      conn = log_in_user(conn, user)
+      event = event_fixture()
+
+      {:ok, lv, _html} = live(conn, ~p"/?sel=#{event.qid}&from=-500&to=500")
+
+      assert has_element?(
+               lv,
+               ~s(a[href="/?from=-500&propose_field=label_fr&sel=#{event.qid}&to=500"]),
+               "Libellé (français)"
+             )
+
+      # The anonymous /proposer round trip carries the view too.
+      {:ok, lv_anon, _html} = live(build_conn(), ~p"/?sel=#{event.qid}&from=-500&to=500")
+
+      assert has_element?(
+               lv_anon,
+               ~s(a[href="/proposer?field=label_fr&from=-500&sel=#{event.qid}&to=500"]),
                "Libellé (français)"
              )
     end
@@ -660,6 +685,36 @@ defmodule AmanogawaWeb.ExploreLiveTest do
 
       {:ok, lv, _html} = live(conn, ~p"/?propose_new_event=1")
 
+      assert has_element?(lv, "#proposal-form")
+    end
+
+    test "deselect_event purges an open correction's propose_field (no orphan param)", %{
+      conn: conn
+    } do
+      user = user_fixture()
+      conn = log_in_user(conn, user)
+      event = event_fixture()
+
+      {:ok, lv, _html} = live(conn, ~p"/?sel=#{event.qid}&propose_field=label_fr")
+      assert has_element?(lv, "#proposal-form")
+
+      lv |> element("#map") |> render_hook("deselect_event", %{})
+
+      assert_patch(lv, ~p"/")
+      refute has_element?(lv, "#proposal-form")
+    end
+
+    test "deselect_event keeps an open new-event form (selection-independent)", %{conn: conn} do
+      user = user_fixture()
+      conn = log_in_user(conn, user)
+      event = event_fixture()
+
+      {:ok, lv, _html} = live(conn, ~p"/?sel=#{event.qid}&propose_new_event=1")
+      assert has_element?(lv, "#proposal-form")
+
+      lv |> element("#map") |> render_hook("deselect_event", %{})
+
+      assert_patch(lv, ~p"/?propose_new_event=1")
       assert has_element?(lv, "#proposal-form")
     end
   end

@@ -54,29 +54,29 @@ msgstr "close"
 msgid "À propos"
 msgstr "About"
 
-#: lib/amanogawa_web/components/event_panel.ex:96
+#: lib/amanogawa_web/components/event_panel.ex:102
 #, elixir-autogen, elixir-format
 msgid "Détails de l'événement"
 msgstr "Event details"
 
-#: lib/amanogawa_web/components/event_panel.ex:107
-#: lib/amanogawa_web/live/proposal_form_component.ex:368
+#: lib/amanogawa_web/components/event_panel.ex:113
+#: lib/amanogawa_web/live/proposal_form_component.ex:376
 #, elixir-autogen, elixir-format
 msgid "Fermer"
 msgstr "Close"
 
-#: lib/amanogawa_web/components/event_panel.ex:136
+#: lib/amanogawa_web/components/event_panel.ex:142
 #, elixir-autogen, elixir-format
 msgid "Lire sur Wikipédia"
 msgstr "Read on Wikipedia"
 
-#: lib/amanogawa_web/components/event_panel.ex:126
-#: lib/amanogawa_web/live/explore_live.ex:333
+#: lib/amanogawa_web/components/event_panel.ex:132
+#: lib/amanogawa_web/live/explore_live.ex:343
 #, elixir-autogen, elixir-format
 msgid "Texte"
 msgstr "Text"
 
-#: lib/amanogawa_web/live/explore_live.ex:335
+#: lib/amanogawa_web/live/explore_live.ex:345
 #, elixir-autogen, elixir-format
 msgid "Carte interactive indisponible : ce navigateur ne fournit pas WebGL."
 msgstr "Interactive map unavailable: this browser does not provide WebGL."
@@ -270,7 +270,7 @@ msgid "OpenFreeMap ne requiert ni clé d'accès ni compte et ne suit pas ses uti
 msgstr "OpenFreeMap requires no access key or account and does not track its users. The underlying geographic data is published by OpenStreetMap under the ODbL license, which requires the notice \"© OpenStreetMap contributors\"."
 
 #: lib/amanogawa_web/controllers/page_controller.ex:29
-#: lib/amanogawa_web/live/proposal_form_component.ex:694
+#: lib/amanogawa_web/live/proposal_form_component.ex:702
 #, elixir-autogen, elixir-format
 msgid "Politique de confidentialité"
 msgstr "Privacy policy"
@@ -351,7 +351,7 @@ msgid "Adresse email"
 msgstr "Email address"
 
 #: lib/amanogawa_web/live/account_live.ex:321
-#: lib/amanogawa_web/live/proposal_form_component.ex:486
+#: lib/amanogawa_web/live/proposal_form_component.ex:494
 #, elixir-autogen, elixir-format
 msgid "Annuler"
 msgstr "Cancel"
@@ -545,10 +545,10 @@ msgid "%d/%m/%Y"
 msgstr "%m/%d/%Y"
 
 #: lib/amanogawa_web/live/account_live.ex:265
-#: lib/amanogawa_web/live/conflicts_live.ex:115
-#: lib/amanogawa_web/live/contribution_live.ex:264
-#: lib/amanogawa_web/live/contributions_live.ex:203
-#: lib/amanogawa_web/live/review_queue_live.ex:346
+#: lib/amanogawa_web/live/conflicts_live.ex:174
+#: lib/amanogawa_web/live/contribution_live.ex:298
+#: lib/amanogawa_web/live/contributions_live.ex:213
+#: lib/amanogawa_web/live/review_queue_live.ex:447
 #, elixir-autogen, elixir-format
 msgid "%d/%m/%Y %H:%M"
 msgstr "%m/%d/%Y %H:%M"
@@ -558,108 +558,104 @@ msgstr "%m/%d/%Y %H:%M"
 msgid "Aucune donnée personnelle collectée sans compte"
 msgstr "No personal data collected without an account"
 
-#: lib/amanogawa_web/live/review_queue_live.ex:376
+#: lib/amanogawa_web/live/review_queue_live.ex:477
 #, elixir-autogen, elixir-format
 msgid "Accepter"
 msgstr "Accept"
 
-#: lib/amanogawa_web/live/review_queue_live.ex:393
+#: lib/amanogawa_web/live/review_queue_live.ex:494
 #, elixir-autogen, elixir-format
 msgid "Accepter l'appel"
 msgstr "Accept the appeal"
 
-#: lib/amanogawa_web/live/conflicts_live.ex:133
+#: lib/amanogawa_web/live/conflicts_live.ex:192
 #, elixir-autogen, elixir-format
 msgid "Adopter Wikidata"
 msgstr "Adopt Wikidata"
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:515
+#: lib/amanogawa_web/live/proposal_form_component.ex:74
+#: lib/amanogawa_web/live/proposal_form_component.ex:523
 #, elixir-autogen, elixir-format
 msgid "Année"
 msgstr "Year"
 
-#: lib/amanogawa_web/live/review_queue_live.ex:296
+#: lib/amanogawa_web/live/review_queue_live.ex:389
 #, elixir-autogen, elixir-format
 msgid "Appel tranché."
 msgstr "Appeal decided."
 
-#: lib/amanogawa_web/live/contribution_live.ex:297
-#: lib/amanogawa_web/live/review_queue_live.ex:428
-#: lib/amanogawa_web/live/review_queue_live.ex:441
-#: lib/amanogawa_web/live/review_queue_live.ex:455
+#: lib/amanogawa_web/live/contribution_live.ex:331
+#: lib/amanogawa_web/live/review_queue_live.ex:533
+#: lib/amanogawa_web/live/review_queue_live.ex:546
+#: lib/amanogawa_web/live/review_queue_live.ex:560
 #, elixir-autogen, elixir-format
 msgid "Après :"
 msgstr "After:"
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:601
+#: lib/amanogawa_web/live/proposal_form_component.ex:609
 #, elixir-autogen, elixir-format
 msgid "Aucun événement local ne correspond à cet identifiant."
 msgstr "No local event matches this identifier."
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:566
+#: lib/amanogawa_web/live/proposal_form_component.ex:574
 #, elixir-autogen, elixir-format
 msgid "Aucune position choisie."
 msgstr "No position chosen."
 
-#: lib/amanogawa_web/live/contribution_live.ex:293
-#: lib/amanogawa_web/live/review_queue_live.ex:425
-#: lib/amanogawa_web/live/review_queue_live.ex:437
-#: lib/amanogawa_web/live/review_queue_live.ex:452
+#: lib/amanogawa_web/live/contribution_live.ex:327
+#: lib/amanogawa_web/live/review_queue_live.ex:530
+#: lib/amanogawa_web/live/review_queue_live.ex:542
+#: lib/amanogawa_web/live/review_queue_live.ex:557
 #, elixir-autogen, elixir-format
 msgid "Avant :"
 msgstr "Before:"
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:413
+#: lib/amanogawa_web/live/proposal_form_component.ex:421
 #, elixir-autogen, elixir-format
 msgid "Avant votre première proposition, choisissez un pseudonyme public : il attribuera vos contributions dans l'historique public, jamais votre adresse email."
 msgstr "Before your first proposal, choose a public display name: it will attribute your contributions in the public history, never your email address."
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:535
+#: lib/amanogawa_web/live/proposal_form_component.ex:543
 #, elixir-autogen, elixir-format
 msgid "Calendrier"
 msgstr "Calendar"
 
-#: lib/amanogawa_web/live/account_live.ex:242
-#, elixir-autogen, elixir-format
-msgid "Ce pseudonyme attribue publiquement vos contributions (issue #036) : jamais votre adresse email."
-msgstr "This display name publicly attributes your contributions (issue #036): never your email address."
-
-#: lib/amanogawa_web/live/proposal_form_component.ex:207
+#: lib/amanogawa_web/live/proposal_form_component.ex:221
 #, elixir-autogen, elixir-format
 msgid "Cet événement est introuvable."
 msgstr "This event could not be found."
 
-#: lib/amanogawa_web/live/conflicts_live.ex:103
+#: lib/amanogawa_web/live/conflicts_live.ex:162
 #, elixir-autogen, elixir-format
 msgid "Champ :"
 msgstr "Field:"
 
-#: lib/amanogawa_web/live/conflicts_live.ex:89
+#: lib/amanogawa_web/live/conflicts_live.ex:148
 #, elixir-autogen, elixir-format
 msgid "Chaque ligne est une divergence détectée entre la valeur corrigée localement et la valeur actuelle de Wikidata."
 msgstr "Each row is a divergence detected between the locally corrected value and the current Wikidata value."
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:570
+#: lib/amanogawa_web/live/proposal_form_component.ex:578
 #, elixir-autogen, elixir-format
 msgid "Choisir sur la carte"
 msgstr "Choose on the map"
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:599
+#: lib/amanogawa_web/live/proposal_form_component.ex:607
 #, elixir-autogen, elixir-format
 msgid "Cible :"
 msgstr "Target:"
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:570
+#: lib/amanogawa_web/live/proposal_form_component.ex:578
 #, elixir-autogen, elixir-format
 msgid "Cliquez sur la carte…"
 msgstr "Click on the map…"
 
-#: lib/amanogawa_web/live/conflicts_live.ex:74
+#: lib/amanogawa_web/live/conflicts_live.ex:129
 #, elixir-autogen, elixir-format
 msgid "Conflit résolu."
 msgstr "Conflict resolved."
 
-#: lib/amanogawa_web/live/conflicts_live.ex:34
+#: lib/amanogawa_web/live/conflicts_live.ex:36
 #, elixir-autogen, elixir-format
 msgid "Conflits de synchronisation"
 msgstr "Sync conflicts"
@@ -669,257 +665,266 @@ msgstr "Sync conflicts"
 msgid "Contribution"
 msgstr "Contribution"
 
-#: lib/amanogawa_web/live/contribution_live.ex:40
+#: lib/amanogawa_web/live/contribution_live.ex:50
 #, elixir-autogen, elixir-format
 msgid "Contribution introuvable."
 msgstr "Contribution not found."
 
-#: lib/amanogawa_web/live/conflicts_live.ex:106
+#: lib/amanogawa_web/live/conflicts_live.ex:165
 #, elixir-autogen, elixir-format
 msgid "Correction locale :"
 msgstr "Local correction:"
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:394
+#: lib/amanogawa_web/live/proposal_form_component.ex:402
 #, elixir-autogen, elixir-format
 msgid "Corriger : %{field}"
 msgstr "Correct: %{field}"
 
-#: lib/amanogawa_web/live/contribution_live.ex:317
-#: lib/amanogawa_web/live/review_queue_live.ex:481
+#: lib/amanogawa_web/live/contribution_live.ex:351
+#: lib/amanogawa_web/live/review_queue_live.ex:586
 #, elixir-autogen, elixir-format
 msgid "Date :"
 msgstr "Date:"
 
-#: lib/amanogawa_web/components/event_panel.ex:205
-#: lib/amanogawa_web/live/contribution_live.ex:161
-#: lib/amanogawa_web/live/contributions_live.ex:158
+#: lib/amanogawa_web/components/event_panel.ex:211
+#: lib/amanogawa_web/live/conflicts_live.ex:106
+#: lib/amanogawa_web/live/contribution_live.ex:179
+#: lib/amanogawa_web/live/contributions_live.ex:168
 #, elixir-autogen, elixir-format
 msgid "Date de début"
 msgstr "Start date"
 
-#: lib/amanogawa_web/components/event_panel.ex:206
-#: lib/amanogawa_web/live/contribution_live.ex:162
-#: lib/amanogawa_web/live/contributions_live.ex:159
+#: lib/amanogawa_web/components/event_panel.ex:212
+#: lib/amanogawa_web/live/conflicts_live.ex:107
+#: lib/amanogawa_web/live/contribution_live.ex:180
+#: lib/amanogawa_web/live/contributions_live.ex:169
 #, elixir-autogen, elixir-format
 msgid "Date de fin"
 msgstr "End date"
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:644
+#: lib/amanogawa_web/live/proposal_form_component.ex:652
 #, elixir-autogen, elixir-format
 msgid "Description (anglais, optionnel)"
 msgstr "Description (English, optional)"
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:643
+#: lib/amanogawa_web/live/proposal_form_component.ex:651
 #, elixir-autogen, elixir-format
 msgid "Description (français, optionnel)"
 msgstr "Description (French, optional)"
 
-#: lib/amanogawa_web/live/review_queue_live.ex:456
+#: lib/amanogawa_web/live/review_queue_live.ex:561
 #, elixir-autogen, elixir-format
 msgid "Distance approximative :"
 msgstr "Approximate distance:"
 
-#: lib/amanogawa_web/live/conflicts_live.ex:115
+#: lib/amanogawa_web/live/conflicts_live.ex:174
 #, elixir-autogen, elixir-format
 msgid "Détecté le :"
 msgstr "Detected on:"
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:578
+#: lib/amanogawa_web/live/proposal_form_component.ex:586
 #, elixir-autogen, elixir-format
 msgid "Effacer"
 msgstr "Clear"
 
 #: lib/amanogawa_web/controllers/page_html.ex:77
-#: lib/amanogawa_web/live/contributions_live.ex:148
-#: lib/amanogawa_web/live/review_queue_live.ex:342
+#: lib/amanogawa_web/live/contribution_live.ex:242
+#: lib/amanogawa_web/live/contributions_live.ex:158
+#: lib/amanogawa_web/live/review_queue_live.ex:443
 #, elixir-autogen, elixir-format
 msgid "En appel"
 msgstr "Under appeal"
 
 #: lib/amanogawa_web/live/account_live.ex:253
-#: lib/amanogawa_web/live/proposal_form_component.ex:425
+#: lib/amanogawa_web/live/proposal_form_component.ex:433
 #, elixir-autogen, elixir-format
 msgid "Enregistrer"
 msgstr "Save"
 
-#: lib/amanogawa_web/live/contribution_live.ex:278
+#: lib/amanogawa_web/live/contribution_live.ex:312
 #, elixir-autogen, elixir-format
 msgid "Envoyer"
 msgstr "Send"
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:484
+#: lib/amanogawa_web/live/proposal_form_component.ex:492
 #, elixir-autogen, elixir-format
 msgid "Envoyer la proposition"
 msgstr "Send the proposal"
 
-#: lib/amanogawa_web/live/review_queue_live.ex:324
+#: lib/amanogawa_web/live/review_queue_live.ex:425
 #, elixir-autogen, elixir-format
 msgid "File chronologique stricte (la plus ancienne proposition d'abord), aucun tri algorithmique."
 msgstr "Strictly chronological queue (oldest proposal first), no algorithmic ranking."
 
-#: lib/amanogawa_web/live/review_queue_live.ex:38
+#: lib/amanogawa_web/live/review_queue_live.ex:49
 #, elixir-autogen, elixir-format
 msgid "File de relecture"
 msgstr "Review queue"
 
-#: lib/amanogawa_web/live/conflicts_live.ex:130
+#: lib/amanogawa_web/live/conflicts_live.ex:189
 #, elixir-autogen, elixir-format
 msgid "Garder la correction"
 msgstr "Keep the correction"
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:541
+#: lib/amanogawa_web/live/proposal_form_component.ex:549
 #, elixir-autogen, elixir-format
 msgid "Grégorien"
 msgstr "Gregorian"
 
-#: lib/amanogawa_web/live/contribution_live.ex:253
+#: lib/amanogawa_web/live/contribution_live.ex:287
 #, elixir-autogen, elixir-format
 msgid "Historique"
 msgstr "History"
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:593
+#: lib/amanogawa_web/live/proposal_form_component.ex:601
 #, elixir-autogen, elixir-format
 msgid "Identifiant de l'événement cible (QID)"
 msgstr "Target event identifier (QID)"
 
-#: lib/amanogawa_web/live/contribution_live.ex:232
+#: lib/amanogawa_web/live/contribution_live.ex:266
 #, elixir-autogen, elixir-format
 msgid "Impossible d'envoyer cette réponse."
 msgstr "This reply could not be sent."
 
-#: lib/amanogawa_web/live/conflicts_live.ex:80
+#: lib/amanogawa_web/live/conflicts_live.ex:135
+#: lib/amanogawa_web/live/conflicts_live.ex:140
 #, elixir-autogen, elixir-format
 msgid "Impossible de résoudre ce conflit."
 msgstr "This conflict could not be resolved."
 
-#: lib/amanogawa_web/live/review_queue_live.ex:317
+#: lib/amanogawa_web/live/review_queue_live.ex:418
 #, elixir-autogen, elixir-format
 msgid "Impossible de traiter cette décision."
 msgstr "This decision could not be processed."
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:517
+#: lib/amanogawa_web/live/proposal_form_component.ex:76
+#: lib/amanogawa_web/live/proposal_form_component.ex:525
 #, elixir-autogen, elixir-format
 msgid "Jour"
 msgstr "Day"
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:544
+#: lib/amanogawa_web/live/proposal_form_component.ex:552
 #, elixir-autogen, elixir-format
 msgid "Julien"
 msgstr "Julian"
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:665
+#: lib/amanogawa_web/live/proposal_form_component.ex:673
 #, elixir-autogen, elixir-format
 msgid "Justification (source ou référence, %{min}-%{max} caractères)"
 msgstr "Justification (source or reference, %{min}-%{max} characters)"
 
-#: lib/amanogawa_web/live/contribution_live.ex:228
+#: lib/amanogawa_web/live/contribution_live.ex:262
 #, elixir-autogen, elixir-format
 msgid "La réponse doit contenir entre 5 et 1000 caractères."
 msgstr "The reply must be between 5 and 1000 characters."
 
-#: lib/amanogawa_web/live/review_queue_live.ex:354
+#: lib/amanogawa_web/live/review_queue_live.ex:455
 #, elixir-autogen, elixir-format
 msgid "La valeur de référence a changé depuis la proposition."
 msgstr "The reference value has changed since the proposal."
 
-#: lib/amanogawa_web/components/event_panel.ex:204
-#: lib/amanogawa_web/live/contribution_live.ex:160
-#: lib/amanogawa_web/live/contributions_live.ex:157
-#: lib/amanogawa_web/live/proposal_form_component.ex:642
+#: lib/amanogawa_web/components/event_panel.ex:210
+#: lib/amanogawa_web/live/conflicts_live.ex:105
+#: lib/amanogawa_web/live/contribution_live.ex:178
+#: lib/amanogawa_web/live/contributions_live.ex:167
+#: lib/amanogawa_web/live/proposal_form_component.ex:650
 #, elixir-autogen, elixir-format
 msgid "Libellé (anglais)"
 msgstr "Label (English)"
 
-#: lib/amanogawa_web/components/event_panel.ex:203
-#: lib/amanogawa_web/live/contribution_live.ex:159
-#: lib/amanogawa_web/live/contributions_live.ex:156
-#: lib/amanogawa_web/live/proposal_form_component.ex:641
+#: lib/amanogawa_web/components/event_panel.ex:209
+#: lib/amanogawa_web/live/conflicts_live.ex:104
+#: lib/amanogawa_web/live/contribution_live.ex:177
+#: lib/amanogawa_web/live/contributions_live.ex:166
+#: lib/amanogawa_web/live/proposal_form_component.ex:649
 #, elixir-autogen, elixir-format
 msgid "Libellé (français)"
 msgstr "Label (French)"
 
-#: lib/amanogawa_web/components/event_panel.ex:208
+#: lib/amanogawa_web/components/event_panel.ex:214
 #, elixir-autogen, elixir-format
 msgid "Lien vers un autre événement"
 msgstr "Link to another event"
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:516
+#: lib/amanogawa_web/live/proposal_form_component.ex:75
+#: lib/amanogawa_web/live/proposal_form_component.ex:524
 #, elixir-autogen, elixir-format
 msgid "Mois"
 msgstr "Month"
 
-#: lib/amanogawa_web/live/conflicts_live.ex:121
-#: lib/amanogawa_web/live/review_queue_live.ex:409
+#: lib/amanogawa_web/live/conflicts_live.ex:180
+#: lib/amanogawa_web/live/review_queue_live.ex:514
 #, elixir-autogen, elixir-format
 msgid "Motif (obligatoire)"
 msgstr "Motive (required)"
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:498
+#: lib/amanogawa_web/live/proposal_form_component.ex:506
 #, elixir-autogen, elixir-format
 msgid "Nouvelle valeur"
 msgstr "New value"
 
-#: lib/amanogawa_web/live/review_queue_live.ex:337
+#: lib/amanogawa_web/live/review_queue_live.ex:438
 #, elixir-autogen, elixir-format
 msgid "Par"
 msgstr "By"
 
-#: lib/amanogawa_web/components/event_panel.ex:207
-#: lib/amanogawa_web/live/contribution_live.ex:163
-#: lib/amanogawa_web/live/contributions_live.ex:160
+#: lib/amanogawa_web/components/event_panel.ex:213
+#: lib/amanogawa_web/live/conflicts_live.ex:108
+#: lib/amanogawa_web/live/contribution_live.ex:181
+#: lib/amanogawa_web/live/contributions_live.ex:170
 #, elixir-autogen, elixir-format
 msgid "Position"
 msgstr "Position"
 
-#: lib/amanogawa_web/live/contribution_live.ex:318
-#: lib/amanogawa_web/live/review_queue_live.ex:482
+#: lib/amanogawa_web/live/contribution_live.ex:352
+#: lib/amanogawa_web/live/review_queue_live.ex:587
 #, elixir-autogen, elixir-format
 msgid "Position :"
 msgstr "Position:"
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:560
+#: lib/amanogawa_web/live/proposal_form_component.ex:568
 #, elixir-autogen, elixir-format
 msgid "Position choisie :"
 msgstr "Chosen position:"
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:396
+#: lib/amanogawa_web/live/proposal_form_component.ex:404
 #, elixir-autogen, elixir-format
 msgid "Proposer un lien"
 msgstr "Propose a link"
 
-#: lib/amanogawa_web/live/explore_live.ex:351
-#: lib/amanogawa_web/live/explore_live.ex:358
-#: lib/amanogawa_web/live/proposal_form_component.ex:397
+#: lib/amanogawa_web/live/explore_live.ex:361
+#: lib/amanogawa_web/live/explore_live.ex:368
+#: lib/amanogawa_web/live/proposal_form_component.ex:405
 #, elixir-autogen, elixir-format
 msgid "Proposer un événement"
 msgstr "Propose an event"
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:357
+#: lib/amanogawa_web/live/proposal_form_component.ex:365
 #, elixir-autogen, elixir-format
 msgid "Proposer une contribution"
 msgstr "Propose a contribution"
 
-#: lib/amanogawa_web/components/event_panel.ex:142
+#: lib/amanogawa_web/components/event_panel.ex:148
 #, elixir-autogen, elixir-format
 msgid "Proposer une correction"
 msgstr "Propose a correction"
 
-#: lib/amanogawa_web/live/review_queue_live.ex:309
+#: lib/amanogawa_web/live/review_queue_live.ex:410
 #, elixir-autogen, elixir-format
 msgid "Proposition acceptée."
 msgstr "Proposal accepted."
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:203
+#: lib/amanogawa_web/live/proposal_form_component.ex:217
 #, elixir-autogen, elixir-format
 msgid "Proposition envoyée, elle sera relue."
 msgstr "Proposal sent, it will be reviewed."
 
-#: lib/amanogawa_web/live/review_queue_live.ex:310
+#: lib/amanogawa_web/live/review_queue_live.ex:411
 #, elixir-autogen, elixir-format
 msgid "Proposition rejetée."
 msgstr "Proposal rejected."
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:520
+#: lib/amanogawa_web/live/proposal_form_component.ex:528
 #, elixir-autogen, elixir-format
 msgid "Précision"
 msgstr "Precision"
@@ -935,174 +940,174 @@ msgid "Pseudonyme enregistré."
 msgstr "Display name saved."
 
 #: lib/amanogawa_web/live/account_live.ex:240
-#: lib/amanogawa_web/live/proposal_form_component.ex:424
+#: lib/amanogawa_web/live/proposal_form_component.ex:432
 #, elixir-autogen, elixir-format
 msgid "Pseudonyme public"
 msgstr "Public display name"
 
-#: lib/amanogawa_web/live/review_queue_live.ex:379
+#: lib/amanogawa_web/live/review_queue_live.ex:480
 #, elixir-autogen, elixir-format
 msgid "Rejeter"
 msgstr "Reject"
 
-#: lib/amanogawa_web/live/review_queue_live.ex:396
+#: lib/amanogawa_web/live/review_queue_live.ex:497
 #, elixir-autogen, elixir-format
 msgid "Rejeter définitivement"
 msgstr "Reject definitively"
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:512
+#: lib/amanogawa_web/live/proposal_form_component.ex:520
 #, elixir-autogen, elixir-format
 msgid "Retirer la date de fin"
 msgstr "Remove the end date"
 
-#: lib/amanogawa_web/live/contribution_live.ex:270
+#: lib/amanogawa_web/live/contribution_live.ex:304
 #, elixir-autogen, elixir-format
 msgid "Répondre à ce rejet"
 msgstr "Reply to this rejection"
 
-#: lib/amanogawa_web/live/review_queue_live.ex:364
+#: lib/amanogawa_web/live/review_queue_live.ex:465
 #, elixir-autogen, elixir-format
 msgid "Réponse de l'auteur :"
 msgstr "Author's reply:"
 
-#: lib/amanogawa_web/live/contribution_live.ex:250
-#: lib/amanogawa_web/live/review_queue_live.ex:360
+#: lib/amanogawa_web/live/contribution_live.ex:284
+#: lib/amanogawa_web/live/review_queue_live.ex:461
 #, elixir-autogen, elixir-format
 msgid "Source :"
 msgstr "Source:"
 
-#: lib/amanogawa_web/live/contribution_live.ex:244
+#: lib/amanogawa_web/live/contribution_live.ex:278
 #, elixir-autogen, elixir-format
 msgid "Statut :"
 msgstr "Status:"
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:214
+#: lib/amanogawa_web/live/proposal_form_component.ex:228
 #, elixir-autogen, elixir-format
 msgid "Trop de propositions pour le moment, réessayez plus tard."
 msgstr "Too many proposals right now, try again later."
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:606
+#: lib/amanogawa_web/live/proposal_form_component.ex:614
 #, elixir-autogen, elixir-format
 msgid "Type de lien"
 msgstr "Link type"
 
-#: lib/amanogawa_web/live/conflicts_live.ex:77
-#: lib/amanogawa_web/live/review_queue_live.ex:312
+#: lib/amanogawa_web/live/conflicts_live.ex:132
+#: lib/amanogawa_web/live/review_queue_live.ex:413
 #, elixir-autogen, elixir-format
 msgid "Un motif est requis."
 msgstr "A motive is required."
 
-#: lib/amanogawa_web/live/contribution_live.ex:272
+#: lib/amanogawa_web/live/contribution_live.ex:306
 #, elixir-autogen, elixir-format
 msgid "Une seule réponse est possible ; un relecteur tranchera ensuite définitivement."
 msgstr "Only one reply is possible; a reviewer will then decide definitively."
 
-#: lib/amanogawa_web/live/review_queue_live.ex:458
+#: lib/amanogawa_web/live/review_queue_live.ex:563
 #, elixir-autogen, elixir-format
 msgid "Voir sur la carte"
 msgstr "View on the map"
 
-#: lib/amanogawa_web/live/contribution_live.ex:277
+#: lib/amanogawa_web/live/contribution_live.ex:311
 #, elixir-autogen, elixir-format
 msgid "Votre réponse"
 msgstr "Your reply"
 
-#: lib/amanogawa_web/live/contribution_live.ex:221
+#: lib/amanogawa_web/live/contribution_live.ex:255
 #, elixir-autogen, elixir-format
 msgid "Votre réponse a été publiée."
 msgstr "Your reply has been published."
 
-#: lib/amanogawa_web/live/review_queue_live.ex:315
+#: lib/amanogawa_web/live/review_queue_live.ex:416
 #, elixir-autogen, elixir-format
 msgid "Vous ne pouvez pas relire votre propre proposition."
 msgstr "You cannot review your own proposal."
 
-#: lib/amanogawa_web/live/conflicts_live.ex:110
+#: lib/amanogawa_web/live/conflicts_live.ex:169
 #, elixir-autogen, elixir-format
 msgid "Wikidata :"
 msgstr "Wikidata:"
 
-#: lib/amanogawa_web/live/review_queue_live.ex:426
-#: lib/amanogawa_web/live/review_queue_live.ex:438
-#: lib/amanogawa_web/live/review_queue_live.ex:442
-#: lib/amanogawa_web/live/review_queue_live.ex:453
+#: lib/amanogawa_web/live/review_queue_live.ex:531
+#: lib/amanogawa_web/live/review_queue_live.ex:543
+#: lib/amanogawa_web/live/review_queue_live.ex:547
+#: lib/amanogawa_web/live/review_queue_live.ex:558
 #, elixir-autogen, elixir-format
 msgid "aucune"
 msgstr "none"
 
-#: lib/amanogawa_web/live/contribution_live.ex:167
-#: lib/amanogawa_web/live/proposal_form_component.ex:618
-#: lib/amanogawa_web/live/review_queue_live.ex:494
+#: lib/amanogawa_web/live/contribution_live.ex:185
+#: lib/amanogawa_web/live/proposal_form_component.ex:626
+#: lib/amanogawa_web/live/review_queue_live.ex:599
 #, elixir-autogen, elixir-format
 msgid "cause"
 msgstr "cause"
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:404
+#: lib/amanogawa_web/live/proposal_form_component.ex:412
 #, elixir-autogen, elixir-format
 msgid "champ"
 msgstr "field"
 
-#: lib/amanogawa_web/live/contribution_live.ex:63
-#: lib/amanogawa_web/live/contributions_live.ex:119
-#: lib/amanogawa_web/live/review_queue_live.ex:71
+#: lib/amanogawa_web/live/contribution_live.ex:73
+#: lib/amanogawa_web/live/contributions_live.ex:129
+#: lib/amanogawa_web/live/review_queue_live.ex:154
 #, elixir-autogen, elixir-format
 msgid "compte supprimé"
 msgstr "deleted account"
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:401
+#: lib/amanogawa_web/live/proposal_form_component.ex:409
 #, elixir-autogen, elixir-format
 msgid "date de début"
 msgstr "start date"
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:402
+#: lib/amanogawa_web/live/proposal_form_component.ex:410
 #, elixir-autogen, elixir-format
 msgid "date de fin"
 msgstr "end date"
 
-#: lib/amanogawa_web/live/contribution_live.ex:168
-#: lib/amanogawa_web/live/proposal_form_component.ex:621
-#: lib/amanogawa_web/live/review_queue_live.ex:495
+#: lib/amanogawa_web/live/contribution_live.ex:186
+#: lib/amanogawa_web/live/proposal_form_component.ex:629
+#: lib/amanogawa_web/live/review_queue_live.ex:600
 #, elixir-autogen, elixir-format
 msgid "effet"
 msgstr "effect"
 
-#: lib/amanogawa_web/live/contribution_live.ex:165
-#: lib/amanogawa_web/live/proposal_form_component.ex:612
-#: lib/amanogawa_web/live/review_queue_live.ex:491
+#: lib/amanogawa_web/live/contribution_live.ex:183
+#: lib/amanogawa_web/live/proposal_form_component.ex:620
+#: lib/amanogawa_web/live/review_queue_live.ex:596
 #, elixir-autogen, elixir-format
 msgid "fait partie de"
 msgstr "is part of"
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:400
+#: lib/amanogawa_web/live/proposal_form_component.ex:408
 #, elixir-autogen, elixir-format
 msgid "libellé (anglais)"
 msgstr "label (English)"
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:399
+#: lib/amanogawa_web/live/proposal_form_component.ex:407
 #, elixir-autogen, elixir-format
 msgid "libellé (français)"
 msgstr "label (French)"
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:403
+#: lib/amanogawa_web/live/proposal_form_component.ex:411
 #, elixir-autogen, elixir-format
 msgid "position"
 msgstr "position"
 
-#: lib/amanogawa_web/live/contribution_live.ex:166
-#: lib/amanogawa_web/live/proposal_form_component.ex:615
-#: lib/amanogawa_web/live/review_queue_live.ex:493
+#: lib/amanogawa_web/live/contribution_live.ex:184
+#: lib/amanogawa_web/live/proposal_form_component.ex:623
+#: lib/amanogawa_web/live/review_queue_live.ex:598
 #, elixir-autogen, elixir-format
 msgid "suit"
 msgstr "follows"
 
-#: lib/amanogawa_web/live/contribution_live.ex:169
-#: lib/amanogawa_web/live/proposal_form_component.ex:624
-#: lib/amanogawa_web/live/review_queue_live.ex:498
+#: lib/amanogawa_web/live/contribution_live.ex:187
+#: lib/amanogawa_web/live/proposal_form_component.ex:632
+#: lib/amanogawa_web/live/review_queue_live.ex:603
 #, elixir-autogen, elixir-format
 msgid "événement notable lié"
 msgstr "related notable event"
 
-#: lib/amanogawa_web/components/event_panel.ex:169
+#: lib/amanogawa_web/components/event_panel.ex:175
 #, elixir-autogen, elixir-format
 msgid "%{accepted} correction(s) acceptée(s), %{pending} en attente."
 msgstr "%{accepted} correction(s) accepted, %{pending} pending."
@@ -1112,8 +1117,9 @@ msgstr "%{accepted} correction(s) accepted, %{pending} pending."
 msgid "%{hours} heures"
 msgstr "%{hours} hours"
 
-#: lib/amanogawa_web/live/contribution_live.ex:203
-#: lib/amanogawa_web/live/contributions_live.ex:146
+#: lib/amanogawa_web/live/contribution_live.ex:231
+#: lib/amanogawa_web/live/contribution_live.ex:240
+#: lib/amanogawa_web/live/contributions_live.ex:156
 #, elixir-autogen, elixir-format
 msgid "Acceptée"
 msgstr "Accepted"
@@ -1123,12 +1129,12 @@ msgstr "Accepted"
 msgid "Acceptées"
 msgstr "Accepted"
 
-#: lib/amanogawa_web/live/contribution_live.ex:206
+#: lib/amanogawa_web/live/contribution_live.ex:234
 #, elixir-autogen, elixir-format
 msgid "Appel tranché"
 msgstr "Appeal decided"
 
-#: lib/amanogawa_web/live/contributions_live.ex:214
+#: lib/amanogawa_web/live/contributions_live.ex:224
 #, elixir-autogen, elixir-format
 msgid "Aucune contribution pour ce filtre."
 msgstr "No contribution for this filter."
@@ -1138,7 +1144,7 @@ msgstr "No contribution for this filter."
 msgid "Aucune donnée personnelle ne doit figurer dans une justification ou une réponse d'appel : cette règle est publiée sur %{moderation_link} et vérifiée à la relecture."
 msgstr "No personal data may appear in a justification or an appeal reply: this rule is published on %{moderation_link} and checked at review time."
 
-#: lib/amanogawa_web/live/contribution_live.ex:209
+#: lib/amanogawa_web/live/contribution_live.ex:237
 #, elixir-autogen, elixir-format
 msgid "Auteur anonymisé (compte supprimé)"
 msgstr "Author anonymized (account deleted)"
@@ -1148,17 +1154,18 @@ msgstr "Author anonymized (account deleted)"
 msgid "Cette action est irréversible : toutes vos données personnelles sont effacées immédiatement, sans délai de récupération. Vos contributions publiques éventuelles (éditeur collaboratif) restent visibles dans l'historique public, mais deviennent anonymes (\"compte supprimé\") : c'est ce qui garantit la cohérence de l'historique, comme sur un wiki."
 msgstr "This action is irreversible: all your personal data is erased immediately, with no recovery period. Any public contributions you made (collaborative editor) remain visible in the public history, but become anonymous (\"deleted account\"): this is what keeps the public history consistent, as on a wiki."
 
-#: lib/amanogawa_web/live/contributions_live.ex:218
+#: lib/amanogawa_web/live/contributions_live.ex:228
+#: lib/amanogawa_web/live/review_queue_live.ex:505
 #, elixir-autogen, elixir-format
 msgid "Charger plus"
 msgstr "Load more"
 
-#: lib/amanogawa_web/live/contribution_live.ex:242
+#: lib/amanogawa_web/live/contribution_live.ex:276
 #, elixir-autogen, elixir-format
 msgid "Concernant :"
 msgstr "Regarding:"
 
-#: lib/amanogawa_web/live/contribution_live.ex:208
+#: lib/amanogawa_web/live/contribution_live.ex:236
 #, elixir-autogen, elixir-format
 msgid "Conflit résolu"
 msgstr "Conflict resolved"
@@ -1189,7 +1196,8 @@ msgid "Délai médian de décision :"
 msgstr "Median decision delay:"
 
 #: lib/amanogawa_web/controllers/page_html.ex:74
-#: lib/amanogawa_web/live/contributions_live.ex:145
+#: lib/amanogawa_web/live/contribution_live.ex:239
+#: lib/amanogawa_web/live/contributions_live.ex:155
 #, elixir-autogen, elixir-format
 msgid "En attente"
 msgstr "Pending"
@@ -1199,12 +1207,12 @@ msgstr "Pending"
 msgid "Exactitude factuelle : la correction doit correspondre à la source citée."
 msgstr "Factual accuracy: the correction must match the cited source."
 
-#: lib/amanogawa_web/live/contributions_live.ex:189
+#: lib/amanogawa_web/live/contributions_live.ex:199
 #, elixir-autogen, elixir-format
 msgid "Filtré sur l'événement :"
 msgstr "Filtered on event:"
 
-#: lib/amanogawa_web/live/contributions_live.ex:167
+#: lib/amanogawa_web/live/contributions_live.ex:177
 #, elixir-autogen, elixir-format
 msgid "Flux chronologique strict de toutes les contributions, de la plus récente à la plus ancienne, aucun tri algorithmique."
 msgstr "Strictly chronological feed of every contribution, most recent first, no algorithmic ranking."
@@ -1229,7 +1237,7 @@ msgstr "Your data export (\"My account\") includes all of your contributions and
 msgid "Le pseudonyme public (choisi avant votre première proposition, modifiable depuis \"Mon compte\") attribue vos contributions ; votre adresse email n'apparaît jamais publiquement."
 msgstr "Your public display name (chosen before your first proposal, editable from \"My account\") attributes your contributions; your email address is never shown publicly."
 
-#: lib/amanogawa_web/live/contributions_live.ex:153
+#: lib/amanogawa_web/live/contributions_live.ex:163
 #, elixir-autogen, elixir-format
 msgid "Lien entre événements"
 msgstr "Link between events"
@@ -1254,18 +1262,18 @@ msgstr "Typical rejection reasons"
 msgid "Neutralité : aucune prise de position, aucune donnée personnelle dans la justification."
 msgstr "Neutrality: no personal opinion, no personal data in the justification."
 
-#: lib/amanogawa_web/live/contributions_live.ex:154
+#: lib/amanogawa_web/live/contributions_live.ex:164
 #, elixir-autogen, elixir-format
 msgid "Nouvel événement"
 msgstr "New event"
 
-#: lib/amanogawa_web/live/contribution_live.ex:76
-#: lib/amanogawa_web/live/contributions_live.ex:128
+#: lib/amanogawa_web/live/contribution_live.ex:86
+#: lib/amanogawa_web/live/contributions_live.ex:138
 #, elixir-autogen, elixir-format
 msgid "Nouvel événement proposé"
 msgstr "New event proposed"
 
-#: lib/amanogawa_web/live/contribution_live.ex:202
+#: lib/amanogawa_web/live/contribution_live.ex:230
 #, elixir-autogen, elixir-format
 msgid "Proposition"
 msgstr "Proposal"
@@ -1275,13 +1283,14 @@ msgstr "Proposal"
 msgid "Propositions par mois :"
 msgstr "Proposals per month:"
 
-#: lib/amanogawa_web/live/contribution_live.ex:245
+#: lib/amanogawa_web/live/contribution_live.ex:279
 #, elixir-autogen, elixir-format
 msgid "Proposé par"
 msgstr "Proposed by"
 
-#: lib/amanogawa_web/live/contribution_live.ex:204
-#: lib/amanogawa_web/live/contributions_live.ex:147
+#: lib/amanogawa_web/live/contribution_live.ex:232
+#: lib/amanogawa_web/live/contribution_live.ex:241
+#: lib/amanogawa_web/live/contributions_live.ex:157
 #, elixir-autogen, elixir-format
 msgid "Rejetée"
 msgstr "Rejected"
@@ -1291,12 +1300,13 @@ msgstr "Rejected"
 msgid "Rejetées"
 msgstr "Rejected"
 
-#: lib/amanogawa_web/live/contributions_live.ex:149
+#: lib/amanogawa_web/live/contribution_live.ex:243
+#: lib/amanogawa_web/live/contributions_live.ex:159
 #, elixir-autogen, elixir-format
 msgid "Remplacée"
 msgstr "Superseded"
 
-#: lib/amanogawa_web/live/contribution_live.ex:207
+#: lib/amanogawa_web/live/contribution_live.ex:235
 #, elixir-autogen, elixir-format
 msgid "Remplacée (synchronisation)"
 msgstr "Superseded (sync)"
@@ -1306,7 +1316,7 @@ msgstr "Superseded (sync)"
 msgid "Remplacées"
 msgstr "Superseded"
 
-#: lib/amanogawa_web/live/contribution_live.ex:205
+#: lib/amanogawa_web/live/contribution_live.ex:233
 #, elixir-autogen, elixir-format
 msgid "Réponse de l'auteur"
 msgstr "Author's reply"
@@ -1331,7 +1341,7 @@ msgstr "Statistics"
 msgid "Suppression de compte : votre email et votre pseudonyme sont réellement supprimés. Vos contributions publiques restent visibles mais deviennent anonymes (\"compte supprimé\") : les supprimer romprait la traçabilité des valeurs affichées sur la carte. Base légale de ce maintien : article 17.3.d du RGPD (archivage dans l'intérêt public)."
 msgstr "Account deletion: your email and display name are actually deleted. Your public contributions remain visible but become anonymous (\"deleted account\"): deleting them would break the traceability of the values shown on the map. Legal basis for this retention: GDPR article 17.3.d (archiving in the public interest)."
 
-#: lib/amanogawa_web/live/contributions_live.ex:177
+#: lib/amanogawa_web/live/contributions_live.ex:187
 #, elixir-autogen, elixir-format
 msgid "Tous les statuts"
 msgstr "All statuses"
@@ -1346,7 +1356,7 @@ msgstr "Every contribution is reviewed before it appears on the map. This page p
 msgid "Une contribution acceptée (correction ou nouvel événement) rejoint l'historique public, permanent, de l'application : date, valeurs avant/après, justification, décision motivée et son auteur (pseudonyme public, jamais l'adresse email) restent consultables sans compte sur %{contributions_link} et %{moderation_link}."
 msgstr "An accepted contribution (correction or new event) joins the application's public, permanent history: date, before/after values, justification, reasoned decision and its author (public display name, never the email address) remain viewable without an account on %{contributions_link} and %{moderation_link}."
 
-#: lib/amanogawa_web/components/event_panel.ex:182
+#: lib/amanogawa_web/components/event_panel.ex:188
 #, elixir-autogen, elixir-format
 msgid "Valeur corrigée par la communauté, source à l'appui."
 msgstr "Value corrected by the community, backed by a source."
@@ -1356,12 +1366,12 @@ msgstr "Value corrected by the community, backed by a source."
 msgid "Valeur imprécise ou incorrecte au regard de la source citée."
 msgstr "Value imprecise or incorrect with respect to the cited source."
 
-#: lib/amanogawa_web/components/event_panel.ex:178
+#: lib/amanogawa_web/components/event_panel.ex:184
 #, elixir-autogen, elixir-format
 msgid "Voir l'historique"
 msgstr "View history"
 
-#: lib/amanogawa_web/components/event_panel.ex:188
+#: lib/amanogawa_web/components/event_panel.ex:194
 #, elixir-autogen, elixir-format
 msgid "Voir la contribution"
 msgstr "View the contribution"
@@ -1376,18 +1386,20 @@ msgstr "View the public contributions feed"
 msgid "aucune décision pour le moment"
 msgstr "no decision yet"
 
-#: lib/amanogawa_web/live/contribution_live.ex:294
-#: lib/amanogawa_web/live/contribution_live.ex:298
+#: lib/amanogawa_web/live/conflicts_live.ex:71
+#: lib/amanogawa_web/live/conflicts_live.ex:72
+#: lib/amanogawa_web/live/contribution_live.ex:328
+#: lib/amanogawa_web/live/contribution_live.ex:332
 #, elixir-autogen, elixir-format
 msgid "aucune valeur"
 msgstr "no value"
 
-#: lib/amanogawa_web/live/contributions_live.ex:203
+#: lib/amanogawa_web/live/contributions_live.ex:213
 #, elixir-autogen, elixir-format
 msgid "par"
 msgstr "by"
 
-#: lib/amanogawa_web/live/contributions_live.ex:191
+#: lib/amanogawa_web/live/contributions_live.ex:201
 #, elixir-autogen, elixir-format
 msgid "retirer"
 msgstr "remove"
@@ -1397,12 +1409,73 @@ msgstr "remove"
 msgid "Éditeur collaboratif (contributions)"
 msgstr "Collaborative editor (contributions)"
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:688
+#: lib/amanogawa_web/live/proposal_form_component.ex:696
 #, elixir-autogen, elixir-format
 msgid "Ne jamais inclure de donnée personnelle dans cette justification."
 msgstr "Never include personal data in this justification."
 
-#: lib/amanogawa_web/live/proposal_form_component.ex:690
+#: lib/amanogawa_web/live/proposal_form_component.ex:698
 #, elixir-autogen, elixir-format
 msgid "Règles de modération"
 msgstr "Moderation rules"
+
+#: lib/amanogawa_web/live/account_live.ex:242
+#, elixir-autogen, elixir-format
+msgid "Ce pseudonyme attribue publiquement vos contributions : jamais votre adresse email."
+msgstr "This display name publicly attributes your contributions: never your email address."
+
+#: lib/amanogawa_web/live/proposal_form_component.ex:66
+#, elixir-autogen, elixir-format
+msgid "Cent millions d'années"
+msgstr "Hundred million years"
+
+#: lib/amanogawa_web/live/proposal_form_component.ex:69
+#, elixir-autogen, elixir-format
+msgid "Centaine de milliers d'années"
+msgstr "Hundred thousand years"
+
+#: lib/amanogawa_web/live/proposal_form_component.ex:70
+#, elixir-autogen, elixir-format
+msgid "Dizaine de milliers d'années"
+msgstr "Ten thousand years"
+
+#: lib/amanogawa_web/live/proposal_form_component.ex:67
+#, elixir-autogen, elixir-format
+msgid "Dizaine de millions d'années"
+msgstr "Ten million years"
+
+#: lib/amanogawa_web/live/proposal_form_component.ex:73
+#, elixir-autogen, elixir-format
+msgid "Décennie"
+msgstr "Decade"
+
+#: lib/amanogawa_web/live/proposal_form_component.ex:65
+#, elixir-autogen, elixir-format
+msgid "Milliard d'années"
+msgstr "Billion years"
+
+#: lib/amanogawa_web/live/proposal_form_component.ex:68
+#, elixir-autogen, elixir-format
+msgid "Million d'années"
+msgstr "Million years"
+
+#: lib/amanogawa_web/live/proposal_form_component.ex:71
+#, elixir-autogen, elixir-format
+msgid "Millénaire"
+msgstr "Millennium"
+
+#: lib/amanogawa_web/live/proposal_form_component.ex:72
+#, elixir-autogen, elixir-format
+msgid "Siècle"
+msgstr "Century"
+
+#: lib/amanogawa_web/live/contribution_live.ex:227
+#, elixir-autogen, elixir-format
+msgid "Valeur Wikidata adoptée (conflit)"
+msgstr "Wikidata value adopted (conflict)"
+
+#: lib/amanogawa_web/live/conflicts_live.ex:81
+#: lib/amanogawa_web/live/conflicts_live.ex:94
+#, elixir-autogen, elixir-format
+msgid "valeur illisible"
+msgstr "unreadable value"

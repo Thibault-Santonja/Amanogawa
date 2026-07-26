@@ -81,7 +81,17 @@ defmodule AmanogawaWeb.ContributionsLive do
     {page, has_more?} = split_page(overrides, page_size)
 
     names = page |> Enum.map(& &1.author_id) |> Attribution.resolve_names()
-    rows = Enum.map(page, &build_row(&1, names))
+
+    # One query for every referenced event on the page (quality review,
+    # N+1 finding), same batching discipline as the attribution above.
+    events =
+      page
+      |> Enum.map(& &1.event_qid)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+      |> Atlas.list_events_by_qids()
+
+    rows = Enum.map(page, &build_row(&1, names, events))
 
     next_cursor =
       case List.last(page) do
@@ -110,8 +120,8 @@ defmodule AmanogawaWeb.ContributionsLive do
     end
   end
 
-  defp build_row(override, names) do
-    event = override.event_qid && Atlas.get_event_by_qid(override.event_qid)
+  defp build_row(override, names, events) do
+    event = override.event_qid && Map.get(events, override.event_qid)
 
     %{
       id: override.id,

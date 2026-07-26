@@ -721,6 +721,34 @@ defmodule Amanogawa.AccountsTest do
       assert {:error, changeset} = Accounts.set_display_name(user, "historien")
       assert "has already been taken" in errors_on(changeset).display_name
     end
+
+    test "security: reserved moderation/system terms are refused, casing and accent variants included" do
+      user = user_fixture()
+
+      for reserved <- [
+            "relecteur",
+            "Relecteur",
+            "REVIEWER",
+            "modérateur",
+            "Modérateur",
+            "moderator",
+            "admin",
+            "Amanogawa",
+            "système",
+            "SYSTÈME",
+            "system",
+            " admin "
+          ] do
+        assert {:error, changeset} = Accounts.set_display_name(user, reserved),
+               "expected #{inspect(reserved)} to be refused"
+
+        assert "is reserved" in errors_on(changeset).display_name
+      end
+
+      # A name merely CONTAINING a reserved term stays allowed: only the
+      # exact identity is impersonation.
+      assert {:ok, _updated} = Accounts.set_display_name(user, "relecteur-du-dimanche")
+    end
   end
 
   describe "display_names_by_ids/1 (issue #034)" do

@@ -28,20 +28,40 @@ defmodule AmanogawaWeb.ProposalController do
 
   @fields ~w(label_fr label_en begin_date end_date position link)
 
+  # Window/camera params forwarded verbatim to `AmanogawaWeb.ExploreLive`
+  # (quality review m-finding: the anonymous sign-in round trip must come
+  # back to the same view, not the default one). Safe to pass through
+  # raw: `AmanogawaWeb.Params.ExploreParams.parse/1` re-validates every
+  # one of them and falls back to its default on anything hostile.
+  @view_params ~w(from to z lat lng)
+
   @doc false
-  def new(conn, %{"sel" => qid, "field" => field}) when field in @fields do
+  def new(conn, %{"sel" => qid, "field" => field} = params) when field in @fields do
     if EventId.valid?(qid) do
-      redirect(conn, to: ~p"/?sel=#{qid}&propose_field=#{field}")
+      query =
+        params
+        |> view_query()
+        |> Map.merge(%{"sel" => qid, "propose_field" => field})
+
+      redirect(conn, to: "/?" <> URI.encode_query(query))
     else
       redirect(conn, to: ~p"/")
     end
   end
 
-  def new(conn, %{"new_event" => "1"}) do
-    redirect(conn, to: ~p"/?propose_new_event=1")
+  def new(conn, %{"new_event" => "1"} = params) do
+    query = params |> view_query() |> Map.put("propose_new_event", "1")
+
+    redirect(conn, to: "/?" <> URI.encode_query(query))
   end
 
   def new(conn, _params) do
     redirect(conn, to: ~p"/")
+  end
+
+  defp view_query(params) do
+    params
+    |> Map.take(@view_params)
+    |> Map.filter(fn {_key, value} -> is_binary(value) end)
   end
 end

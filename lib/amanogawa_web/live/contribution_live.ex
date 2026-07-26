@@ -33,7 +33,17 @@ defmodule AmanogawaWeb.ContributionLive do
 
   @impl true
   def handle_params(%{"id" => id}, _url, socket) do
-    case Contributions.get_override(id) do
+    # `Ecto.UUID.cast/1` first (security review, minor 3): a malformed id
+    # in the public URL is answered with the same neutral "introuvable"
+    # as an unknown one, never a raised `Ecto.Query.CastError` (a 500).
+    case Ecto.UUID.cast(id) do
+      {:ok, uuid} -> assign_override(socket, Contributions.get_override(uuid))
+      :error -> assign_override(socket, nil)
+    end
+  end
+
+  defp assign_override(socket, override) do
+    case override do
       nil ->
         {:noreply,
          socket
@@ -136,7 +146,7 @@ defmodule AmanogawaWeb.ContributionLive do
           month: month,
           day: day,
           precision: precision,
-          calendar: calendar && String.to_existing_atom(calendar)
+          calendar: calendar_atom(calendar)
         }
 
         case HistoricalDate.new(attrs) do
@@ -156,6 +166,14 @@ defmodule AmanogawaWeb.ContributionLive do
     end
   end
 
+  # Total conversion (security review, calendar finding): the payload is
+  # stored jsonb on a PUBLIC page, so forged/legacy data must render as
+  # "no calendar" (then usually "no value"), never crash the LiveView
+  # through `String.to_existing_atom/1`.
+  defp calendar_atom("gregorian"), do: :gregorian
+  defp calendar_atom("julian"), do: :julian
+  defp calendar_atom(_other), do: nil
+
   defp field_label(:label_fr), do: gettext("Libellé (français)")
   defp field_label(:label_en), do: gettext("Libellé (anglais)")
   defp field_label(:begin_date), do: gettext("Date de début")
@@ -169,17 +187,22 @@ defmodule AmanogawaWeb.ContributionLive do
   defp link_type_label(:significant), do: gettext("événement notable lié")
 
   # ---------------------------------------------------------------------
-  # Revision history (issue #038): every entry datedandattributed, an
+  # Revision history (issue #038): every entry dated and attributed, an
   # action whose actor is the SYSTEM (a sync-triggered `:superseded`, or
-  # the account-deletion-triggered `:anonymized`, both always journalled
-  # with `actor_id: nil` by design, `Amanogawa.Contributions`' own
-  # moduledoc) never renders as "compte supprimé": that label is reserved
-  # for a REAL person's account that was later anonymized.
+  # the account-deletion-triggered `:anonymized`, both journalled with
+  # `actor_id: nil` by design, `Amanogawa.Contributions`' own moduledoc)
+  # never renders as "compte supprimé": that label is reserved for a REAL
+  # person's account that was later anonymized. A `:superseded` revision
+  # CARRYING an actor is a different animal (quality review): a reviewer
+  # resolving a conflict by adopting Wikidata's value
+  # (`Amanogawa.Contributions.resolve_conflict/3`, `:adopted_wikidata`),
+  # so that decision IS attributed, with its own label.
   # ---------------------------------------------------------------------
 
   @system_actions [:superseded, :anonymized]
 
-  defp revision_row(%{action: action} = revision, _names) when action in @system_actions do
+  defp revision_row(%{action: action, actor_id: nil} = revision, _names)
+       when action in @system_actions do
     %{
       action: revision.action,
       action_label: action_label(revision.action),
@@ -192,12 +215,17 @@ defmodule AmanogawaWeb.ContributionLive do
   defp revision_row(revision, names) do
     %{
       action: revision.action,
-      action_label: action_label(revision.action),
+      action_label: attributed_action_label(revision.action),
       actor_name: Attribution.name(names, revision.actor_id, deleted_label()),
       message: revision.message,
       inserted_at: revision.inserted_at
     }
   end
+
+  # A `:superseded` revision with an actor is a reviewer's own
+  # `:adopted_wikidata` conflict resolution, never the sync.
+  defp attributed_action_label(:superseded), do: gettext("Valeur Wikidata adoptée (conflit)")
+  defp attributed_action_label(action), do: action_label(action)
 
   defp action_label(:proposed), do: gettext("Proposition")
   defp action_label(:accepted), do: gettext("Acceptée")
@@ -207,6 +235,12 @@ defmodule AmanogawaWeb.ContributionLive do
   defp action_label(:superseded), do: gettext("Remplacée (synchronisation)")
   defp action_label(:conflict_resolved), do: gettext("Conflit résolu")
   defp action_label(:anonymized), do: gettext("Auteur anonymisé (compte supprimé)")
+
+  defp status_label(:pending), do: gettext("En attente")
+  defp status_label(:accepted), do: gettext("Acceptée")
+  defp status_label(:rejected), do: gettext("Rejetée")
+  defp status_label(:appealed), do: gettext("En appel")
+  defp status_label(:superseded), do: gettext("Remplacée")
 
   @impl true
   def handle_event("submit_appeal", %{"appeal" => %{"text" => text}}, socket) do
@@ -241,7 +275,7 @@ defmodule AmanogawaWeb.ContributionLive do
         <p class="text-text-muted">
           {gettext("Concernant :")} <span class="font-semibold text-text">{@event_label}</span>
         </p>
-        <p class="text-text-muted">{gettext("Statut :")} {@override.status}</p>
+        <p class="text-text-muted">{gettext("Statut :")} {status_label(@override.status)}</p>
         <p class="text-text-muted">{gettext("Proposé par")} {@author_name}</p>
 
         <.diff_view diff={@diff} />

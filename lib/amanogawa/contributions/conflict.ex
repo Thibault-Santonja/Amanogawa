@@ -12,6 +12,25 @@ defmodule Amanogawa.Contributions.Conflict do
   index): a repeated sync divergence on the same field refreshes this one
   row (`wikidata_value`, `detected_at`) rather than piling up duplicates.
 
+  ## Absent Wikidata value
+
+  `wikidata_value` is `NOT NULL`: when Wikidata carries NO value at all
+  for the field (e.g. it removed an end date the accepted override still
+  corrects), the absence is represented as `%{"absent" => true}`, the one
+  reserved payload shape no real field value can collide with (every real
+  payload carries at least a `"value"`, date, or coordinate key). Readers
+  resolve it back to `nil` (`Amanogawa.Contributions`' own
+  `from_conflict_value/1`) before releasing a field or refreshing a
+  snapshot.
+
+  ## System resolution
+
+  `:obsolete` is the SYSTEM resolution (`resolved_by: nil`): written when
+  the override's own lifecycle makes an open conflict moot (the override
+  left `:accepted`, or the sync observed the divergence has vanished),
+  never by a reviewer's explicit decision. Reviewers only ever write
+  `:kept_override` or `:adopted_wikidata`.
+
   `override_id` carries a foreign key (intra-context, both tables live in
   the `contributions` PG schema); `resolved_by` does not (same reasoning
   as `Amanogawa.Contributions.Override.author_id`).
@@ -28,7 +47,7 @@ defmodule Amanogawa.Contributions.Conflict do
 
   @type t :: %__MODULE__{}
   @type status :: :open | :resolved
-  @type resolution :: :kept_override | :adopted_wikidata
+  @type resolution :: :kept_override | :adopted_wikidata | :obsolete
 
   @schema_prefix "contributions"
   @primary_key {:id, Ecto.UUID, autogenerate: [version: 7]}
@@ -43,7 +62,7 @@ defmodule Amanogawa.Contributions.Conflict do
     field :wikidata_value, :map
     field :detected_at, :utc_datetime
     field :status, Ecto.Enum, values: [:open, :resolved], default: :open
-    field :resolution, Ecto.Enum, values: [:kept_override, :adopted_wikidata]
+    field :resolution, Ecto.Enum, values: [:kept_override, :adopted_wikidata, :obsolete]
     field :resolved_by, :binary_id
     field :resolved_at, :utc_datetime
 

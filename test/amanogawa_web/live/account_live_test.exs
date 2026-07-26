@@ -2,11 +2,23 @@ defmodule AmanogawaWeb.AccountLiveTest do
   use AmanogawaWeb.ConnCase, async: true
 
   import Amanogawa.AccountsFixtures
+  import Amanogawa.AtlasFixtures
+  import Mox
   import Phoenix.LiveViewTest
 
   alias Amanogawa.Accounts
   alias Amanogawa.Accounts.SessionToken
+  alias Amanogawa.Atlas
+  alias Amanogawa.Contributions
+  alias Amanogawa.Contributions.DecisionNotifierMock
   alias Amanogawa.Repo
+
+  setup :verify_on_exit!
+
+  setup do
+    stub(DecisionNotifierMock, :deliver, fn _email, _outcome, _message, _path, _locale -> :ok end)
+    :ok
+  end
 
   describe "mount + handle_params" do
     test "connected, /compte shows the email, creation date, and the current session", %{
@@ -51,7 +63,9 @@ defmodule AmanogawaWeb.AccountLiveTest do
         |> form("#display-name-form", %{"display_name" => %{"display_name" => taken}})
         |> render_submit()
 
-      assert html =~ "has already been taken"
+      # The changeset message is served TRANSLATED (i18n review finding):
+      # the default locale is fr.
+      assert html =~ "est déjà utilisé"
       assert Accounts.get_user!(user.id).display_name == nil
     end
 
@@ -186,6 +200,74 @@ defmodule AmanogawaWeb.AccountLiveTest do
 
       assert html =~ "ne correspond pas"
       assert Repo.aggregate(Amanogawa.Accounts.User, :count) == 1
+    end
+
+    test "M4, RGPD chain end to end: deleting a contributor anonymizes every trace, the public history stays coherent and the corrected value stays served",
+         %{conn: conn} do
+      author = user_fixture()
+      {:ok, author} = Accounts.set_display_name(author, unique_display_name())
+      reviewer = reviewer_fixture()
+      event = event_fixture(label_fr: "Ancien nom")
+
+      {:ok, override} =
+        Contributions.propose(
+          %{
+            kind: :field,
+            event_qid: event.qid,
+            field: :label_fr,
+            proposed_value: %{"value" => "Nom corrigé"},
+            source: "https://example.org/source"
+          },
+          author.id
+        )
+
+      {:ok, _accepted} = Contributions.accept_override(override.id, reviewer, "Source vérifiée")
+
+      # Deletion goes through the REAL account form, not the domain
+      # function directly: the whole chain (AccountLive ->
+      # Contributions.anonymize_user/1 -> Accounts.delete_user/1) is what
+      # this test covers.
+      conn = log_in_user(conn, author)
+      {:ok, lv, _html} = live(conn, ~p"/compte")
+
+      lv |> element("button", "Supprimer mon compte") |> render_click()
+
+      lv
+      |> form("#delete-account-form", %{"confirmation" => author.email})
+      |> render_submit()
+
+      assert_redirect(lv, "/")
+
+      # The account is gone; the contribution's factual content survives,
+      # attribution does not.
+      assert Accounts.get_user_by_email(author.email) == nil
+
+      reloaded = Contributions.get_override(override.id)
+      assert reloaded.author_id == nil
+      assert reloaded.status == :accepted
+
+      revisions = Contributions.list_revisions(override.id)
+      assert Enum.any?(revisions, &(&1.action == :anonymized))
+      assert Enum.find(revisions, &(&1.action == :proposed)).actor_id == nil
+      # The reviewer's own attribution is untouched.
+      assert Enum.find(revisions, &(&1.action == :accepted)).actor_id == reviewer.id
+
+      # Public feed and detail page both render "compte supprimé", never
+      # the deleted account's pseudonym or email.
+      anon_conn = build_conn()
+      {:ok, _feed_lv, feed_html} = live(anon_conn, ~p"/contributions")
+      assert feed_html =~ "compte supprimé"
+      refute feed_html =~ author.email
+
+      {:ok, _detail_lv, detail_html} = live(anon_conn, ~p"/contributions/#{override.id}")
+      assert detail_html =~ "compte supprimé"
+      refute detail_html =~ author.display_name
+      refute detail_html =~ author.email
+
+      # The corrected value is still what the map serves.
+      assert Atlas.get_event_by_qid(event.qid).label_fr == "Nom corrigé"
+      {:ok, _explore_lv, explore_html} = live(anon_conn, ~p"/?sel=#{event.qid}")
+      assert explore_html =~ "Nom corrigé"
     end
   end
 end
