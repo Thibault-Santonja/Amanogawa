@@ -146,7 +146,7 @@ defmodule AmanogawaWeb.CoreComponentsTest do
       assert html =~ ~s(id="user_email")
       assert html =~ ~s(name="user[email]")
       assert html =~ ~s(value="not-an-email")
-      assert html =~ "is invalid"
+      assert html =~ "est invalide"
     end
   end
 
@@ -177,24 +177,26 @@ defmodule AmanogawaWeb.CoreComponentsTest do
   end
 
   describe "translate_error/1" do
+    # The default locale is fr and the errors domain is fully translated
+    # (i18n review finding): known changeset messages come back in French.
     test "translates a simple message" do
-      assert CoreComponents.translate_error({"is invalid", []}) == "is invalid"
+      assert CoreComponents.translate_error({"is invalid", []}) == "est invalide"
     end
 
-    test "translates a message with count interpolation" do
+    test "translates a message with count interpolation and pluralization" do
       msg = "should be at least %{count} character(s)"
 
       assert CoreComponents.translate_error({msg, count: 3}) ==
-               "should be at least 3 character(s)"
+               "devrait comporter au moins 3 caractères"
     end
   end
 
   describe "translate_errors/2" do
-    test "translates all errors for the given field" do
+    test "translates all errors for the given field, untranslated messages passing through" do
       errors = [name: {"can't be blank", []}, name: {"is too short", []}, age: {"nope", []}]
 
       assert CoreComponents.translate_errors(errors, :name) ==
-               ["can't be blank", "is too short"]
+               ["ne peut pas être vide", "is too short"]
     end
   end
 end

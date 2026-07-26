@@ -47,6 +47,8 @@ defmodule Amanogawa.Accounts do
     before a token is ever generated.
   """
 
+  import Ecto.Query
+
   require Logger
 
   alias Amanogawa.Accounts.MagicLink
@@ -151,6 +153,58 @@ defmodule Amanogawa.Accounts do
   @doc "Fetches a user by id, raising if none exists."
   @spec get_user!(Ecto.UUID.t()) :: User.t()
   def get_user!(id), do: Repo.get!(User, id)
+
+  @doc """
+  `true` when `user`'s role is `:reviewer` (issue #034, F08 overview's
+  moderation role, promoted manually in the database). `Amanogawa.
+  Accounts.Scope.for_user/1` is the mechanism the web layer actually
+  gates on (`AmanogawaWeb.UserAuth.require_reviewer/2`); this function is
+  the primitive it is built from, exposed on the facade for domain
+  callers that hold a `User` rather than a `Scope` (issue #035's
+  `Amanogawa.Contributions.accept_override/3` and `resolve_conflict/3`,
+  which verify the role independently of the router, per
+  `.claude/rules/security.md`: "revérifié côté domaine, jamais seulement
+  dans le routeur").
+  """
+  @spec reviewer?(User.t() | nil) :: boolean()
+  def reviewer?(%User{role: :reviewer}), do: true
+  def reviewer?(%User{}), do: false
+  def reviewer?(nil), do: false
+
+  @doc """
+  Sets `user`'s public display name (issue #034, F08 overview's "colonne
+  display_name... exigée avant la première proposition, modifiable depuis
+  /compte"): `{:ok, user}` on a valid, available name (3-40 characters,
+  unique case-insensitively, `Amanogawa.Accounts.User.
+  display_name_changeset/2`), `{:error, changeset}` otherwise (including a
+  name already taken by another account).
+  """
+  @spec set_display_name(User.t(), String.t()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
+  def set_display_name(%User{} = user, display_name) do
+    user
+    |> User.display_name_changeset(%{display_name: display_name})
+    |> Repo.update()
+  end
+
+  @doc """
+  Resolves every user id in `ids` to its public display name (issue #034:
+  the mechanism the web layer uses to attribute a contribution publicly,
+  `Amanogawa.Contributions`' overrides and revisions carry only an
+  `author_id`/`actor_id`, never a name, never an email): one query,
+  `%{user_id => display_name | nil}`, `nil` for an id with no display
+  name set yet (never seen, per this context's minimal-data principle,
+  as "compte supprimé" rather than raising) and for an id not found at
+  all (an anonymized or deleted account, issue #038): the caller decides
+  how to render either case, this facade never assumes.
+  """
+  @spec display_names_by_ids([Ecto.UUID.t()]) :: %{Ecto.UUID.t() => String.t() | nil}
+  def display_names_by_ids(ids) when is_list(ids) do
+    User
+    |> where([u], u.id in ^ids)
+    |> select([u], {u.id, u.display_name})
+    |> Repo.all()
+    |> Map.new()
+  end
 
   @doc "Fetches a user by email (normalized before lookup), or `nil`."
   @spec get_user_by_email(String.t()) :: User.t() | nil

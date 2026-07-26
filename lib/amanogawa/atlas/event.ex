@@ -2,8 +2,11 @@ defmodule Amanogawa.Atlas.Event do
   @moduledoc """
   A historical event, the read model row served to the UI.
 
-  Identified by its Wikidata QID (unique, upsert key); the internal `id` is
-  a UUID v7 so ids are naturally time-ordered on insert. Begin/end dates are
+  Identified by its Wikidata QID (unique, upsert key), or, for a
+  community-contributed event (issue #034), a local `L<uuid hex>` id in the
+  same `qid` column (`origin: :contribution`, never touched by a Wikidata
+  sync, see `@qid_regex`). The internal `id` is a UUID v7 so ids are
+  naturally time-ordered on insert. Begin/end dates are
   stored as flat `begin_*`/`end_*` columns (see ADR 0006): `begin_date/1` and
   `end_date/1` rebuild an `Amanogawa.HistoricalDate` from them, and
   `flatten_date/2` does the inverse, used both by ingestion (to build
@@ -53,8 +56,23 @@ defmodule Amanogawa.Atlas.Event do
     field :end_calendar, Ecto.Enum, values: [:gregorian, :julian]
 
     field :geom, Geo.PostGIS.Geometry
-    field :location_source, Ecto.Enum, values: [:direct, :place, :country]
+    field :location_source, Ecto.Enum, values: [:direct, :place, :country, :contribution]
     field :sitelink_count, :integer, default: 0
+
+    # Layered-data resolution (issue #034, F08 overview): which business
+    # field names currently carry an accepted contribution override rather
+    # than their Wikidata-sourced value. Read by
+    # `Amanogawa.Atlas.upsert_events/1` to decide, column by column,
+    # whether a sync keeps the value in place or takes Wikidata's incoming
+    # one; written only through `Amanogawa.Atlas.apply_field_override/3`
+    # and `release_field_override/3`, never directly.
+    field :overridden_fields, {:array, :string}, default: []
+
+    # `:wikidata` for every event imported from Wikidata (the default),
+    # `:contribution` for one born from an accepted `:new_event` proposal
+    # (`Amanogawa.Atlas.create_contributed_event/1`): its `qid` is then a
+    # local `L<uuid hex>` identifier, never a real Wikidata QID.
+    field :origin, Ecto.Enum, values: [:wikidata, :contribution], default: :wikidata
 
     # Wikipedia enrichment (#012): `extract_fetched_at` is the cache
     # freshness marker (set on every attempt, successful or not, see
@@ -93,7 +111,9 @@ defmodule Amanogawa.Atlas.Event do
     :sitelink_count,
     :extract_fetched_at,
     :thumbnail_url,
-    :extract_attribution
+    :extract_attribution,
+    :overridden_fields,
+    :origin
   ]
 
   # Cast by both `changeset/2` (fixtures, general-purpose writes) and
@@ -107,13 +127,29 @@ defmodule Amanogawa.Atlas.Event do
     :extract_fetched_at
   ]
 
-  @qid_regex ~r/\AQ\d+\z/
+  # `Q\d+`: a real Wikidata QID. `L` followed by 32 lowercase hex
+  # characters (a UUID with its dashes stripped): the local identifier a
+  # community-contributed event gets from
+  # `Amanogawa.Atlas.create_contributed_event/1` (issue #034, F08
+  # overview). The `L` prefix guarantees this format never collides with
+  # `Q\d+`, so a community event is structurally invisible to
+  # `Amanogawa.Atlas.upsert_events/1`'s `qid` conflict target: a Wikidata
+  # sync can never touch it.
+  @qid_regex ~r/\A(Q\d+|L[0-9a-f]{32})\z/
+
+  # Bound on the free-text descriptions (security review, minor 2): the
+  # community write path (`Amanogawa.Atlas.create_contributed_event/1`,
+  # fed by an accepted `:new_event` proposal) goes through `changeset/2`,
+  # so the invariant is enforced here too, not only on the proposal
+  # payload (`Amanogawa.Contributions.Override`).
+  @description_max_length 4000
 
   @doc """
   Builds and validates a changeset.
 
-  The QID must match `Q\\d+`; `begin_*`/`end_*` coherence (precision-driven
-  month/day truncation) is enforced by delegating to
+  The QID must match `Q\\d+` (Wikidata) or `L<uuid hex>` (community
+  contribution, see `@qid_regex` above); `begin_*`/`end_*` coherence
+  (precision-driven month/day truncation) is enforced by delegating to
   `Amanogawa.HistoricalDate.changeset/2` for each of the two date groups,
   so the invariant is defined in exactly one place. `end_*` is left alone
   when `end_year` is nil (most events are punctual). The geometry, when
@@ -136,8 +172,12 @@ defmodule Amanogawa.Atlas.Event do
     event
     |> cast(attrs, @castable_fields)
     |> validate_required([:qid, :begin_year])
-    |> validate_format(:qid, @qid_regex, message: "must be a Wikidata QID, e.g. Q12345")
+    |> validate_format(:qid, @qid_regex,
+      message: "must be a Wikidata QID (e.g. Q12345) or a local id (e.g. L<uuid hex>)"
+    )
     |> unique_constraint(:qid)
+    |> validate_length(:description_fr, max: @description_max_length)
+    |> validate_length(:description_en, max: @description_max_length)
     |> apply_historical_date_invariants(:begin)
     |> apply_historical_date_invariants(:end)
     |> validate_geom_srid()
@@ -167,6 +207,27 @@ defmodule Amanogawa.Atlas.Event do
     |> cast(attrs, @summary_fields)
     |> validate_wikimedia_url(:thumbnail_url, &WikimediaUrl.valid_thumbnail?/1)
     |> validate_attribution()
+  end
+
+  @doc """
+  Builds the changeset `Amanogawa.Atlas.apply_field_override/3` and
+  `release_field_override/3` write through (issue #034): casts exactly
+  `attrs`' keys (the columns
+  `Amanogawa.Atlas.OverridableField` returns for one business
+  field) plus `overridden_fields`, and re-validates the same domain
+  invariants as `changeset/2` for the two groups this could touch
+  (`begin_*`/`end_*` coherence, geometry SRID): a contribution override
+  is held to exactly the same rules as any other write path, never a
+  looser one.
+  """
+  @spec override_changeset(t(), map(), [String.t()]) :: Ecto.Changeset.t()
+  def override_changeset(event, attrs, overridden_fields) do
+    event
+    |> cast(attrs, Map.keys(attrs))
+    |> put_change(:overridden_fields, overridden_fields)
+    |> apply_historical_date_invariants(:begin)
+    |> apply_historical_date_invariants(:end)
+    |> validate_geom_srid()
   end
 
   @doc """

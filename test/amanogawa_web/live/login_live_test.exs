@@ -104,7 +104,7 @@ defmodule AmanogawaWeb.LoginLiveTest do
         |> form("#login-form", login: %{email: "sans-arobase"})
         |> render_submit()
 
-      assert html =~ "must be a valid email address"
+      assert html =~ "doit être une adresse email valide"
       assert has_element?(lv, "#login-form")
       refute has_element?(lv, "#magic-link-sent")
     end

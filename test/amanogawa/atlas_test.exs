@@ -779,6 +779,184 @@ defmodule Amanogawa.AtlasTest do
     end
   end
 
+  describe "apply_field_override/3 and release_field_override/3 (issue #034)" do
+    test "apply_field_override/3 writes the value, marks the field, and release_field_override/3 restores it exactly" do
+      event = event_fixture(label_fr: "Ancien nom")
+
+      assert {:ok, updated} =
+               Atlas.apply_field_override(event.qid, :label_fr, %{"value" => "Nouveau nom"})
+
+      assert updated.label_fr == "Nouveau nom"
+      assert updated.overridden_fields == ["label_fr"]
+
+      assert {:ok, released} =
+               Atlas.release_field_override(event.qid, :label_fr, %{"value" => "Ancien nom"})
+
+      assert released.label_fr == "Ancien nom"
+      assert released.overridden_fields == []
+
+      # Indistinguishable from an event never corrected.
+      assert Map.take(released, [:label_fr, :overridden_fields]) ==
+               Map.take(event, [:label_fr, :overridden_fields])
+    end
+
+    test "apply_field_override/3 on :position forces location_source to :contribution regardless of payload" do
+      event = event_fixture(location_source: :place)
+
+      assert {:ok, updated} =
+               Atlas.apply_field_override(event.qid, :position, %{"lon" => 10.0, "lat" => 20.0})
+
+      assert updated.geom == %Geo.Point{coordinates: {10.0, 20.0}, srid: 4326}
+      assert updated.location_source == :contribution
+      assert updated.overridden_fields == ["position"]
+    end
+
+    test "release_field_override/3 on :position restores location_source from the payload" do
+      event = event_fixture(location_source: :direct)
+      {:ok, _} = Atlas.apply_field_override(event.qid, :position, %{"lon" => 1.0, "lat" => 2.0})
+
+      assert {:ok, released} =
+               Atlas.release_field_override(event.qid, :position, %{
+                 "lon" => 5.0,
+                 "lat" => 6.0,
+                 "location_source" => "place"
+               })
+
+      assert released.location_source == :place
+      assert released.overridden_fields == []
+    end
+
+    test "returns {:error, :not_found} for an unknown qid" do
+      assert Atlas.apply_field_override("Q999999999", :label_fr, %{"value" => "X"}) ==
+               {:error, :not_found}
+
+      assert Atlas.release_field_override("Q999999999", :label_fr, %{"value" => "X"}) ==
+               {:error, :not_found}
+    end
+
+    test "label_en and end_date apply/release round trip exactly like label_fr/begin_date" do
+      event = event_fixture(label_en: "Old", end_year: nil)
+
+      assert {:ok, updated} =
+               Atlas.apply_field_override(event.qid, :label_en, %{"value" => "New"})
+
+      assert updated.label_en == "New"
+
+      assert {:ok, released} =
+               Atlas.release_field_override(event.qid, :label_en, %{"value" => "Old"})
+
+      assert released.label_en == "Old"
+
+      end_date_payload = %{
+        "year" => 1850,
+        "month" => nil,
+        "day" => nil,
+        "precision" => 9,
+        "calendar" => "gregorian"
+      }
+
+      assert {:ok, updated} = Atlas.apply_field_override(event.qid, :end_date, end_date_payload)
+      assert updated.end_year == 1850
+      assert updated.overridden_fields == ["end_date"]
+
+      # `nil` (no end date at all, `Amanogawa.Contributions`' "absent
+      # value" convention): releasing back to "no end date" must not
+      # crash on `Amanogawa.HistoricalDate`'s required-year invariant.
+      assert {:ok, released} = Atlas.release_field_override(event.qid, :end_date, nil)
+      assert released.end_year == nil
+      assert released.overridden_fields == []
+
+      assert {:ok, applied_nil} = Atlas.apply_field_override(event.qid, :end_date, nil)
+      assert applied_nil.end_year == nil
+      assert applied_nil.overridden_fields == ["end_date"]
+    end
+  end
+
+  describe "create_contributed_event/1 (issue #034)" do
+    test "generates an L<uuid hex> qid, sets origin: :contribution, and validates like any other event" do
+      assert {:ok, event} =
+               Atlas.create_contributed_event(%{
+                 label_fr: "Evenement communautaire",
+                 begin_year: 1900,
+                 begin_precision: 9,
+                 geom: %Geo.Point{coordinates: {2.0, 48.0}, srid: 4326},
+                 location_source: :contribution
+               })
+
+      assert event.origin == :contribution
+      assert Regex.match?(~r/\AL[0-9a-f]{32}\z/, event.qid)
+      assert Atlas.get_event_by_qid(event.qid).label_fr == "Evenement communautaire"
+    end
+
+    test "an invalid payload (missing begin_year) is rejected like any other event write" do
+      assert {:error, changeset} = Atlas.create_contributed_event(%{label_fr: "Incomplet"})
+      assert "can't be blank" in errors_on(changeset).begin_year
+    end
+  end
+
+  describe "Event.changeset/2 qid format (issue #034)" do
+    test "accepts a Wikidata QID and a local L<uuid hex> id, rejects a third-party format" do
+      valid_local = "L" <> String.duplicate("a", 32)
+
+      assert %Ecto.Changeset{valid?: true} =
+               Event.changeset(%Event{}, event_attrs(qid: "Q123"))
+
+      assert %Ecto.Changeset{valid?: true} =
+               Event.changeset(%Event{}, event_attrs(qid: valid_local, origin: :contribution))
+
+      for invalid <- ["X1", "Q12x", "L" <> String.duplicate("a", 31)] do
+        assert %Ecto.Changeset{valid?: false} =
+                 Event.changeset(%Event{}, event_attrs(qid: invalid))
+      end
+    end
+  end
+
+  describe "upsert_events/1 preserves overridden columns (issue #035)" do
+    test "a marked field is preserved, an unmarked field is replaced, in the same upsert statement" do
+      event =
+        event_fixture(
+          label_fr: "Corrige",
+          begin_year: 1000,
+          begin_precision: 9,
+          begin_month: nil,
+          begin_day: nil
+        )
+
+      event
+      |> Ecto.Changeset.change(overridden_fields: ["label_fr"])
+      |> Repo.update!()
+
+      incoming =
+        event_attrs(
+          qid: event.qid,
+          label_fr: "Wikidata voudrait ceci",
+          begin_year: 1500,
+          begin_precision: 9
+        )
+
+      assert {:ok, %{upserted: 1}} = Atlas.upsert_events([incoming])
+
+      result = Atlas.get_event_by_qid(event.qid)
+      assert result.label_fr == "Corrige"
+      assert result.begin_year == 1500
+      assert result.overridden_fields == ["label_fr"]
+    end
+
+    test "overridden_fields and origin are never touched by a Wikidata upsert" do
+      event = event_fixture()
+
+      event
+      |> Ecto.Changeset.change(overridden_fields: ["label_fr"], origin: :contribution)
+      |> Repo.update!()
+
+      {:ok, _} = Atlas.upsert_events([event_attrs(qid: event.qid)])
+
+      result = Atlas.get_event_by_qid(event.qid)
+      assert result.overridden_fields == ["label_fr"]
+      assert result.origin == :contribution
+    end
+  end
+
   describe "indexes and constraints" do
     test "qid has a unique constraint" do
       qid = hd(unique_qids(1))

@@ -111,11 +111,34 @@ defmodule Amanogawa.Atlas.EventTest do
   end
 
   describe "changeset/2 error cases" do
+    test "a description longer than 4000 characters is rejected (community write path bound)" do
+      attrs = Map.merge(@valid_attrs, %{description_fr: String.duplicate("a", 4001)})
+      changeset = Event.changeset(%Event{}, attrs)
+
+      refute changeset.valid?
+      assert "should be at most 4000 character(s)" in errors_on(changeset).description_fr
+
+      attrs = Map.merge(@valid_attrs, %{description_en: String.duplicate("a", 4001)})
+      changeset = Event.changeset(%Event{}, attrs)
+
+      refute changeset.valid?
+      assert "should be at most 4000 character(s)" in errors_on(changeset).description_en
+    end
+
+    test "a description at exactly 4000 characters is accepted" do
+      attrs = Map.merge(@valid_attrs, %{description_fr: String.duplicate("a", 4000)})
+
+      assert Event.changeset(%Event{}, attrs).valid?
+    end
+
     test "a malformed QID is rejected" do
       changeset = Event.changeset(%Event{}, %{@valid_attrs | qid: "not-a-qid"})
 
       refute changeset.valid?
-      assert "must be a Wikidata QID, e.g. Q12345" in errors_on(changeset).qid
+
+      assert "must be a Wikidata QID (e.g. Q12345) or a local id (e.g. L<uuid hex>)" in errors_on(
+               changeset
+             ).qid
     end
 
     test "begin_month with begin_precision 9 is truncated, not rejected (same rule as #006)" do

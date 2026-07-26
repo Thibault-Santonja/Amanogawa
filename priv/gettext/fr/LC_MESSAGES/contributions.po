@@ -1,0 +1,52 @@
+## "msgid"s in this file come from POT (.pot) files.
+###
+### Do not add, change, or remove "msgid"s manually here as
+### they're tied to the ones in the corresponding POT file
+### (with the same domain).
+###
+### Use "mix gettext.extract --merge" or "mix gettext.merge"
+### to merge POT files into PO files.
+msgid ""
+msgstr ""
+"Language: fr\n"
+"Plural-Forms: nplurals=2; plural=(n>1);\n"
+
+#: lib/amanogawa/contributions/decision_notifier/email.ex:53
+#, elixir-autogen, elixir-format
+msgid "Votre appel a été accepté"
+msgstr "Votre appel a été accepté"
+
+#: lib/amanogawa/contributions/decision_notifier/email.ex:93
+#, elixir-autogen, elixir-format
+msgid "Votre appel a été examiné et accepté : votre proposition est maintenant acceptée.\n\nMotif : %{message}\n\nVous pouvez consulter la contribution ici :\n\n%{url}\n"
+msgstr "Votre appel a été examiné et accepté : votre proposition est maintenant acceptée.\n\nMotif : %{message}\n\nVous pouvez consulter la contribution ici :\n\n%{url}\n"
+
+#: lib/amanogawa/contributions/decision_notifier/email.ex:110
+#, elixir-autogen, elixir-format
+msgid "Votre appel a été examiné et rejeté. Cette décision est définitive.\n\nMotif : %{message}\n\nVous pouvez consulter la contribution ici :\n\n%{url}\n"
+msgstr "Votre appel a été examiné et rejeté. Cette décision est définitive.\n\nMotif : %{message}\n\nVous pouvez consulter la contribution ici :\n\n%{url}\n"
+
+#: lib/amanogawa/contributions/decision_notifier/email.ex:56
+#, elixir-autogen, elixir-format
+msgid "Votre appel a été rejeté"
+msgstr "Votre appel a été rejeté"
+
+#: lib/amanogawa/contributions/decision_notifier/email.ex:49
+#, elixir-autogen, elixir-format
+msgid "Votre proposition a été acceptée"
+msgstr "Votre proposition a été acceptée"
+
+#: lib/amanogawa/contributions/decision_notifier/email.ex:59
+#, elixir-autogen, elixir-format
+msgid "Votre proposition a été acceptée par un relecteur.\n\nMotif : %{message}\n\nVous pouvez consulter la contribution ici :\n\n%{url}\n"
+msgstr "Votre proposition a été acceptée par un relecteur.\n\nMotif : %{message}\n\nVous pouvez consulter la contribution ici :\n\n%{url}\n"
+
+#: lib/amanogawa/contributions/decision_notifier/email.ex:50
+#, elixir-autogen, elixir-format
+msgid "Votre proposition a été rejetée"
+msgstr "Votre proposition a été rejetée"
+
+#: lib/amanogawa/contributions/decision_notifier/email.ex:76
+#, elixir-autogen, elixir-format
+msgid "Votre proposition a été rejetée par un relecteur.\n\nMotif : %{message}\n\nVous pouvez consulter la contribution et, si besoin, y répondre une fois ici :\n\n%{url}\n"
+msgstr "Votre proposition a été rejetée par un relecteur.\n\nMotif : %{message}\n\nVous pouvez consulter la contribution et, si besoin, y répondre une fois ici :\n\n%{url}\n"

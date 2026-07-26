@@ -52,7 +52,11 @@ defmodule Amanogawa.Ingestion.Workers.ImportEventsTest do
                "pages" => 3,
                "events_fetched" => 7,
                "events_upserted" => 6,
-               "events_rejected" => 1
+               "events_rejected" => 1,
+               "sync_unchanged" => 0,
+               "sync_superseded" => 0,
+               "sync_conflicts_opened" => 0,
+               "sync_conflicts_refreshed" => 0
              }
 
       assert Atlas.count_events() == 6

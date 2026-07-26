@@ -17,6 +17,7 @@ defmodule Amanogawa.Atlas do
   alias Amanogawa.Atlas.Event
   alias Amanogawa.Atlas.EventLink
   alias Amanogawa.Atlas.EventQueries
+  alias Amanogawa.Atlas.OverridableField
   alias Amanogawa.Atlas.Polity
   alias Amanogawa.Atlas.PolityColor
   alias Amanogawa.Atlas.TimeScale
@@ -42,35 +43,19 @@ defmodule Amanogawa.Atlas do
 
   @wikipedia_license "CC BY-SA 4.0"
 
-  # Columns replaced on conflict when upserting events from Wikidata.
-  # Deliberately excludes :id, :inserted_at, :qid (the conflict target) and
-  # the Wikipedia enrichment columns (extract_fr, extract_en, thumbnail_url,
-  # extract_attribution, extract_fetched_at, filled by #012): a Wikidata
-  # upsert must never erase enrichment data written by
-  # `Amanogawa.Ingestion.Workers.EnrichSummaries`.
-  @wikidata_columns [
-    :label_fr,
-    :label_en,
-    :description_fr,
-    :description_en,
-    :wiki_url_fr,
-    :wiki_url_en,
-    :kind,
-    :begin_year,
-    :begin_month,
-    :begin_day,
-    :begin_precision,
-    :begin_calendar,
-    :end_year,
-    :end_month,
-    :end_day,
-    :end_precision,
-    :end_calendar,
-    :geom,
-    :location_source,
-    :sitelink_count,
-    :updated_at
-  ]
+  # Columns replaced on conflict when upserting events from Wikidata,
+  # column by column, per `wikidata_upsert_conflict_query/0` below.
+  # Deliberately excludes :id, :inserted_at, :qid (the conflict target),
+  # the Wikipedia enrichment columns (extract_fr, extract_en,
+  # thumbnail_url, extract_attribution, extract_fetched_at, filled by
+  # #012: a Wikidata upsert must never erase enrichment data written by
+  # `Amanogawa.Ingestion.Workers.EnrichSummaries`), and overridden_fields/
+  # origin (issue #034: written only by `apply_field_override/3` and
+  # `release_field_override/3`, never by a Wikidata upsert). Of the
+  # remaining columns, the fourteen owned by an overridable business
+  # field (`Amanogawa.Atlas.OverridableField`) are replaced
+  # conditionally (issue #035, see `upsert_events/1`'s moduledoc), the
+  # other seven unconditionally.
 
   @doc """
   Upserts a batch of normalized event attribute maps (flat, including
@@ -80,7 +65,7 @@ defmodule Amanogawa.Atlas do
   business column unchanged. Rows are inserted in chunks of
   #{@max_batch_size} to stay under PostgreSQL's parameter limit. Existing
   enrichment columns (Wikipedia extracts) are preserved: see
-  `@wikidata_columns`.
+  `wikidata_upsert_conflict_query/0`.
 
   Rows are deduplicated on `:qid` (first occurrence wins) before insertion:
   PostgreSQL's `ON CONFLICT DO UPDATE` refuses to affect the same row twice
@@ -91,6 +76,23 @@ defmodule Amanogawa.Atlas do
   hand in already-normalized data (as produced by the ingestion SPARQL
   decoder). Database constraints (QID format is not enforced here, only
   uniqueness) remain the safety net.
+
+  ## Layered-data preservation (issue #035, F08 overview)
+
+  The `ON CONFLICT DO UPDATE` clause is conditional, column by column, on
+  `overridden_fields` (`Amanogawa.Atlas.OverridableField`'s
+  business-field-owned columns only): for each such column, the existing
+  (target) row's value is kept in place when its owning field name is a
+  member of the existing row's `overridden_fields`, and the incoming
+  (`EXCLUDED`) Wikidata value is taken otherwise. Columns owned by no
+  overridable field (`description_*`, `wiki_url_*`, `kind`,
+  `sitelink_count`, `updated_at`) are always replaced, exactly as before.
+  This preservation is atomic and per row, in the very same `UPDATE`
+  statement as the upsert itself: there is no window where a corrected
+  value could be overwritten and then reapplied. `overridden_fields` and
+  `origin` are never part of this `SET` clause at all (a Wikidata upsert
+  never touches either), so they always survive a sync untouched, whoever
+  wrote them last (`apply_field_override/3`, `release_field_override/3`).
   """
   @spec upsert_events([map()]) :: {:ok, %{upserted: non_neg_integer()}}
   def upsert_events(events) when is_list(events) do
@@ -208,6 +210,19 @@ defmodule Amanogawa.Atlas do
   end
 
   @doc """
+  The batched read of `get_event_by_qid/1` (quality review, N+1 finding:
+  a page of contributions resolves every referenced event in ONE query):
+  a map keyed by QID, an unknown QID simply absent from it.
+  """
+  @spec list_events_by_qids([String.t()]) :: %{String.t() => Event.t()}
+  def list_events_by_qids(qids) when is_list(qids) do
+    Event
+    |> where([e], e.qid in ^qids)
+    |> Repo.all()
+    |> Map.new(&{&1.qid, &1})
+  end
+
+  @doc """
   Fetches the hover card / summary of `qid` (issue #016): `{:ok, summary}`
   with `qid`, `label` (fr, falling back to en), `extract` (fr, falling back
   to en, plain text as stored by #012, `nil` when neither exists yet),
@@ -257,6 +272,98 @@ defmodule Amanogawa.Atlas do
   (Ingestion) never reach into Atlas internals.
   """
   defdelegate flatten_date(date, group), to: Event
+
+  @doc """
+  Applies an ACCEPTED contribution override to `qid`'s `field` (issue
+  #034, F08 overview's "colonne résolue... maintenue par le contexte
+  Contributions via l'API publique d'Atlas"): writes `value` (a jsonb
+  payload shaped as `Amanogawa.Contributions.Override` stores it, see its
+  moduledoc) into the business columns `field` owns
+  (`Amanogawa.Atlas.OverridableField`), and marks `field` in
+  `overridden_fields` so `upsert_events/1` preserves it on every future
+  sync.
+
+  This is the ONLY door `Amanogawa.Contributions` uses to reach into
+  `atlas.events`: it never calls `Amanogawa.Repo` nor any of this
+  context's internal modules directly (`.claude/rules/architecture.md`).
+
+  Returns `{:ok, event}` with the fully resolved row, or
+  `{:error, :not_found}` for an unknown `qid`; `{:error, changeset}` if
+  the resulting row would violate a domain invariant (should not happen
+  for a value that already passed `Amanogawa.Contributions.Override`'s own
+  changeset, but defended here too rather than trusted blindly).
+
+  Nothing is lost: the value this call replaces is expected to already be
+  snapshotted by the caller (`Amanogawa.Contributions.Override.
+  wikidata_value_at_acceptance`) before this is invoked, so
+  `release_field_override/3` can always restore it later.
+  """
+  @spec apply_field_override(String.t(), OverridableField.field(), map()) ::
+          {:ok, Event.t()} | {:error, :not_found | Ecto.Changeset.t()}
+  def apply_field_override(qid, field, value) do
+    with_event(qid, fn event ->
+      attrs = OverridableField.to_applied_attrs(field, value)
+      overridden_fields = Enum.uniq([Atom.to_string(field) | event.overridden_fields])
+
+      event
+      |> Event.override_changeset(attrs, overridden_fields)
+      |> Repo.update()
+    end)
+  end
+
+  @doc """
+  Releases `field` on `qid` back to a Wikidata-sourced value (issue #034:
+  used both when a reviewer directly reverses an acceptance and, in issue
+  #035, when a sync divergence turns out to mean "Wikidata rejoined the
+  correction"): writes `wikidata_value` (same payload shape as
+  `apply_field_override/3`'s `value`, but see
+  `Amanogawa.Atlas.OverridableField.to_released_attrs/2` for how
+  `:position` differs) into `field`'s columns and removes `field` from
+  `overridden_fields`, so the event becomes indistinguishable from one
+  never corrected.
+
+  Same return shape and boundary contract as `apply_field_override/3`.
+  """
+  @spec release_field_override(String.t(), OverridableField.field(), map()) ::
+          {:ok, Event.t()} | {:error, :not_found | Ecto.Changeset.t()}
+  def release_field_override(qid, field, wikidata_value) do
+    with_event(qid, fn event ->
+      attrs = OverridableField.to_released_attrs(field, wikidata_value)
+      overridden_fields = List.delete(event.overridden_fields, Atom.to_string(field))
+
+      event
+      |> Event.override_changeset(attrs, overridden_fields)
+      |> Repo.update()
+    end)
+  end
+
+  @doc """
+  Creates an event of community origin (issue #034, F08 overview's
+  "nouveaux événements"): generates a fresh local identifier
+  (`L<uuid hex>`, `Amanogawa.Atlas.Event`'s extended `qid` format, never
+  colliding with a real Wikidata QID so `upsert_events/1`'s `qid` conflict
+  target never touches it), sets `origin: :contribution`, and validates
+  `attrs` through the same `Amanogawa.Atlas.Event.changeset/2` every other
+  event write goes through.
+
+  `attrs` carries the proposal's business fields (`label_fr`/`label_en`,
+  `begin_year`/`begin_month`/`begin_day`/`begin_precision`/
+  `begin_calendar`, `geom`, `description_fr`/`description_en`, optional);
+  any `qid` or `origin` given is overwritten, this function is the single
+  source of truth for both.
+  """
+  @spec create_contributed_event(map()) :: {:ok, Event.t()} | {:error, Ecto.Changeset.t()}
+  def create_contributed_event(attrs) do
+    attrs =
+      attrs
+      |> Map.new(fn {key, value} -> {atom_key(key), value} end)
+      |> Map.put(:qid, generate_local_qid())
+      |> Map.put(:origin, :contribution)
+
+    %Event{}
+    |> Event.changeset(attrs)
+    |> Repo.insert()
+  end
 
   @doc """
   Upserts a `Amanogawa.Atlas.Polity` keyed by its natural key `(name,
@@ -566,12 +673,135 @@ defmodule Amanogawa.Atlas do
   defp insert_event_batch(batch) do
     {count, _} =
       Repo.insert_all(Event, batch,
-        on_conflict: {:replace, @wikidata_columns},
+        on_conflict: wikidata_upsert_conflict_query(),
         conflict_target: :qid
       )
 
     count
   end
+
+  # Built once per call rather than hoisted to a module attribute: an Ecto
+  # query referencing a binding (`e`) cannot itself be a module attribute
+  # (it would need to be evaluated at compile time before the schema
+  # macros below it run); the cost is trivial next to the query it backs.
+  #
+  # Every column below is a Wikidata-sourced business column; the seven
+  # with no owning overridable field (`Amanogawa.Atlas.OverridableField`)
+  # keep the plain `EXCLUDED.<column>` replacement `insert_event_batch/1`
+  # always used; the fourteen columns owned by `:label_fr`, `:label_en`,
+  # `:begin_date`, `:end_date` or `:position` are wrapped in the `CASE
+  # WHEN <field> = ANY(overridden_fields)` guard documented on
+  # `upsert_events/1`. `overridden_fields` and `origin` are deliberately
+  # absent from this `SET` list entirely: a Wikidata upsert never writes
+  # either.
+  defp wikidata_upsert_conflict_query do
+    from(e in Event,
+      update: [
+        set: [
+          label_fr:
+            fragment(
+              "CASE WHEN 'label_fr' = ANY(?) THEN ? ELSE EXCLUDED.label_fr END",
+              e.overridden_fields,
+              e.label_fr
+            ),
+          label_en:
+            fragment(
+              "CASE WHEN 'label_en' = ANY(?) THEN ? ELSE EXCLUDED.label_en END",
+              e.overridden_fields,
+              e.label_en
+            ),
+          description_fr: fragment("EXCLUDED.description_fr"),
+          description_en: fragment("EXCLUDED.description_en"),
+          wiki_url_fr: fragment("EXCLUDED.wiki_url_fr"),
+          wiki_url_en: fragment("EXCLUDED.wiki_url_en"),
+          kind: fragment("EXCLUDED.kind"),
+          begin_year:
+            fragment(
+              "CASE WHEN 'begin_date' = ANY(?) THEN ? ELSE EXCLUDED.begin_year END",
+              e.overridden_fields,
+              e.begin_year
+            ),
+          begin_month:
+            fragment(
+              "CASE WHEN 'begin_date' = ANY(?) THEN ? ELSE EXCLUDED.begin_month END",
+              e.overridden_fields,
+              e.begin_month
+            ),
+          begin_day:
+            fragment(
+              "CASE WHEN 'begin_date' = ANY(?) THEN ? ELSE EXCLUDED.begin_day END",
+              e.overridden_fields,
+              e.begin_day
+            ),
+          begin_precision:
+            fragment(
+              "CASE WHEN 'begin_date' = ANY(?) THEN ? ELSE EXCLUDED.begin_precision END",
+              e.overridden_fields,
+              e.begin_precision
+            ),
+          begin_calendar:
+            fragment(
+              "CASE WHEN 'begin_date' = ANY(?) THEN ? ELSE EXCLUDED.begin_calendar END",
+              e.overridden_fields,
+              e.begin_calendar
+            ),
+          end_year:
+            fragment(
+              "CASE WHEN 'end_date' = ANY(?) THEN ? ELSE EXCLUDED.end_year END",
+              e.overridden_fields,
+              e.end_year
+            ),
+          end_month:
+            fragment(
+              "CASE WHEN 'end_date' = ANY(?) THEN ? ELSE EXCLUDED.end_month END",
+              e.overridden_fields,
+              e.end_month
+            ),
+          end_day:
+            fragment(
+              "CASE WHEN 'end_date' = ANY(?) THEN ? ELSE EXCLUDED.end_day END",
+              e.overridden_fields,
+              e.end_day
+            ),
+          end_precision:
+            fragment(
+              "CASE WHEN 'end_date' = ANY(?) THEN ? ELSE EXCLUDED.end_precision END",
+              e.overridden_fields,
+              e.end_precision
+            ),
+          end_calendar:
+            fragment(
+              "CASE WHEN 'end_date' = ANY(?) THEN ? ELSE EXCLUDED.end_calendar END",
+              e.overridden_fields,
+              e.end_calendar
+            ),
+          geom:
+            fragment(
+              "CASE WHEN 'position' = ANY(?) THEN ? ELSE EXCLUDED.geom END",
+              e.overridden_fields,
+              e.geom
+            ),
+          location_source:
+            fragment(
+              "CASE WHEN 'position' = ANY(?) THEN ? ELSE EXCLUDED.location_source END",
+              e.overridden_fields,
+              e.location_source
+            ),
+          sitelink_count: fragment("EXCLUDED.sitelink_count"),
+          updated_at: fragment("EXCLUDED.updated_at")
+        ]
+      ]
+    )
+  end
+
+  defp with_event(qid, fun) do
+    case get_event_by_qid(qid) do
+      nil -> {:error, :not_found}
+      event -> fun.(event)
+    end
+  end
+
+  defp generate_local_qid, do: "L" <> String.replace(Ecto.UUID.generate(version: 7), "-", "")
 
   defp insert_link_batch(batch) do
     {count, _} = Repo.insert_all(EventLink, batch, on_conflict: :nothing)

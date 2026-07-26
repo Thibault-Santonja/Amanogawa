@@ -9,28 +9,33 @@ defmodule Amanogawa.Accounts.Scope do
   a `Scope` struct, never a bare `nil`, so `@current_scope.user` is a
   safe read whether or not the visitor is signed in.
 
-  Deliberately a struct with a single field today: it is the seam F08
-  (collaborative editor) will grow into for moderation roles without
-  changing any existing `@current_scope.user` call site.
+  Grew a `reviewer?` field in issue #034 (F08 overview's moderation role):
+  the seam this struct was deliberately left for in F07 is what
+  `AmanogawaWeb.UserAuth.require_reviewer/2` and
+  `on_mount(:require_reviewer)` (#035) gate on, without ever reaching past
+  this facade into `Amanogawa.Accounts.User`'s own `role` field.
   """
 
   alias Amanogawa.Accounts.User
 
-  @type t :: %__MODULE__{user: User.t() | nil}
+  @type t :: %__MODULE__{user: User.t() | nil, reviewer?: boolean()}
 
-  defstruct user: nil
+  defstruct user: nil, reviewer?: false
 
   @doc """
   Builds a scope for `user` (a `User` struct or `nil` for an anonymous
-  visitor).
+  visitor). `reviewer?` mirrors the user's `role` (always `false` for an
+  anonymous visitor).
 
   ## Examples
 
       iex> Amanogawa.Accounts.Scope.for_user(nil)
-      %Amanogawa.Accounts.Scope{user: nil}
+      %Amanogawa.Accounts.Scope{user: nil, reviewer?: false}
 
   """
   @spec for_user(User.t() | nil) :: t()
-  def for_user(%User{} = user), do: %__MODULE__{user: user}
-  def for_user(nil), do: %__MODULE__{user: nil}
+  def for_user(%User{role: role} = user),
+    do: %__MODULE__{user: user, reviewer?: role == :reviewer}
+
+  def for_user(nil), do: %__MODULE__{user: nil, reviewer?: false}
 end

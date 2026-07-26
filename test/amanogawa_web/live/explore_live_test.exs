@@ -1,8 +1,20 @@
 defmodule AmanogawaWeb.ExploreLiveTest do
   use AmanogawaWeb.ConnCase, async: true
 
+  import Amanogawa.AccountsFixtures
   import Amanogawa.AtlasFixtures
+  import Mox
   import Phoenix.LiveViewTest
+
+  alias Amanogawa.Contributions
+  alias Amanogawa.Contributions.DecisionNotifierMock
+
+  setup :verify_on_exit!
+
+  setup do
+    stub(DecisionNotifierMock, :deliver, fn _email, _outcome, _message, _path, _locale -> :ok end)
+    :ok
+  end
 
   describe "GET /" do
     test "responds 200 with the French root layout and the CSP header", %{conn: conn} do
@@ -262,6 +274,23 @@ defmodule AmanogawaWeb.ExploreLiveTest do
 
       refute_patched(lv)
       assert Process.alive?(lv.pid)
+    end
+
+    test "issue #039: an open proposal form survives an incidental map move (production bug found by E2E)",
+         %{conn: conn} do
+      user = user_fixture()
+      conn = log_in_user(conn, user)
+      event = event_fixture()
+
+      {:ok, lv, _html} = live(conn, ~p"/?sel=#{event.qid}&propose_field=label_fr")
+      assert has_element?(lv, "#proposal-form")
+
+      lv
+      |> element("#map")
+      |> render_hook("map_moved", %{"z" => 4.5, "lat" => 10.0, "lng" => -20.0})
+
+      assert_patch(lv, ~p"/?lat=10.0&lng=-20.0&propose_field=label_fr&sel=#{event.qid}&z=4.5")
+      assert has_element?(lv, "#proposal-form")
     end
   end
 
@@ -562,6 +591,229 @@ defmodule AmanogawaWeb.ExploreLiveTest do
 
       {:ok, _lv, html} = live(conn, ~p"/compte")
       assert html =~ user.email
+    end
+  end
+
+  describe "issue #036: proposal entry point in the event panel" do
+    test "an anonymous visitor sees the discrete correction links routed through /proposer", %{
+      conn: conn
+    } do
+      event = event_fixture()
+      {:ok, lv, _html} = live(conn, ~p"/?sel=#{event.qid}")
+
+      assert has_element?(
+               lv,
+               ~s(a[href="/proposer?field=label_fr&sel=#{event.qid}"]),
+               "Libellé (français)"
+             )
+    end
+
+    test "an authenticated visitor sees patch links straight into the form", %{conn: conn} do
+      user = user_fixture()
+      conn = log_in_user(conn, user)
+      event = event_fixture()
+      {:ok, lv, _html} = live(conn, ~p"/?sel=#{event.qid}")
+
+      assert has_element?(
+               lv,
+               ~s(a[href="/?propose_field=label_fr&sel=#{event.qid}"]),
+               "Libellé (français)"
+             )
+    end
+
+    test "correction links preserve the current window and camera (quality review m-finding)", %{
+      conn: conn
+    } do
+      user = user_fixture()
+      conn = log_in_user(conn, user)
+      event = event_fixture()
+
+      {:ok, lv, _html} = live(conn, ~p"/?sel=#{event.qid}&from=-500&to=500")
+
+      assert has_element?(
+               lv,
+               ~s(a[href="/?from=-500&propose_field=label_fr&sel=#{event.qid}&to=500"]),
+               "Libellé (français)"
+             )
+
+      # The anonymous /proposer round trip carries the view too.
+      {:ok, lv_anon, _html} = live(build_conn(), ~p"/?sel=#{event.qid}&from=-500&to=500")
+
+      assert has_element?(
+               lv_anon,
+               ~s(a[href="/proposer?field=label_fr&from=-500&sel=#{event.qid}&to=500"]),
+               "Libellé (français)"
+             )
+    end
+  end
+
+  describe "issue #036: propose_field/propose_new_event query params" do
+    test "propose_field opens the correction form for the selected event, authenticated", %{
+      conn: conn
+    } do
+      user = user_fixture()
+      conn = log_in_user(conn, user)
+      event = event_fixture()
+
+      {:ok, lv, _html} = live(conn, ~p"/?sel=#{event.qid}&propose_field=label_fr")
+
+      assert has_element?(lv, "#proposal-form")
+    end
+
+    test "propose_field with no selection never opens the form", %{conn: conn} do
+      user = user_fixture()
+      conn = log_in_user(conn, user)
+
+      {:ok, lv, _html} = live(conn, ~p"/?propose_field=label_fr")
+
+      refute has_element?(lv, "#proposal-form")
+    end
+
+    test "propose_field is ignored for an anonymous visitor even with a valid selection", %{
+      conn: conn
+    } do
+      event = event_fixture()
+
+      {:ok, lv, _html} = live(conn, ~p"/?sel=#{event.qid}&propose_field=label_fr")
+
+      refute has_element?(lv, "#proposal-form")
+    end
+
+    test "propose_new_event opens the creation form, independent of any selection", %{conn: conn} do
+      user = user_fixture()
+      conn = log_in_user(conn, user)
+
+      {:ok, lv, _html} = live(conn, ~p"/?propose_new_event=1")
+
+      assert has_element?(lv, "#proposal-form")
+    end
+
+    test "deselect_event purges an open correction's propose_field (no orphan param)", %{
+      conn: conn
+    } do
+      user = user_fixture()
+      conn = log_in_user(conn, user)
+      event = event_fixture()
+
+      {:ok, lv, _html} = live(conn, ~p"/?sel=#{event.qid}&propose_field=label_fr")
+      assert has_element?(lv, "#proposal-form")
+
+      lv |> element("#map") |> render_hook("deselect_event", %{})
+
+      assert_patch(lv, ~p"/")
+      refute has_element?(lv, "#proposal-form")
+    end
+
+    test "deselect_event keeps an open new-event form (selection-independent)", %{conn: conn} do
+      user = user_fixture()
+      conn = log_in_user(conn, user)
+      event = event_fixture()
+
+      {:ok, lv, _html} = live(conn, ~p"/?sel=#{event.qid}&propose_new_event=1")
+      assert has_element?(lv, "#proposal-form")
+
+      lv |> element("#map") |> render_hook("deselect_event", %{})
+
+      assert_patch(lv, ~p"/?propose_new_event=1")
+      assert has_element?(lv, "#proposal-form")
+    end
+  end
+
+  describe "issue #036: display_name gate and full submission" do
+    test "an authenticated user without a display_name sees the pseudonym gate first", %{
+      conn: conn
+    } do
+      user = user_fixture()
+      conn = log_in_user(conn, user)
+      event = event_fixture()
+
+      {:ok, lv, _html} = live(conn, ~p"/?sel=#{event.qid}&propose_field=label_fr")
+
+      assert has_element?(lv, "form[phx-submit=\"set_display_name\"]")
+      refute has_element?(lv, "form[phx-submit=\"submit\"]")
+    end
+
+    test "submitting a label correction creates a pending override, flashes, and closes the form",
+         %{conn: conn} do
+      user = user_fixture()
+      {:ok, user} = Amanogawa.Accounts.set_display_name(user, unique_display_name())
+      conn = log_in_user(conn, user)
+      event = event_fixture(label_fr: "Ancien nom")
+
+      {:ok, lv, _html} = live(conn, ~p"/?sel=#{event.qid}&propose_field=label_fr")
+
+      lv
+      |> form("#proposal-form form", %{
+        "proposal" => %{"value" => "Nouveau nom", "source" => "https://example.org/source"}
+      })
+      |> render_submit()
+
+      assert_patch(lv, ~p"/?sel=#{event.qid}")
+      refute has_element?(lv, "#proposal-form")
+      assert render(lv) =~ "Proposition envoyée"
+
+      assert [override] = Contributions.list_overrides(%{event_qid: event.qid})
+      assert override.status == :pending
+      assert override.proposed_value == %{"value" => "Nouveau nom"}
+      # The map still shows the untouched Wikidata value: nothing is ever
+      # applied directly (F08 overview).
+      assert render(lv) =~ "Ancien nom"
+    end
+  end
+
+  describe "issue #038: EventPanel transparency section" do
+    test "an event with no contribution shows no section at all", %{conn: conn} do
+      event = event_fixture(label_fr: "Événement vierge")
+
+      {:ok, lv, _html} = live(conn, ~p"/?sel=#{event.qid}")
+
+      refute has_element?(lv, "#event-panel", "correction(s) acceptée")
+      refute has_element?(lv, "#event-panel", "Voir l'historique")
+    end
+
+    test "an event with an accepted override shows counts, the history link, and the \"valeur corrigée\" mention",
+         %{conn: conn} do
+      event = event_fixture(label_fr: "Ancien nom")
+      author = user_fixture()
+
+      override =
+        Amanogawa.ContributionsFixtures.override_fixture(
+          event_qid: event.qid,
+          field: :label_fr,
+          proposed_value: %{"value" => "Nouveau nom"},
+          author_id: author.id
+        )
+
+      reviewer = Amanogawa.AccountsFixtures.reviewer_fixture()
+      assert {:ok, _accepted} = Contributions.accept_override(override.id, reviewer, "Vérifié")
+
+      {:ok, lv, html} = live(conn, ~p"/?sel=#{event.qid}")
+
+      assert html =~ "1 correction(s) acceptée(s), 0 en attente."
+
+      assert has_element?(
+               lv,
+               "a[href=\"/contributions?event=#{event.qid}\"]",
+               "Voir l'historique"
+             )
+
+      assert html =~ "Valeur corrigée par la communauté"
+      assert has_element?(lv, "a[href=\"/contributions/#{override.id}\"]", "Voir la contribution")
+      # The corrected value is now what the panel and the map show.
+      assert html =~ "Nouveau nom"
+    end
+
+    test "a pending proposal shows the pending count but no \"valeur corrigée\" mention", %{
+      conn: conn
+    } do
+      event = event_fixture(label_fr: "Nom actuel")
+      _override = Amanogawa.ContributionsFixtures.override_fixture(event_qid: event.qid)
+
+      {:ok, lv, html} = live(conn, ~p"/?sel=#{event.qid}")
+
+      assert html =~ "0 correction(s) acceptée(s), 1 en attente."
+      assert has_element?(lv, "a", "Voir l'historique")
+      refute html =~ "Valeur corrigée par la communauté"
     end
   end
 

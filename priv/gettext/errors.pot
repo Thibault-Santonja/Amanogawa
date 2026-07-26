@@ -107,3 +107,11 @@ msgstr ""
 
 msgid "must be equal to %{number}"
 msgstr ""
+
+## Custom changeset messages (Amanogawa.Contributions.Override,
+## Amanogawa.Accounts.User)
+msgid "must be a valid event id"
+msgstr ""
+
+msgid "must be a valid email address"
+msgstr ""

@@ -32,8 +32,34 @@ defmodule Amanogawa.Accounts.User do
   # an address works is the magic link actually being delivered to it.
   @email_format ~r/\A[^\s]+@[^\s]+\z/
 
+  # Public pseudonym bounds (issue #034, F08 overview's "attribution
+  # publique sans fuite d'email"): generous enough for a real display
+  # name, small enough to keep the column and its case-insensitive unique
+  # index cheap.
+  @display_name_min_length 3
+  @display_name_max_length 40
+
+  # Minimal reserved-terms list (security review): a pseudonym is the
+  # ONLY public identity in the contribution history, so one that
+  # impersonates the moderation, the system, or the project itself would
+  # lend false authority to its revisions. Matched after trimming,
+  # downcasing and stripping accents, so casing or accent variants
+  # ("Modérateur", "SYSTÈME") are caught too.
+  @reserved_display_names ~w(relecteur reviewer moderateur moderator admin amanogawa systeme system)
+
   schema "users" do
     field :email, :string
+
+    # Promoted manually in the database for V1 (issue #034, F08 overview:
+    # "promue manuellement en base pour commencer"): no self-service
+    # escalation path exists anywhere in this context.
+    field :role, Ecto.Enum, values: [:user, :reviewer], default: :user
+
+    # Public pseudonym (issue #034): required before a user's first
+    # contribution proposal, never the email, which is never shown
+    # publicly (`Amanogawa.Contributions`' revisions attribute by this
+    # field alone).
+    field :display_name, :string
 
     timestamps(type: :utc_datetime, updated_at: false)
   end
@@ -54,6 +80,52 @@ defmodule Amanogawa.Accounts.User do
     |> validate_format(:email, @email_format, message: "must be a valid email address")
     |> validate_length(:email, max: @max_email_length)
     |> unique_constraint(:email)
+  end
+
+  @doc """
+  Builds and validates a changeset for `display_name` alone (issue #034,
+  `Amanogawa.Accounts.set_display_name/2`): required, #{@display_name_min_length}
+  to #{@display_name_max_length} characters, unique case-insensitively
+  (`users_display_name_lower_index`, the same `lower(...)` technique
+  `changeset/2` uses for `email`), and never one of the reserved
+  moderation/system terms (`#{Enum.join(@reserved_display_names, ", ")}`,
+  casing and accent variants included).
+  """
+  @spec display_name_changeset(t(), map()) :: Ecto.Changeset.t()
+  def display_name_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:display_name])
+    |> validate_required([:display_name])
+    |> validate_length(:display_name,
+      min: @display_name_min_length,
+      max: @display_name_max_length
+    )
+    |> validate_not_reserved(:display_name)
+    |> unique_constraint(:display_name, name: :users_display_name_lower_index)
+  end
+
+  defp validate_not_reserved(changeset, field) do
+    case get_change(changeset, field) do
+      nil ->
+        changeset
+
+      value ->
+        if normalize_for_reservation(value) in @reserved_display_names do
+          add_error(changeset, field, "is reserved")
+        else
+          changeset
+        end
+    end
+  end
+
+  # Trim + downcase + strip combining accents (NFD decomposition), so
+  # "Modérateur" and "SYSTÈME" normalize to their reserved base terms.
+  defp normalize_for_reservation(value) do
+    value
+    |> String.trim()
+    |> String.downcase()
+    |> String.normalize(:nfd)
+    |> String.replace(~r/\p{Mn}/u, "")
   end
 
   @doc """

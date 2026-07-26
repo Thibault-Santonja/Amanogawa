@@ -81,6 +81,18 @@ defmodule AmanogawaWeb.Router do
     live_session :current_user, on_mount: [{AmanogawaWeb.UserAuth, :mount_current_scope}] do
       live "/", ExploreLive
       live "/connexion", LoginLive
+
+      # Public transparency feed (issue #038): the chronological index
+      # over the detail page below. Declared before the ":id" route only
+      # for readability, Phoenix.Router dispatches on segment count so
+      # "/contributions" and "/contributions/:id" never actually compete
+      # for a match.
+      live "/contributions", ContributionsLive
+
+      # Minimal public detail page (issue #037, completed in #038): every
+      # visitor may read it, only its own author (if signed in) sees the
+      # appeal form on a `:rejected` proposal with no appeal yet.
+      live "/contributions/:id", ContributionLive
     end
 
     get "/connexion/:token", SessionController, :confirm
@@ -112,6 +124,32 @@ defmodule AmanogawaWeb.Router do
     pipe_through [:browser, :authenticated]
 
     get "/compte/export", AccountController, :export
+
+    # Anonymous-visitor entry point for "Proposer une correction"/"Proposer
+    # un événement" (issue #036, `AmanogawaWeb.ProposalController`'s own
+    # moduledoc): reuses the `:authenticated` pipeline's `user_return_to`
+    # mechanic, never duplicated here.
+    get "/proposer", ProposalController, :new
+  end
+
+  # Reviewer-only routes (issue #035: reuses the :authenticated pipeline
+  # for the same "user_return_to" reason documented above, layers
+  # AmanogawaWeb.UserAuth.require_reviewer/2 on top). :require_reviewer is
+  # its own live_session name, never reused for another gate (F07's "never
+  # duplicate a live_session name" lesson applies just as much to this
+  # newer name as to :require_authenticated_user).
+  pipeline :reviewer do
+    plug :require_reviewer
+  end
+
+  scope "/", AmanogawaWeb do
+    pipe_through [:browser, :authenticated, :reviewer]
+
+    live_session :require_reviewer,
+      on_mount: [{AmanogawaWeb.UserAuth, :require_reviewer}] do
+      live "/relecture", ReviewQueueLive
+      live "/relecture/conflits", ConflictsLive
+    end
   end
 
   scope "/", AmanogawaWeb do
@@ -120,6 +158,10 @@ defmodule AmanogawaWeb.Router do
     get "/sources", PageController, :sources
     get "/mentions-legales", PageController, :legal
     get "/confidentialite", PageController, :privacy
+
+    # Public moderation rules and aggregate, factual statistics (issue
+    # #038): no cookie, same reasoning as the three static pages above.
+    get "/moderation", PageController, :moderation
   end
 
   scope "/", AmanogawaWeb do

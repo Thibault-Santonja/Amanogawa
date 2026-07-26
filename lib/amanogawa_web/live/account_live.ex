@@ -17,6 +17,16 @@ defmodule AmanogawaWeb.AccountLive do
   collections belong in streams, not assigns), never re-fetched by any
   `handle_event` below (each mutates the stream/assign it already holds
   in place instead of reloading from the database).
+
+  Also carries the public pseudonym editor (issue #036,
+  `Amanogawa.Accounts.set_display_name/2`): the same field
+  `AmanogawaWeb.Live.ProposalFormComponent` requires before a first
+  proposal, editable here at any time.
+
+  Deletion anonymizes the account's public contributions BEFORE deleting
+  the account itself (issue #038, `Amanogawa.Contributions.
+  anonymize_user/1` then `Amanogawa.Accounts.delete_user/1`): see the
+  ordering comment on `confirm_delete_account` below for why.
   """
 
   use AmanogawaWeb, :live_view
@@ -24,6 +34,7 @@ defmodule AmanogawaWeb.AccountLive do
   import AmanogawaWeb.PageHTML, only: [section: 1]
 
   alias Amanogawa.Accounts
+  alias Amanogawa.Contributions
   alias AmanogawaWeb.UserAuth
 
   @impl true
@@ -35,6 +46,12 @@ defmodule AmanogawaWeb.AccountLive do
      |> assign(:current_session_id, nil)
      |> assign(:confirm_delete?, false)
      |> assign(:delete_error, nil)
+     |> assign(
+       :display_name_form,
+       to_form(%{"display_name" => socket.assigns.current_scope.user.display_name || ""},
+         as: "display_name"
+       )
+     )
      |> stream(:sessions, [])}
   end
 
@@ -113,6 +130,22 @@ defmodule AmanogawaWeb.AccountLive do
     {:noreply, put_flash(socket, :info, gettext("Les autres sessions ont été révoquées."))}
   end
 
+  def handle_event("set_display_name", %{"display_name" => %{"display_name" => name}}, socket) do
+    case Accounts.set_display_name(socket.assigns.current_scope.user, name) do
+      {:ok, user} ->
+        current_scope = %{socket.assigns.current_scope | user: user}
+
+        {:noreply,
+         socket
+         |> assign(:current_scope, current_scope)
+         |> assign(:display_name_form, to_form(%{"display_name" => name}, as: "display_name"))
+         |> put_flash(:info, gettext("Pseudonyme enregistré."))}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, :display_name_form, to_form(changeset, as: "display_name"))}
+    end
+  end
+
   def handle_event("toggle_delete_confirmation", _params, socket) do
     {:noreply,
      assign(socket, confirm_delete?: !socket.assigns.confirm_delete?, delete_error: nil)}
@@ -142,6 +175,16 @@ defmodule AmanogawaWeb.AccountLive do
         |> Enum.reject(&(&1.id == current_session_id))
         |> Enum.map(& &1.id)
 
+      # Anonymize BEFORE deleting (issue #038, `Amanogawa.Contributions.
+      # anonymize_user/1`'s own moduledoc): two transactions, two
+      # contexts, this order on purpose. A crash between the two calls
+      # leaves a state that is still safe and still resumable: the
+      # user's contributions are already anonymized (public, but no
+      # longer attributed) while the account row itself still exists and
+      # can simply be deleted again; the reverse order would instead
+      # risk an orphaned attribution pointing at an already-deleted
+      # account id, which nothing could self-heal automatically.
+      :ok = Contributions.anonymize_user(user)
       :ok = Accounts.delete_user(user)
 
       Enum.each(other_session_ids, fn id ->
@@ -194,6 +237,23 @@ defmodule AmanogawaWeb.AccountLive do
         {Calendar.strftime(@current_scope.user.inserted_at, gettext("%d/%m/%Y"))}
       </p>
 
+      <.section title={gettext("Pseudonyme public")}>
+        <p class="text-text-muted">
+          {gettext(
+            "Ce pseudonyme attribue publiquement vos contributions : jamais votre adresse email."
+          )}
+        </p>
+        <.form
+          for={@display_name_form}
+          id="display-name-form"
+          phx-submit="set_display_name"
+          class="mt-2 max-w-sm"
+        >
+          <.input field={@display_name_form[:display_name]} label={gettext("Pseudonyme")} required />
+          <.button variant="primary" type="submit">{gettext("Enregistrer")}</.button>
+        </.form>
+      </.section>
+
       <.section title={gettext("Sessions actives")}>
         <ul id="sessions" phx-update="stream" class="space-y-2">
           <li
@@ -229,14 +289,19 @@ defmodule AmanogawaWeb.AccountLive do
       <.section title={gettext("Supprimer mon compte")}>
         <p class="text-text-muted">
           {gettext(
-            "Cette action est irréversible : toutes vos données sont effacées immédiatement, sans délai de récupération."
+            "Cette action est irréversible : toutes vos données personnelles sont effacées immédiatement, sans délai de récupération. Vos contributions publiques éventuelles (éditeur collaboratif) restent visibles dans l'historique public, mais deviennent anonymes (\"compte supprimé\") : c'est ce qui garantit la cohérence de l'historique, comme sur un wiki."
           )}
         </p>
         <.button :if={!@confirm_delete?} phx-click="toggle_delete_confirmation" class="mt-2">
           {gettext("Supprimer mon compte")}
         </.button>
 
-        <form :if={@confirm_delete?} phx-submit="confirm_delete_account" class="mt-2 max-w-sm">
+        <form
+          :if={@confirm_delete?}
+          id="delete-account-form"
+          phx-submit="confirm_delete_account"
+          class="mt-2 max-w-sm"
+        >
           <label for="delete-confirmation" class="mb-1 block text-sm text-text-muted">
             {gettext("Pour confirmer, saisissez votre adresse email :")}
           </label>

@@ -19,6 +19,20 @@ defmodule Amanogawa.Ingestion.Workers.ImportEvents do
   events_rejected` on a non-dry run); `events_rejected` tracks bindings
   dropped by `Amanogawa.Ingestion.Wikidata.EventDecoder` for data-quality
   reasons.
+
+  ## Layered-data coexistence (issue #035)
+
+  After every non-dry-run upsert, this worker calls
+  `Amanogawa.Contributions.record_sync_divergences/1` with the SAME
+  normalized attrs the page just upserted (a facade-to-facade call,
+  `.claude/rules/architecture.md`: Ingestion already calls the Atlas
+  facade the same way): the accepted overrides Wikidata's incoming values
+  might diverge from get journalled or superseded there, never here.
+  `sync_unchanged`, `sync_superseded`, `sync_conflicts_opened` and
+  `sync_conflicts_refreshed` are folded into the run's counters
+  alongside `events_upserted`. A `dry_run` never calls it, exactly as it
+  never calls `Amanogawa.Atlas.upsert_events/1`: nothing to compare a
+  divergence against when nothing was written.
   """
 
   use Oban.Worker, queue: :ingestion, max_attempts: 5
@@ -26,6 +40,7 @@ defmodule Amanogawa.Ingestion.Workers.ImportEvents do
   @behaviour Amanogawa.Ingestion.Workers.PagedImport
 
   alias Amanogawa.Atlas
+  alias Amanogawa.Contributions
   alias Amanogawa.Ingestion.SyncRun
   alias Amanogawa.Ingestion.Wikidata.EventDecoder
   alias Amanogawa.Ingestion.Wikidata.ExtractedEvent
@@ -45,21 +60,30 @@ defmodule Amanogawa.Ingestion.Workers.ImportEvents do
   @impl PagedImport
   def apply_page(counts, result, dry_run) do
     {events, rejected} = EventDecoder.decode(result)
-    upserted = upsert(events, dry_run)
+    {upserted, divergences} = upsert(events, dry_run)
 
     SyncRun.merge_counts(counts, %{
       "events_fetched" => length(events) + rejected,
       "events_upserted" => upserted,
-      "events_rejected" => rejected
+      "events_rejected" => rejected,
+      "sync_unchanged" => divergences.unchanged,
+      "sync_superseded" => divergences.superseded,
+      "sync_conflicts_opened" => divergences.conflicts_opened,
+      "sync_conflicts_refreshed" => divergences.conflicts_refreshed
     })
   end
 
-  defp upsert(_events, true), do: 0
+  defp upsert(_events, true), do: {0, empty_divergences()}
 
   defp upsert(events, false) do
-    {:ok, %{upserted: upserted}} = events |> Enum.map(&to_atlas_attrs/1) |> Atlas.upsert_events()
-    upserted
+    attrs = Enum.map(events, &to_atlas_attrs/1)
+    {:ok, %{upserted: upserted}} = Atlas.upsert_events(attrs)
+    divergences = Contributions.record_sync_divergences(attrs)
+    {upserted, divergences}
   end
+
+  defp empty_divergences,
+    do: %{unchanged: 0, superseded: 0, conflicts_opened: 0, conflicts_refreshed: 0}
 
   defp to_atlas_attrs(%ExtractedEvent{} = event) do
     %{

@@ -12,3 +12,4 @@ Numérotation continue et immuable. Un ADR accepté ne se modifie pas : il se su
 | [0006](0006-modele-temporel-historical-date.md) | Modèle temporel HistoricalDate (année astronomique + précision) | 2026-07-23 | Accepté |
 | [0007](0007-postgis-diffusion-geojson.md) | PostGIS et diffusion GeoJSON bornée (bbox + fenêtre + importance) | 2026-07-23 | Accepté |
 | [0008](0008-licence-agpl-principes-ethiques.md) | AGPL-3.0 et principes éthiques non négociables | 2026-07-23 | Accepté |
+| [0009](0009-surcouche-de-contributions.md) | Surcouche de contributions résolue à l'écriture, jamais à la lecture | 2026-07-26 | Accepté |

@@ -4,3 +4,7 @@ Mox.defmock(Amanogawa.HealthCheckMock, for: Amanogawa.HealthCheck)
 Mox.defmock(Amanogawa.Alerting.NotifierMock, for: Amanogawa.Alerting.Notifier)
 Mox.defmock(Amanogawa.Alerting.ClockMock, for: Amanogawa.Alerting.Clock)
 Mox.defmock(Amanogawa.MagicLinkNotifierMock, for: Amanogawa.Accounts.MagicLinkNotifier)
+
+Mox.defmock(Amanogawa.Contributions.DecisionNotifierMock,
+  for: Amanogawa.Contributions.DecisionNotifier
+)

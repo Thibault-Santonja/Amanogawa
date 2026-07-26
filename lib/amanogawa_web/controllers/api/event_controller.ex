@@ -165,7 +165,9 @@ defmodule AmanogawaWeb.Controllers.Api.EventController do
   defp bad_request(conn) do
     conn
     |> put_status(:bad_request)
-    |> json(%{errors: %{qid: ["must be a Wikidata QID, e.g. Q12345"]}})
+    |> json(%{
+      errors: %{qid: ["must be a Wikidata QID (e.g. Q12345) or a local id (e.g. L<uuid hex>)"]}
+    })
   end
 
   defp not_found(conn) do

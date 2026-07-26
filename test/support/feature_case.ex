@@ -107,10 +107,32 @@ defmodule AmanogawaWeb.FeatureCase do
       scale_ms: :timer.hours(24)
     )
 
+    # Same single shared Chrome peer for every contribution proposal the
+    # E2E journeys submit (issue #039, flaky finding): the proposal
+    # quota's IP counter must never deny a scenario partway through a
+    # run that legitimately proposes many times from 127.0.0.1.
+    Application.put_env(:amanogawa, Amanogawa.Contributions.ProposalThrottle,
+      limit: 10_000,
+      scale_ms: :timer.hours(24)
+    )
+
     Application.put_env(
       :amanogawa,
       :magic_link_notifier,
       Amanogawa.Accounts.MagicLinkNotifier.Mailer
+    )
+
+    # Same reasoning, for decision emails (issue #039's review journey):
+    # a real browser drives `AmanogawaWeb.ReviewQueueLive`'s accept/reject/
+    # appeal-review actions from ITS OWN process, never the test process
+    # Mox's private mode expects, so the test-only mock
+    # (`Amanogawa.Contributions.DecisionNotifierMock`, `config/test.exs`)
+    # is swapped for the real `Amanogawa.Contributions.DecisionNotifier.
+    # Email` here, exactly like the magic link notifier above.
+    Application.put_env(
+      :amanogawa,
+      :decision_notifier,
+      Amanogawa.Contributions.DecisionNotifier.Email
     )
 
     :ok
