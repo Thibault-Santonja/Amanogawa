@@ -679,6 +679,21 @@ defmodule AmanogawaWeb.Live.ProposalFormComponent do
       >
         {msg}
       </p>
+      <%!-- Issue #038: no personal data in a justification (the rule
+      published on /moderation and checked at review time), and this
+      contribution joins a public, permanent history (the privacy
+      policy's own arbitrage, article 17.3.d): both cross-referenced
+      here, right where a contributor is about to write one. --%>
+      <p class="mt-2 text-xs text-text-muted">
+        {gettext("Ne jamais inclure de donnée personnelle dans cette justification.")}
+        <.link navigate={~p"/moderation"} class="text-accent hover:underline">
+          {gettext("Règles de modération")}
+        </.link>
+        ·
+        <.link navigate={~p"/confidentialite"} class="text-accent hover:underline">
+          {gettext("Politique de confidentialité")}
+        </.link>
+      </p>
     </div>
     """
   end

@@ -88,6 +88,47 @@ Amanogawa.Ingestion.last_sync_run(:events)
 Amanogawa.Ingestion.get_sync_run("<uuid>")
 ```
 
+## Divergences et conflits (issue #039, F08)
+
+Depuis la feature 008 (éditeur collaboratif), la synchronisation `events` ne se contente plus d'importer : elle préserve aussi toute correction locale acceptée (`atlas.events.overridden_fields`, arbitrage ADR 0009) et journalise la moindre divergence entre la valeur Wikidata reçue et une correction acceptée, plutôt que d'écraser ou d'ignorer silencieusement l'une des deux.
+
+### Préservation par champ
+
+L'upsert d'un lot d'événements (`Amanogawa.Atlas.upsert_events/1`) ne remplace JAMAIS un champ marqué dans `overridden_fields` : Wikidata continue de fournir sa propre valeur au niveau de la ligne, mais colonne par colonne, seuls les champs NON corrigés localement sont mis à jour. Rien à faire ici : ce comportement est automatique et ne se désactive pas (un contournement casserait le principe fondateur "aucun écrasement silencieux", ADR 0008/0009).
+
+### Compteurs de divergences dans le résumé du run
+
+Chaque run `ingestion.sync_runs` de type `events` porte, dans sa colonne `counts` (jsonb), quatre compteurs supplémentaires produits par `Amanogawa.Contributions.record_sync_divergences/1` :
+
+| Compteur | Signification |
+|----------|----------------|
+| `sync_unchanged` | La valeur Wikidata reçue est identique au snapshot pris à l'acceptation : rien à signaler, le champ corrigé reste stable. |
+| `sync_superseded` | Wikidata a rejoint la valeur corrigée localement : la correction devient inutile, elle est levée automatiquement (`Amanogawa.Atlas.release_field_override/3`), l'override passe à `:superseded`, rien à décider. |
+| `sync_conflicts_opened` | Une nouvelle divergence est ouverte dans `contributions.conflicts` : Wikidata a changé et NE rejoint PAS la correction locale, un relecteur doit trancher. |
+| `sync_conflicts_refreshed` | Une divergence déjà ouverte se répète (le même champ diverge toujours) : le conflit existant est mis à jour (nouvelle valeur Wikidata, nouvelle date de détection), pas dupliqué. |
+
+Lire les compteurs du dernier run `events` :
+
+```elixir
+Amanogawa.Ingestion.last_sync_run(:events).counts
+```
+
+```sql
+select started_at,
+       counts->>'sync_unchanged' as unchanged,
+       counts->>'sync_superseded' as superseded,
+       counts->>'sync_conflicts_opened' as conflicts_opened,
+       counts->>'sync_conflicts_refreshed' as conflicts_refreshed
+from ingestion.sync_runs
+where kind = 'events'
+order by started_at desc
+limit 5;
+```
+
+### Quand examiner les conflits
+
+Un `sync_conflicts_opened` ou `sync_conflicts_refreshed` non nul après un run `events` signale qu'au moins un conflit attend une décision sur `/relecture/conflits`. Procédure d'examen complète (les deux résolutions possibles, garder la correction ou adopter Wikidata) : voir `docs/ops/moderation.md`, section "Examiner les conflits de synchronisation". En pratique : consulter `/relecture/conflits` juste après chaque synchronisation mensuelle (le jour suivant le run `events`, avant celui de `links`), la file restant sans urgence dans l'intervalle (un conflit non résolu ne dégrade jamais la carte, la correction locale reste affichée par défaut).
+
 ## Reprise après échec
 
 Un run `failed` n'est jamais repris automatiquement. Le message affiché par la mix task en cas d'échec contient la commande de reprise exacte (identifiant du run inclus).

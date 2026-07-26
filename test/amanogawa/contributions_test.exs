@@ -1272,6 +1272,277 @@ defmodule Amanogawa.ContributionsTest do
     end
   end
 
+  # ---------------------------------------------------------------------
+  # list_public/1 (issue #038)
+  # ---------------------------------------------------------------------
+
+  describe "list_public/1" do
+    test "happy path: chronological (most recent first), no ranking, filters by status and event_qid" do
+      event = event_fixture()
+      other_event = event_fixture()
+      pending = override_fixture(event_qid: event.qid)
+      accepted = accepted_override_fixture(event_qid: event.qid)
+      _other = override_fixture(event_qid: other_event.qid)
+
+      assert Contributions.list_public(%{event_qid: event.qid}) == [accepted, pending]
+      assert Contributions.list_public(%{status: "accepted", event_qid: event.qid}) == [accepted]
+    end
+
+    test "accepts string OR atom keys for the same filters" do
+      event = event_fixture()
+      override = override_fixture(event_qid: event.qid)
+
+      assert Contributions.list_public(%{"status" => "pending", "event_qid" => event.qid}) == [
+               override
+             ]
+
+      assert Contributions.list_public(%{status: "pending", event_qid: event.qid}) == [override]
+    end
+
+    test "error case: an unknown status is dropped, never an exception, never a 500" do
+      override = override_fixture()
+
+      assert Contributions.list_public(%{status: "not_a_real_status"})
+             |> Enum.any?(&(&1.id == override.id))
+    end
+
+    test "error case: a malformed event id is dropped, never an exception" do
+      override = override_fixture()
+
+      assert Contributions.list_public(%{event_qid: "'; DROP TABLE overrides; --"})
+             |> Enum.any?(&(&1.id == override.id))
+    end
+
+    test "limit case: keyset pagination with :after and :limit, stable across a tie" do
+      event = event_fixture()
+      same_instant = DateTime.truncate(DateTime.utc_now(), :second)
+
+      first = override_fixture(event_qid: event.qid)
+      first |> Ecto.Changeset.change(inserted_at: same_instant) |> Repo.update!()
+
+      second = override_fixture(event_qid: event.qid)
+      second |> Ecto.Changeset.change(inserted_at: same_instant) |> Repo.update!()
+
+      [newest, oldest] =
+        Contributions.list_public(%{event_qid: event.qid, limit: 2})
+        |> Enum.sort_by(& &1.id, :desc)
+
+      cursor = %{inserted_at: newest.inserted_at, id: newest.id}
+
+      assert Contributions.list_public(%{event_qid: event.qid, after: cursor}) == [oldest]
+    end
+
+    test "limit case: a malformed :after or :limit is dropped" do
+      override = override_fixture()
+
+      assert Contributions.list_public(%{after: %{garbage: true}})
+             |> Enum.any?(&(&1.id == override.id))
+
+      assert Contributions.list_public(%{limit: -5}) |> Enum.any?(&(&1.id == override.id))
+    end
+  end
+
+  # ---------------------------------------------------------------------
+  # event_contribution_summary/1 (issue #038)
+  # ---------------------------------------------------------------------
+
+  describe "event_contribution_summary/1" do
+    test "happy path: counts accepted and pending (appealed included), maps accepted fields to override ids" do
+      event = event_fixture()
+      accepted = accepted_override_fixture(event_qid: event.qid, field: :label_fr)
+      _pending = override_fixture(event_qid: event.qid, field: :label_en)
+
+      appealed =
+        override_fixture(event_qid: event.qid, field: :label_en)
+        |> Ecto.Changeset.change(status: :appealed)
+        |> Repo.update!()
+
+      summary = Contributions.event_contribution_summary(event.qid)
+
+      assert summary.accepted_count == 1
+      assert summary.pending_count == 2
+      assert summary.accepted_override_ids_by_field["label_fr"] == accepted.id
+      refute Map.has_key?(summary.accepted_override_ids_by_field, "label_en")
+      assert appealed.status == :appealed
+    end
+
+    test "limit case: an event with no contribution returns all zeros and an empty map" do
+      event = event_fixture()
+
+      assert Contributions.event_contribution_summary(event.qid) == %{
+               accepted_count: 0,
+               pending_count: 0,
+               accepted_override_ids_by_field: %{}
+             }
+    end
+  end
+
+  # ---------------------------------------------------------------------
+  # public_stats/0 (issue #038)
+  # ---------------------------------------------------------------------
+
+  describe "public_stats/0" do
+    test "limit case: an empty database returns coherent zeros, never a crash" do
+      stats = Contributions.public_stats()
+
+      assert stats.total_by_status == %{
+               pending: 0,
+               accepted: 0,
+               rejected: 0,
+               superseded: 0,
+               appealed: 0
+             }
+
+      assert stats.proposals_by_month == []
+      assert stats.median_decision_hours == nil
+      assert stats.open_conflicts_count == 0
+    end
+
+    test "happy path: totals, monthly counts, median decision delay and open conflicts count" do
+      author = user_fixture()
+      reviewer = reviewer_fixture()
+      event = event_fixture()
+
+      override = propose_fixture(event, author)
+      _pending = override_fixture()
+
+      assert {:ok, accepted} = Contributions.accept_override(override.id, reviewer, "motif")
+
+      # Reuses the very override just accepted (rather than
+      # `conflict_fixture/1`'s own default, which would silently insert a
+      # SECOND accepted override and throw off every count below).
+      _conflict = conflict_fixture(override: accepted)
+
+      stats = Contributions.public_stats()
+
+      assert stats.total_by_status.accepted == 1
+      assert stats.total_by_status.pending == 1
+      assert [%{count: count}] = stats.proposals_by_month
+      assert count == 2
+      assert is_float(stats.median_decision_hours)
+      assert stats.open_conflicts_count == 1
+    end
+  end
+
+  # ---------------------------------------------------------------------
+  # export_user_contributions/1 (issue #038)
+  # ---------------------------------------------------------------------
+
+  describe "export_user_contributions/1" do
+    test "happy path: every contribution the user authored, with its own revisions" do
+      author = user_fixture()
+      event = event_fixture()
+      override = propose_fixture(event, author)
+
+      [exported] = Contributions.export_user_contributions(author)
+
+      assert exported.id == override.id
+      assert exported.status == :pending
+      assert [%{action: :proposed}] = exported.revisions
+    end
+
+    test "edge case: a user with no contribution exports an empty list, never an error" do
+      author = user_fixture()
+
+      assert Contributions.export_user_contributions(author) == []
+    end
+
+    test "never carries author_id/actor_id (RGPD: only the requester's own export, no third-party id)" do
+      author = user_fixture()
+      event = event_fixture()
+      _override = propose_fixture(event, author)
+
+      [exported] = Contributions.export_user_contributions(author)
+
+      refute Map.has_key?(exported, :author_id)
+      assert Enum.all?(exported.revisions, &(not Map.has_key?(&1, :actor_id)))
+    end
+  end
+
+  # ---------------------------------------------------------------------
+  # anonymize_user/1 (issue #038)
+  # ---------------------------------------------------------------------
+
+  describe "anonymize_user/1" do
+    test "happy path: nils author_id/actor_id, journals one :anonymized revision per touched override" do
+      author = user_fixture()
+      event = event_fixture()
+      override = propose_fixture(event, author)
+
+      assert :ok = Contributions.anonymize_user(author)
+
+      reloaded = Contributions.get_override(override.id)
+      assert reloaded.author_id == nil
+      assert reloaded.status == :pending
+      assert reloaded.source == override.source
+
+      revisions = Contributions.list_revisions(override.id)
+      assert Enum.any?(revisions, &(&1.action == :anonymized))
+      assert Enum.find(revisions, &(&1.action == :proposed)).actor_id == nil
+    end
+
+    test "anonymizes a reviewer's own actor_id on revisions, without touching the override's author" do
+      author = user_fixture()
+      reviewer = reviewer_fixture()
+      override = override_fixture(author_id: author.id)
+
+      assert {:ok, _accepted} = Contributions.accept_override(override.id, reviewer, "motif")
+      assert :ok = Contributions.anonymize_user(reviewer)
+
+      reloaded = Contributions.get_override(override.id)
+      assert reloaded.author_id == author.id
+
+      revisions = Contributions.list_revisions(override.id)
+      assert Enum.find(revisions, &(&1.action == :accepted)).actor_id == nil
+      refute Enum.any?(revisions, &(&1.action == :anonymized))
+    end
+
+    test "edge case: idempotent, replayed after a simulated crash never doubles :anonymized revisions" do
+      author = user_fixture()
+      event = event_fixture()
+      override = propose_fixture(event, author)
+
+      assert :ok = Contributions.anonymize_user(author)
+      assert :ok = Contributions.anonymize_user(author)
+
+      revisions = Contributions.list_revisions(override.id)
+      assert Enum.count(revisions, &(&1.action == :anonymized)) == 1
+    end
+
+    test "edge case: an author with no contribution is a no-op that still returns :ok" do
+      author = user_fixture()
+
+      assert :ok = Contributions.anonymize_user(author)
+    end
+  end
+
+  # ---------------------------------------------------------------------
+  # Property: export_user_contributions/1 composed with
+  # Amanogawa.Accounts.export_user_data/1 always encodes and never leaks
+  # another user's identity (issue #038, precedent #033)
+  # ---------------------------------------------------------------------
+
+  property "export composed for an arbitrary user always JSON-encodes and never leaks another user's email" do
+    check all(contribution_count <- StreamData.integer(0..4), max_runs: 10) do
+      author = user_fixture()
+      other = user_fixture()
+
+      for _ <- 1..contribution_count//1 do
+        event = event_fixture()
+        propose_fixture(event, author)
+      end
+
+      export = %{
+        format_version: 2,
+        account: %{email: author.email},
+        contributions: Contributions.export_user_contributions(author)
+      }
+
+      assert {:ok, encoded} = Jason.encode(export)
+      refute encoded =~ other.email
+    end
+  end
+
   defp unique_ip do
     n = System.unique_integer([:positive, :monotonic])
     "10.#{rem(div(n, 65_536), 256)}.#{rem(div(n, 256), 256)}.#{rem(n, 256)}"

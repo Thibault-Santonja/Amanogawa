@@ -1,6 +1,22 @@
 defmodule AmanogawaWeb.PageControllerTest do
   use AmanogawaWeb.ConnCase, async: true
 
+  import Mox
+
+  setup :verify_on_exit!
+
+  setup do
+    stub(Amanogawa.Contributions.DecisionNotifierMock, :deliver, fn _email,
+                                                                    _outcome,
+                                                                    _message,
+                                                                    _path,
+                                                                    _locale ->
+      :ok
+    end)
+
+    :ok
+  end
+
   describe "GET /sources" do
     test "200 with the five source sections and their exact license names", %{conn: conn} do
       html = conn |> get(~p"/sources") |> html_response(200)
@@ -87,6 +103,59 @@ defmodule AmanogawaWeb.PageControllerTest do
 
       en_html = conn |> get(~p"/confidentialite?locale=en") |> html_response(200)
       assert en_html =~ "User accounts"
+    end
+  end
+
+  describe "GET /moderation" do
+    alias Amanogawa.AccountsFixtures
+    alias Amanogawa.AtlasFixtures
+    alias Amanogawa.Contributions
+    alias Amanogawa.ContributionsFixtures
+
+    test "200 with the published rules and factual, zero-filled statistics on an empty database",
+         %{conn: conn} do
+      html = conn |> get(~p"/moderation") |> html_response(200)
+
+      assert html =~ "Critères d&#39;acceptation"
+      assert html =~ "Source vérifiable exigée"
+      assert html =~ "Motifs de rejet types"
+      assert html =~ "L&#39;appel"
+      assert html =~ "le même relecteur peut trancher"
+      assert html =~ "aucune décision pour le moment"
+      # No contributor ranking, no "top" (F08 overview's anti-dark-patterns
+      # principle): the word "classement" only ever appears to DENY it.
+      refute html =~ "classement des contributeurs"
+    end
+
+    test "issue #038: reflects real, non-zero stats and never leaks an email", %{conn: conn} do
+      author = AccountsFixtures.user_fixture()
+      event = AtlasFixtures.event_fixture()
+
+      override =
+        ContributionsFixtures.override_fixture(event_qid: event.qid, author_id: author.id)
+
+      ContributionsFixtures.conflict_fixture()
+
+      reviewer = AccountsFixtures.reviewer_fixture()
+      Contributions.accept_override(override.id, reviewer, "Motif public")
+
+      html = get(conn, ~p"/moderation") |> html_response(200)
+
+      assert html =~ "Conflits de synchronisation ouverts"
+      refute html =~ author.email
+      refute html =~ reviewer.email
+    end
+
+    test "limit case: locale=en returns 200 with the translated content", %{conn: conn} do
+      html = conn |> get(~p"/moderation?locale=en") |> html_response(200)
+
+      assert html =~ "Acceptance criteria"
+      assert html =~ "Typical rejection reasons"
+    end
+
+    test "no session, no cookie for an anonymous visitor", %{conn: conn} do
+      conn = get(conn, ~p"/moderation")
+      assert get_resp_header(conn, "set-cookie") == []
     end
   end
 

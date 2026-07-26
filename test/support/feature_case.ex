@@ -113,6 +113,19 @@ defmodule AmanogawaWeb.FeatureCase do
       Amanogawa.Accounts.MagicLinkNotifier.Mailer
     )
 
+    # Same reasoning, for decision emails (issue #039's review journey):
+    # a real browser drives `AmanogawaWeb.ReviewQueueLive`'s accept/reject/
+    # appeal-review actions from ITS OWN process, never the test process
+    # Mox's private mode expects, so the test-only mock
+    # (`Amanogawa.Contributions.DecisionNotifierMock`, `config/test.exs`)
+    # is swapped for the real `Amanogawa.Contributions.DecisionNotifier.
+    # Email` here, exactly like the magic link notifier above.
+    Application.put_env(
+      :amanogawa,
+      :decision_notifier,
+      Amanogawa.Contributions.DecisionNotifier.Email
+    )
+
     :ok
   end
 

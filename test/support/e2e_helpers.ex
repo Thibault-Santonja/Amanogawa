@@ -11,6 +11,8 @@ defmodule AmanogawaWeb.E2EHelpers do
   what it actually drives (map helpers, timeline helpers, or both).
   """
 
+  import ExUnit.Assertions
+  import Swoosh.TestAssertions
   import Wallaby.Browser
 
   alias Wallaby.Query
@@ -207,6 +209,103 @@ defmodule AmanogawaWeb.E2EHelpers do
   def deselect_event(session) do
     execute_script(session, "window.__amanogawaE2E__.deselectEvent()")
   end
+
+  @doc """
+  The complete passwordless sign-in journey (issue #032, factored out of
+  `test/e2e/auth_journey_test.exs`'s own private helper so issue #039's
+  contributor and reviewer journeys reuse it too, per that issue's own
+  point d'attention): from wherever `session` currently is, opens
+  `/connexion`, requests a magic link for `email`, captures its URL from
+  the shared Swoosh test mailbox (the caller's own `setup` must have
+  called `AmanogawaWeb.FeatureCase.share_swoosh_mailbox/0` first, exactly
+  as `test/e2e/auth_journey_test.exs` already does), visits it, and clicks
+  the real confirm button. Returns `session`, now signed in as `email`.
+  """
+  @spec sign_in_via_magic_link(Session.t(), String.t()) :: Session.t()
+  def sign_in_via_magic_link(session, email) do
+    session
+    |> visit("/connexion")
+    |> assert_has(Query.css("#login-form"))
+    |> fill_in(Query.css("input[name='login[email]']"), with: email)
+    |> click(Query.css("#login-form button", text: "Recevoir un lien de connexion"))
+    |> assert_has(Query.css("#magic-link-sent"))
+
+    assert_email_sent(fn sent_email ->
+      assert sent_email.to == [{"", email}]
+
+      [url] = Regex.run(~r{https?://\S+/connexion/\S+}, sent_email.text_body)
+      send(self(), {:captured_magic_link_url, String.trim(url)})
+      true
+    end)
+
+    assert_receive {:captured_magic_link_url, magic_link_url}
+
+    session
+    |> visit(magic_link_url)
+    |> click(Query.css("button", text: "Confirmer la connexion"))
+    |> assert_has(Query.css("#topbar", text: email))
+  end
+
+  @doc """
+  Picks `{lng, lat}` through the test-only hook witness
+  (`window.__amanogawaE2E__.pickPosition`, `assets/js/hooks/map_hook.js`,
+  issue #039): sends the exact same `position_picked` intent a real map
+  click does while `AmanogawaWeb.Live.ProposalFormComponent`'s "Choisir
+  sur la carte" is active, without depending on WebGL canvas hit-testing
+  for a specific pixel (the contributor journey only cares about the
+  LiveView/form contract, not the map's own rendering, already covered
+  by the map/hover/relation-lines scenarios).
+  """
+  @spec pick_position(Session.t(), float(), float()) :: Session.t()
+  def pick_position(session, lng, lat) do
+    execute_script(session, "window.__amanogawaE2E__.pickPosition(arguments[0], arguments[1])", [
+      lng,
+      lat
+    ])
+  end
+
+  @doc """
+  Clicks the FIRST element matched by `css_selector` through a genuine DOM
+  `.click()` call (`execute_script/2`) rather than Wallaby's own native
+  WebDriver click: still a trusted `click` event, so `phoenix_html`'s
+  patch-link listener fires exactly as it would for a real pointer click,
+  but sidesteps WebDriver's own element-coordinate computation (which can
+  intermittently miss a link inside a just-toggled `<details>`, issue
+  #039's own contributor/reviewer journeys). Prefer `Wallaby.Browser.
+  click/2` for anything this suite ALSO wants to prove is reachable by a
+  real pointer (buttons, the map canvas); reach for this only for a patch
+  link whose click TARGET, not its physical clickability, is what the
+  scenario is actually about.
+  """
+  @spec click_via_js(Session.t(), String.t()) :: Session.t()
+  def click_via_js(session, css_selector) do
+    execute_script(session, "document.querySelector(arguments[0]).click()", [css_selector])
+  end
+
+  @doc """
+  Retries `fun` (a `session -> session` Wallaby action, e.g. `&fill_in(&1,
+  query, with: "x")` or `&click(&1, query)`) up to `attempts` times when the
+  DOM node it targets goes stale BETWEEN Wallaby's own find and act
+  (`Wallaby.StaleReferenceError`, issue #039's own contributor/reviewer
+  journeys): a background LiveView patch (the map/timeline hooks push
+  fairly often, `map_moved`/`select_time_window`) can replace a node the
+  exact moment a real click/fill_in reaches for it, a real-browser race no
+  `Phoenix.LiveViewTest` process ever has to contend with. A short sleep
+  between attempts gives the in-flight patch time to settle before the
+  retry.
+  """
+  @spec retry_stale(Session.t(), (Session.t() -> Session.t()), pos_integer()) :: Session.t()
+  def retry_stale(session, fun, attempts \\ 3)
+
+  def retry_stale(session, fun, attempts) when attempts > 1 do
+    fun.(session)
+  rescue
+    Wallaby.StaleReferenceError ->
+      Process.sleep(200)
+      retry_stale(session, fun, attempts - 1)
+  end
+
+  def retry_stale(session, fun, _attempts), do: fun.(session)
 
   @doc """
   Emulates `prefers-color-scheme: dark` for the whole session through

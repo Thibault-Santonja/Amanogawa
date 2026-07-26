@@ -3,9 +3,18 @@ defmodule AmanogawaWeb.ExploreLiveTest do
 
   import Amanogawa.AccountsFixtures
   import Amanogawa.AtlasFixtures
+  import Mox
   import Phoenix.LiveViewTest
 
   alias Amanogawa.Contributions
+  alias Amanogawa.Contributions.DecisionNotifierMock
+
+  setup :verify_on_exit!
+
+  setup do
+    stub(DecisionNotifierMock, :deliver, fn _email, _outcome, _message, _path, _locale -> :ok end)
+    :ok
+  end
 
   describe "GET /" do
     test "responds 200 with the French root layout and the CSP header", %{conn: conn} do
@@ -265,6 +274,23 @@ defmodule AmanogawaWeb.ExploreLiveTest do
 
       refute_patched(lv)
       assert Process.alive?(lv.pid)
+    end
+
+    test "issue #039: an open proposal form survives an incidental map move (production bug found by E2E)",
+         %{conn: conn} do
+      user = user_fixture()
+      conn = log_in_user(conn, user)
+      event = event_fixture()
+
+      {:ok, lv, _html} = live(conn, ~p"/?sel=#{event.qid}&propose_field=label_fr")
+      assert has_element?(lv, "#proposal-form")
+
+      lv
+      |> element("#map")
+      |> render_hook("map_moved", %{"z" => 4.5, "lat" => 10.0, "lng" => -20.0})
+
+      assert_patch(lv, ~p"/?lat=10.0&lng=-20.0&propose_field=label_fr&sel=#{event.qid}&z=4.5")
+      assert has_element?(lv, "#proposal-form")
     end
   end
 
@@ -677,6 +703,62 @@ defmodule AmanogawaWeb.ExploreLiveTest do
       # The map still shows the untouched Wikidata value: nothing is ever
       # applied directly (F08 overview).
       assert render(lv) =~ "Ancien nom"
+    end
+  end
+
+  describe "issue #038: EventPanel transparency section" do
+    test "an event with no contribution shows no section at all", %{conn: conn} do
+      event = event_fixture(label_fr: "Événement vierge")
+
+      {:ok, lv, _html} = live(conn, ~p"/?sel=#{event.qid}")
+
+      refute has_element?(lv, "#event-panel", "correction(s) acceptée")
+      refute has_element?(lv, "#event-panel", "Voir l'historique")
+    end
+
+    test "an event with an accepted override shows counts, the history link, and the \"valeur corrigée\" mention",
+         %{conn: conn} do
+      event = event_fixture(label_fr: "Ancien nom")
+      author = user_fixture()
+
+      override =
+        Amanogawa.ContributionsFixtures.override_fixture(
+          event_qid: event.qid,
+          field: :label_fr,
+          proposed_value: %{"value" => "Nouveau nom"},
+          author_id: author.id
+        )
+
+      reviewer = Amanogawa.AccountsFixtures.reviewer_fixture()
+      assert {:ok, _accepted} = Contributions.accept_override(override.id, reviewer, "Vérifié")
+
+      {:ok, lv, html} = live(conn, ~p"/?sel=#{event.qid}")
+
+      assert html =~ "1 correction(s) acceptée(s), 0 en attente."
+
+      assert has_element?(
+               lv,
+               "a[href=\"/contributions?event=#{event.qid}\"]",
+               "Voir l'historique"
+             )
+
+      assert html =~ "Valeur corrigée par la communauté"
+      assert has_element?(lv, "a[href=\"/contributions/#{override.id}\"]", "Voir la contribution")
+      # The corrected value is now what the panel and the map show.
+      assert html =~ "Nouveau nom"
+    end
+
+    test "a pending proposal shows the pending count but no \"valeur corrigée\" mention", %{
+      conn: conn
+    } do
+      event = event_fixture(label_fr: "Nom actuel")
+      _override = Amanogawa.ContributionsFixtures.override_fixture(event_qid: event.qid)
+
+      {:ok, lv, html} = live(conn, ~p"/?sel=#{event.qid}")
+
+      assert html =~ "0 correction(s) acceptée(s), 1 en attente."
+      assert has_element?(lv, "a", "Voir l'historique")
+      refute html =~ "Valeur corrigée par la communauté"
     end
   end
 

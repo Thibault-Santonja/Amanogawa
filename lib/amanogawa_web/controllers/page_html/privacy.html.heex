@@ -59,6 +59,37 @@
     </p>
   </.section>
 
+  <.section title={gettext("Éditeur collaboratif (contributions)")}>
+    <p>
+      {gettext(
+        "Une contribution acceptée (correction ou nouvel événement) rejoint l'historique public, permanent, de l'application : date, valeurs avant/après, justification, décision motivée et son auteur (pseudonyme public, jamais l'adresse email) restent consultables sans compte sur %{contributions_link} et %{moderation_link}.",
+        contributions_link: "/contributions",
+        moderation_link: "/moderation"
+      )}
+    </p>
+    <p>
+      {gettext(
+        "Le pseudonyme public (choisi avant votre première proposition, modifiable depuis \"Mon compte\") attribue vos contributions ; votre adresse email n'apparaît jamais publiquement."
+      )}
+    </p>
+    <p>
+      {gettext(
+        "L'export de vos données (\"Mon compte\") inclut l'intégralité de vos contributions et de leurs révisions."
+      )}
+    </p>
+    <p>
+      {gettext(
+        "Suppression de compte : votre email et votre pseudonyme sont réellement supprimés. Vos contributions publiques restent visibles mais deviennent anonymes (\"compte supprimé\") : les supprimer romprait la traçabilité des valeurs affichées sur la carte. Base légale de ce maintien : article 17.3.d du RGPD (archivage dans l'intérêt public)."
+      )}
+    </p>
+    <p>
+      {gettext(
+        "Aucune donnée personnelle ne doit figurer dans une justification ou une réponse d'appel : cette règle est publiée sur %{moderation_link} et vérifiée à la relecture.",
+        moderation_link: "/moderation"
+      )}
+    </p>
+  </.section>
+
   <.section title={gettext("Journaux techniques")}>
     <p>
       {gettext(

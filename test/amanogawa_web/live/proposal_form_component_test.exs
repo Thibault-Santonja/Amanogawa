@@ -236,6 +236,17 @@ defmodule AmanogawaWeb.Live.ProposalFormComponentTest do
     end
   end
 
+  describe "issue #038: cross-links from the justification field" do
+    test "links to the moderation rules and the privacy policy are present", %{conn: conn} do
+      event = event_fixture()
+
+      {:ok, lv, _html} = live(conn, ~p"/?sel=#{event.qid}&propose_field=label_fr")
+
+      assert has_element?(lv, "a[href=\"/moderation\"]", "Règles de modération")
+      assert has_element?(lv, "a[href=\"/confidentialite\"]", "Politique de confidentialité")
+    end
+  end
+
   # A unique fake remote IP per call: gives the rate-limiting test its own
   # isolated Hammer bucket, distinct from every other test's default
   # (127.0.0.1) peer (mirrors `AmanogawaWeb.ExploreLiveTest`'s own helper

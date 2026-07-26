@@ -267,3 +267,8 @@ config :amanogawa, AmanogawaWeb.RateLimit,
 config :amanogawa, AmanogawaWeb.ExploreLive,
   selection_rate_limit: 3,
   selection_rate_limit_scale_ms: :timer.minutes(1)
+
+# Small page (issue #038) so AmanogawaWeb.ContributionsLiveTest can reach
+# "has_more?" and exercise "charger plus" with a handful of fixtures
+# instead of twenty.
+config :amanogawa, AmanogawaWeb.ContributionsLive, page_size: 2

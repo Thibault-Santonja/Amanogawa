@@ -45,6 +45,29 @@ defmodule AmanogawaWeb.Components.EventPanel do
   `"user_return_to"`, F07's own mechanic) before bouncing to
   `/connexion`, so signing in comes back to this exact event with the
   chosen field already selected.
+
+  ## Transparency section (issue #038)
+
+  A sober footer (counts + a link, never a competing call-to-action to
+  the consultation content above): the number of accepted and pending
+  corrections for this event, and a link filtered to `/contributions?
+  event=<qid>`. Renders NOTHING when both counts are zero (F08 overview's
+  own point d'attention: "un événement vierge ne montre aucune section
+  vide bavarde"). Fed by `Amanogawa.Contributions.
+  event_contribution_summary/1`, computed ONCE by `AmanogawaWeb.
+  ExploreLive.load_selection/2` alongside `selected_event` (never inside
+  this function component itself: a stateless component's body reruns on
+  every parent render, which would turn one click into a query on every
+  unrelated re-render of the page it sits in), passed down as
+  `:contribution_summary`.
+
+  Any field currently listed in `@event.overridden_fields` (already
+  loaded with the event, `Amanogawa.Atlas.Event`, this component never
+  queries for it) additionally shows a discrete "valeur corrigée par la
+  communauté" mention, linking to the exact contribution that produced
+  it (`contribution_summary.accepted_override_ids_by_field`): the visitor
+  always knows whether they are reading Wikidata's own value or a local
+  correction.
   """
 
   use AmanogawaWeb, :html
@@ -61,6 +84,7 @@ defmodule AmanogawaWeb.Components.EventPanel do
 
   attr :event, Event, required: true
   attr :current_scope, Amanogawa.Accounts.Scope, required: true
+  attr :contribution_summary, :map, required: true
 
   def event_panel(assigns) do
     assigns = assign(assigns, :correction_fields, @correction_fields)
@@ -136,9 +160,41 @@ defmodule AmanogawaWeb.Components.EventPanel do
           </li>
         </ul>
       </details>
+
+      <div
+        :if={show_contribution_section?(@contribution_summary)}
+        class="mt-4 border-t border-border pt-3 text-sm text-text-muted"
+      >
+        <p>
+          {gettext("%{accepted} correction(s) acceptée(s), %{pending} en attente.",
+            accepted: @contribution_summary.accepted_count,
+            pending: @contribution_summary.pending_count
+          )}
+        </p>
+        <.link
+          navigate={"/contributions?event=#{URI.encode_www_form(@event.qid)}"}
+          class="text-accent hover:underline"
+        >
+          {gettext("Voir l'historique")}
+        </.link>
+
+        <p :for={field <- @event.overridden_fields} class="mt-2">
+          {gettext("Valeur corrigée par la communauté, source à l'appui.")}
+          <.link
+            :if={@contribution_summary.accepted_override_ids_by_field[field]}
+            navigate={"/contributions/#{@contribution_summary.accepted_override_ids_by_field[field]}"}
+            class="text-accent hover:underline"
+          >
+            {gettext("Voir la contribution")}
+          </.link>
+        </p>
+      </div>
     </aside>
     """
   end
+
+  defp show_contribution_section?(%{accepted_count: 0, pending_count: 0}), do: false
+  defp show_contribution_section?(_summary), do: true
 
   defp label(event), do: event.label_fr || event.label_en || event.qid
   defp extract(event), do: event.extract_fr || event.extract_en

@@ -53,9 +53,9 @@ Objectif : ouvrir la contribution, type wiki, avec une gouvernance transparente.
 | ID | Feature | Priorité | Statut | Spec |
 |----|---------|----------|--------|------|
 | F07 | Comptes utilisateurs (magic link) | P0 | Livrée (PR #8) | [F07](features/007-comptes-utilisateurs/000-comptes-utilisateurs.md) |
-| F08 | Éditeur collaboratif éthique | P0 | En spécification | [F08](features/008-editeur-collaboratif/000-editeur-collaboratif.md) |
+| F08 | Éditeur collaboratif éthique | P0 | Livrée | [F08](features/008-editeur-collaboratif/000-editeur-collaboratif.md) |
 
-Critère de sortie : proposition d'édition, historique public des révisions, modération documentée.
+Critère de sortie : proposition d'édition, historique public des révisions, modération documentée. Atteint à la clôture de #039 (issue #039, F08) : surcouche de contributions résolue à l'écriture (ADR 0009), flux public `/contributions` et règles publiées sur `/moderation`, parcours contributeur et relecteur prouvés en navigateur (E2E), export RGPD et anonymisation à la suppression documentés et testés. Phase 2 close.
 
 ## Dépendances entre features
 

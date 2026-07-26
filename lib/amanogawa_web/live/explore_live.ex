@@ -38,6 +38,7 @@ defmodule AmanogawaWeb.ExploreLive do
 
   alias Amanogawa.Atlas
   alias Amanogawa.Atlas.TimeScale
+  alias Amanogawa.Contributions
   alias AmanogawaWeb.ClientIp
   alias AmanogawaWeb.Components.EventPanel
   alias AmanogawaWeb.Components.TimeLegend
@@ -88,6 +89,7 @@ defmodule AmanogawaWeb.ExploreLive do
      |> assign(:lng, nil)
      |> assign(:selected_qid, nil)
      |> assign(:selected_event, nil)
+     |> assign(:contribution_summary, nil)
      |> assign(:proposal_mode, nil)
      |> assign(:expose_e2e_test_api, Application.get_env(:amanogawa, :expose_e2e_test_api, false))}
   end
@@ -361,6 +363,7 @@ defmodule AmanogawaWeb.ExploreLive do
         :if={@selected_event}
         event={@selected_event}
         current_scope={@current_scope}
+        contribution_summary={@contribution_summary}
       />
       <.live_component
         :if={@proposal_mode}
@@ -421,15 +424,42 @@ defmodule AmanogawaWeb.ExploreLive do
     end
   end
 
-  defp load_selection(socket, nil), do: assign(socket, selected_qid: nil, selected_event: nil)
+  defp load_selection(socket, nil) do
+    assign(socket, selected_qid: nil, selected_event: nil, contribution_summary: nil)
+  end
 
   defp load_selection(socket, qid) do
     case Atlas.get_event_by_qid(qid) do
-      nil -> assign(socket, selected_qid: nil, selected_event: nil)
-      event -> assign(socket, selected_qid: qid, selected_event: event)
+      nil ->
+        assign(socket, selected_qid: nil, selected_event: nil, contribution_summary: nil)
+
+      event ->
+        assign(socket,
+          selected_qid: qid,
+          selected_event: event,
+          # Computed HERE, once per actual selection change (issue #038):
+          # never inside `AmanogawaWeb.Components.EventPanel` itself,
+          # whose function component body would otherwise rerun this
+          # query on every unrelated re-render of the page while the
+          # panel stays open (`apply_selection/2` above already guards
+          # against re-querying Atlas on a pure map/timeline patch, the
+          # same discipline applies here).
+          contribution_summary: Contributions.event_contribution_summary(qid)
+        )
     end
   end
 
+  # `ExploreParams.to_query/1` only ever serializes `from`/`to`/`sel`/`z`/
+  # `lat`/`lng` (its own concern is the time window and camera, not the
+  # proposal form): `propose_field`/`propose_new_event` are appended here
+  # instead, straight from `@proposal_mode`, so every patch this LiveView
+  # itself issues (`map_moved`, `select_time_window`, `select_event`,
+  # `deselect_event`) preserves an open proposal form by construction. A
+  # PRODUCTION bug this fixes, found by issue #039's own E2E journeys, not
+  # merely a test artifact: MapLibre settling the camera after a selection
+  # (or a contributor nudging the map/timeline while drafting a
+  # justification) used to `push_patch` a URL with no `propose_field` at
+  # all, silently closing the form out from under them mid-edit.
   defp patch_path(socket, changes) do
     state = %{
       from: socket.assigns.from,
@@ -441,12 +471,23 @@ defmodule AmanogawaWeb.ExploreLive do
     }
 
     updated = Enum.reduce(changes, state, fn {key, value}, acc -> Map.put(acc, key, value) end)
+    query = updated |> ExploreParams.to_query() |> Map.merge(proposal_mode_query(socket))
 
-    case ExploreParams.to_query(updated) do
+    case query do
       empty when empty == %{} -> ~p"/"
       query -> "/?" <> URI.encode_query(query)
     end
   end
+
+  defp proposal_mode_query(%{assigns: %{proposal_mode: {:correction, field}}}) do
+    %{"propose_field" => field}
+  end
+
+  defp proposal_mode_query(%{assigns: %{proposal_mode: :new_event}}) do
+    %{"propose_new_event" => "1"}
+  end
+
+  defp proposal_mode_query(_socket), do: %{}
 
   defp selection_rate_limited?(%{assigns: %{peer_ip: nil}}), do: false
 

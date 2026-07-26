@@ -1,6 +1,6 @@
 # F08 -- Éditeur collaboratif éthique
 
-> Phase 2 | Priorité P0 (phase 2) | Estimation : 2 semaines (70h) | Statut : en cours
+> Phase 2 | Priorité P0 (phase 2) | Estimation : 2 semaines (70h) | Statut : livrée
 
 ## Résumé
 

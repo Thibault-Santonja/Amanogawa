@@ -506,7 +506,16 @@ const MapHook = {
         // engine's own "fully processed and rendered" signal, polled by
         // `AmanogawaWeb.E2EHelpers.wait_for_map_rendered/1` before any
         // scenario drives the canvas with a real pointer.
-        mapLoaded: () => this.map.loaded()
+        mapLoaded: () => this.map.loaded(),
+        // Issue #039's own vigilance point: the contributor E2E journey
+        // needs to pick a position (issue #036's "Choisir sur la carte")
+        // without depending on WebGL canvas hit-testing for a specific
+        // pixel, the same reasoning as `selectEvent`/`deselectEvent`
+        // above. Reports the exact same `{lng, lat}` shape a real map
+        // click does while picking (`onMapClick`'s own picking branch),
+        // through the SAME `pickPosition` method, so the preview marker
+        // and the `position_picked` push behave identically either way.
+        pickPosition: (lng, lat) => this.pickPosition({lng, lat})
       }
     }
   },

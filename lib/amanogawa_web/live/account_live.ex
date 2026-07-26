@@ -22,6 +22,11 @@ defmodule AmanogawaWeb.AccountLive do
   `Amanogawa.Accounts.set_display_name/2`): the same field
   `AmanogawaWeb.Live.ProposalFormComponent` requires before a first
   proposal, editable here at any time.
+
+  Deletion anonymizes the account's public contributions BEFORE deleting
+  the account itself (issue #038, `Amanogawa.Contributions.
+  anonymize_user/1` then `Amanogawa.Accounts.delete_user/1`): see the
+  ordering comment on `confirm_delete_account` below for why.
   """
 
   use AmanogawaWeb, :live_view
@@ -29,6 +34,7 @@ defmodule AmanogawaWeb.AccountLive do
   import AmanogawaWeb.PageHTML, only: [section: 1]
 
   alias Amanogawa.Accounts
+  alias Amanogawa.Contributions
   alias AmanogawaWeb.UserAuth
 
   @impl true
@@ -169,6 +175,16 @@ defmodule AmanogawaWeb.AccountLive do
         |> Enum.reject(&(&1.id == current_session_id))
         |> Enum.map(& &1.id)
 
+      # Anonymize BEFORE deleting (issue #038, `Amanogawa.Contributions.
+      # anonymize_user/1`'s own moduledoc): two transactions, two
+      # contexts, this order on purpose. A crash between the two calls
+      # leaves a state that is still safe and still resumable: the
+      # user's contributions are already anonymized (public, but no
+      # longer attributed) while the account row itself still exists and
+      # can simply be deleted again; the reverse order would instead
+      # risk an orphaned attribution pointing at an already-deleted
+      # account id, which nothing could self-heal automatically.
+      :ok = Contributions.anonymize_user(user)
       :ok = Accounts.delete_user(user)
 
       Enum.each(other_session_ids, fn id ->
@@ -273,7 +289,7 @@ defmodule AmanogawaWeb.AccountLive do
       <.section title={gettext("Supprimer mon compte")}>
         <p class="text-text-muted">
           {gettext(
-            "Cette action est irréversible : toutes vos données sont effacées immédiatement, sans délai de récupération."
+            "Cette action est irréversible : toutes vos données personnelles sont effacées immédiatement, sans délai de récupération. Vos contributions publiques éventuelles (éditeur collaboratif) restent visibles dans l'historique public, mais deviennent anonymes (\"compte supprimé\") : c'est ce qui garantit la cohérence de l'historique, comme sur un wiki."
           )}
         </p>
         <.button :if={!@confirm_delete?} phx-click="toggle_delete_confirmation" class="mt-2">

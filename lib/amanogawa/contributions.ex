@@ -610,6 +610,207 @@ defmodule Amanogawa.Contributions do
   end
 
   # ---------------------------------------------------------------------
+  # Public transparency and RGPD (issue #038)
+  # ---------------------------------------------------------------------
+
+  # Mirrors `Amanogawa.Contributions.Override`'s own `@qid_regex`: this
+  # module cannot reach that private attribute (it belongs to a schema
+  # internal to this very context, but still a different module), same
+  # reasoning as the `Override`/`Amanogawa.Atlas.OverridableField` mirror
+  # documented on `Override`'s moduledoc.
+  @qid_regex ~r/\A(Q\d+|L[0-9a-f]{32})\z/
+  @status_strings Override |> Ecto.Enum.values(:status) |> Enum.map(&Atom.to_string/1)
+
+  @doc """
+  The PUBLIC read of `list_overrides/1` (issue #038, `/contributions`):
+  the same strictly chronological feed, no algorithmic ranking, but a
+  safe entry point for RAW, possibly hostile filter values (a query
+  string typed by an anonymous visitor), unlike `list_overrides/1` itself,
+  which trusts its caller to already hand it valid atoms.
+
+  `opts` accepts `:status` and `:event_qid` as PLAIN STRINGS (atom keys
+  or string keys, either works: `%{status: "pending"}` and `%{"status" =>
+  "pending"}` are equivalent), `:after` as an already-built keyset cursor
+  (`%{inserted_at:, id:}`, from the caller's own last-seen row, never
+  parsed from a raw string here) and `:limit`.
+
+  An unknown status (not one of `Amanogawa.Contributions.Override`'s
+  values) or a malformed event id (anything but a Wikidata QID or a
+  local `L<uuid hex>` id) is a filter that is simply DROPPED, never an
+  exception and never a `500`: the safest thing an ambiguous public query
+  parameter can do is fall back to "no such filter", not crash the page.
+  A malformed `:after`/`:limit` is dropped the same way.
+  """
+  @spec list_public(map()) :: [Override.t()]
+  def list_public(opts \\ %{}) do
+    opts = Map.new(opts)
+
+    %{}
+    |> put_public_status(opts)
+    |> put_public_event_qid(opts)
+    |> put_public_after(opts)
+    |> put_public_limit(opts)
+    |> list_overrides()
+  end
+
+  @doc """
+  A single event's public contribution footprint (issue #038): the
+  EventPanel's "historique des corrections" section and `/moderation`'s
+  neighbourly context both need this without ever loading every override
+  row for the event.
+
+  Returns `%{accepted_count:, pending_count:, accepted_override_ids_by_field:}`:
+  `pending_count` folds `:pending` and `:appealed` together (both are "not
+  yet settled", from a reader's point of view), `accepted_override_ids_by_field`
+  maps the business field NAME (string, matching `atlas.events.
+  overridden_fields`'s own entries) to the `:accepted` override's id, so a
+  caller who already holds the event's `overridden_fields` can link
+  straight to the contribution that produced each one, without this
+  context ever reaching into `Amanogawa.Atlas.Event` itself.
+
+  Two small queries, both indexed on `event_qid`: negligible next to the
+  read-heavy paths this context never touches (the viewport query and the
+  histogram stay entirely inside `Amanogawa.Atlas`, F08 overview's
+  "aucun coût nouveau sur le chemin de lecture chaud").
+  """
+  @spec event_contribution_summary(String.t()) :: %{
+          accepted_count: non_neg_integer(),
+          pending_count: non_neg_integer(),
+          accepted_override_ids_by_field: %{String.t() => Ecto.UUID.t()}
+        }
+  def event_contribution_summary(event_qid) do
+    counts =
+      Override
+      |> where([o], o.event_qid == ^event_qid)
+      |> group_by([o], o.status)
+      |> select([o], {o.status, count()})
+      |> Repo.all()
+      |> Map.new()
+
+    accepted_fields =
+      Override
+      |> where(
+        [o],
+        o.event_qid == ^event_qid and o.status == :accepted and o.kind == :field
+      )
+      |> select([o], {o.field, o.id})
+      |> Repo.all()
+      |> Map.new(fn {field, id} -> {Atom.to_string(field), id} end)
+
+    %{
+      accepted_count: Map.get(counts, :accepted, 0),
+      pending_count: Map.get(counts, :pending, 0) + Map.get(counts, :appealed, 0),
+      accepted_override_ids_by_field: accepted_fields
+    }
+  end
+
+  @doc """
+  The FACTUAL, aggregate statistics of `/moderation` (issue #038, F08
+  overview's anti-dark-patterns principle: totals only, never a
+  contributor ranking, a "top", or any series meant to drive engagement).
+
+  Returns `%{total_by_status:, proposals_by_month:, median_decision_hours:,
+  open_conflicts_count:}`. `total_by_status` always carries every one of
+  `Amanogawa.Contributions.Override`'s status values, zero-filled (an
+  empty database is a coherent all-zero answer, never an absent key).
+  `proposals_by_month` is chronological, one entry per calendar month
+  that has ever seen a proposal (`%{month: "2026-07", count:}`).
+  `median_decision_hours` is `nil` on a database with no decision yet
+  (median of an empty set is undefined, never `0`, never a crash):
+  computed in SQL (`percentile_cont`) over every override's delay between
+  `inserted_at` (the proposal) and its FIRST `:accepted`/`:rejected`
+  revision, so an appeal's later `:appeal_reviewed` never re-counts an
+  override that already had its decision measured.
+
+  Recomputed on every call, no caching (V1 volumes are low, F08 overview
+  / issue #038's own point d'attention: revisit if `/moderation` ever
+  becomes expensive).
+  """
+  @spec public_stats() :: %{
+          total_by_status: %{Override.status() => non_neg_integer()},
+          proposals_by_month: [%{month: String.t(), count: non_neg_integer()}],
+          median_decision_hours: float() | nil,
+          open_conflicts_count: non_neg_integer()
+        }
+  def public_stats do
+    %{
+      total_by_status: zero_filled_status_counts(),
+      proposals_by_month: proposals_by_month(),
+      median_decision_hours: median_decision_hours(),
+      open_conflicts_count: Repo.aggregate(where(Conflict, status: :open), :count)
+    }
+  end
+
+  @doc """
+  Every contribution `user` authored, with its own full revision history
+  (issue #038, RGPD article 20): oldest first, each entry `%{id:, kind:,
+  event_qid:, field:, status:, proposed_value:, source:, inserted_at:,
+  revisions: [%{action:, message:, inserted_at:}, ...]}`.
+
+  Deliberately never includes `author_id`/`actor_id` (this user's own id
+  is redundant to hand back, and a revision's `actor_id` could belong to
+  the REVIEWER who decided it, a different person's identifier this
+  export has no business repeating) nor an email or display name (the
+  account export composing this one, `AmanogawaWeb.AccountController.
+  export/2`, already carries the requester's own email once). A
+  reviewer's public decision `message` IS included: it is already public
+  on `/contributions/:id`, publishing it again to the very author it was
+  addressed to leaks nothing (F08 overview's own arbitrage).
+
+  Returns `[]` for a user with no contribution, never an error (issue
+  #038's own limit case: a pre-F08 account exports cleanly).
+  """
+  @spec export_user_contributions(Accounts.User.t()) :: [map()]
+  def export_user_contributions(%Accounts.User{id: user_id}) do
+    Override
+    |> where([o], o.author_id == ^user_id)
+    |> order_by([o], asc: o.inserted_at, asc: o.id)
+    |> Repo.all()
+    |> Enum.map(&export_override/1)
+  end
+
+  @doc """
+  Anonymizes every trace of `user` in this context (issue #038, RGPD
+  article 17.3.d: the factual content of a contribution survives account
+  deletion as archival material of public interest, only the PERSONAL
+  attribution is erased): sets `author_id` to `nil` on every override
+  `user` authored and `actor_id` to `nil` on every revision `user` acted
+  on (proposed, decided, appealed, ...), journalling one `:anonymized`
+  revision per override whose `author_id` was just cleared (never one per
+  revision: the revisions themselves already ARE the public journal, only
+  their actor attribution disappears).
+
+  Idempotent by construction, not by a separate check: re-running this
+  after a crash between it and `Amanogawa.Accounts.delete_user/1` (the
+  ordering this issue's caller, `AmanogawaWeb.AccountLive`, relies on)
+  finds zero overrides still authored by `user` and zero revisions still
+  acted on by `user`, so the second run writes nothing and journals
+  nothing, but still returns `:ok`.
+
+  One transaction; called with the ALREADY-loaded `user`, this context
+  never queries `Amanogawa.Accounts` for it (facade boundary,
+  `.claude/rules/architecture.md`).
+  """
+  @spec anonymize_user(Accounts.User.t()) :: :ok
+  def anonymize_user(%Accounts.User{id: user_id}) do
+    Repo.transaction(fn ->
+      {_count, touched_override_ids} =
+        Override
+        |> where([o], o.author_id == ^user_id)
+        |> select([o], o.id)
+        |> Repo.update_all(set: [author_id: nil])
+
+      Enum.each(touched_override_ids, &insert_anonymized_revision/1)
+
+      Revision
+      |> where([r], r.actor_id == ^user_id)
+      |> Repo.update_all(set: [actor_id: nil])
+    end)
+
+    :ok
+  end
+
+  # ---------------------------------------------------------------------
   # Private: proposals
   # ---------------------------------------------------------------------
 
@@ -934,6 +1135,129 @@ defmodule Amanogawa.Contributions do
   # floating-point representation noise, per this issue's own point
   # d'attention ("coordonnées arrondies à l'identique").
   defp round_coord(value), do: Float.round(value / 1, 6)
+
+  # ---------------------------------------------------------------------
+  # Private: public transparency and RGPD (issue #038)
+  # ---------------------------------------------------------------------
+
+  defp put_public_status(filters, opts) do
+    case fetch_opt(opts, :status) do
+      value when is_binary(value) ->
+        if value in @status_strings do
+          Map.put(filters, :status, String.to_existing_atom(value))
+        else
+          filters
+        end
+
+      _other ->
+        filters
+    end
+  end
+
+  defp put_public_event_qid(filters, opts) do
+    case fetch_opt(opts, :event_qid) do
+      qid when is_binary(qid) ->
+        if Regex.match?(@qid_regex, qid), do: Map.put(filters, :event_qid, qid), else: filters
+
+      _other ->
+        filters
+    end
+  end
+
+  defp put_public_after(filters, opts) do
+    case fetch_opt(opts, :after) do
+      %{inserted_at: %DateTime{}, id: id} = cursor when is_binary(id) ->
+        Map.put(filters, :after, cursor)
+
+      _other ->
+        filters
+    end
+  end
+
+  defp put_public_limit(filters, opts) do
+    case fetch_opt(opts, :limit) do
+      limit when is_integer(limit) and limit > 0 -> Map.put(filters, :limit, limit)
+      _other -> filters
+    end
+  end
+
+  defp fetch_opt(opts, key) do
+    case Map.fetch(opts, key) do
+      {:ok, value} -> value
+      :error -> Map.get(opts, Atom.to_string(key))
+    end
+  end
+
+  defp zero_filled_status_counts do
+    Override
+    |> Ecto.Enum.values(:status)
+    |> Map.new(&{&1, 0})
+    |> Map.merge(count_by_status())
+  end
+
+  @decision_actions [:accepted, :rejected]
+
+  defp median_decision_hours do
+    first_decision =
+      Revision
+      |> where([r], r.action in ^@decision_actions)
+      |> group_by([r], r.override_id)
+      |> select([r], %{override_id: r.override_id, decided_at: min(r.inserted_at)})
+
+    Override
+    |> join(:inner, [o], d in subquery(first_decision), on: d.override_id == o.id)
+    |> select(
+      [o, d],
+      fragment(
+        "percentile_cont(0.5) within group (order by extract(epoch from (? - ?)) / 3600.0)",
+        d.decided_at,
+        o.inserted_at
+      )
+    )
+    |> Repo.one()
+  end
+
+  defp proposals_by_month do
+    Override
+    |> group_by([o], fragment("date_trunc('month', ?)", o.inserted_at))
+    |> select([o], {fragment("date_trunc('month', ?)", o.inserted_at), count()})
+    |> order_by([o], fragment("date_trunc('month', ?)", o.inserted_at))
+    |> Repo.all()
+    |> Enum.map(fn {month, count} ->
+      %{month: Calendar.strftime(month, "%Y-%m"), count: count}
+    end)
+  end
+
+  defp export_override(override) do
+    %{
+      id: override.id,
+      kind: override.kind,
+      event_qid: override.event_qid,
+      field: override.field,
+      target_qid: override.target_qid,
+      link_type: override.link_type,
+      status: override.status,
+      proposed_value: override.proposed_value,
+      source: override.source,
+      inserted_at: override.inserted_at,
+      revisions: override.id |> list_revisions() |> Enum.map(&export_revision/1)
+    }
+  end
+
+  defp export_revision(revision) do
+    %{action: revision.action, message: revision.message, inserted_at: revision.inserted_at}
+  end
+
+  defp insert_anonymized_revision(override_id) do
+    %Revision{}
+    |> Revision.create_changeset(%{
+      override_id: override_id,
+      action: :anonymized,
+      actor_id: nil,
+      message: nil
+    })
+    |> Repo.insert!()
+  end
 
   # ---------------------------------------------------------------------
   # Private: listing

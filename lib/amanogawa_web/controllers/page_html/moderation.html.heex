@@ -1,0 +1,81 @@
+<Layouts.page page_title={@page_title}>
+  <p class="leading-relaxed text-text-muted">
+    {gettext(
+      "Toute contribution est relue avant d'apparaître sur la carte. Cette page publie les règles de modération et des statistiques agrégées, factuelles : aucun classement de contributeurs, aucun \"top\", aucune série destinée à encourager la publication."
+    )}
+  </p>
+
+  <.section title={gettext("Critères d'acceptation")}>
+    <ul class="list-disc space-y-1 pl-5">
+      <li>
+        {gettext(
+          "Source vérifiable exigée : une URL ou une référence précise, jamais \"je le sais\"."
+        )}
+      </li>
+      <li>
+        {gettext("Exactitude factuelle : la correction doit correspondre à la source citée.")}
+      </li>
+      <li>
+        {gettext(
+          "Neutralité : aucune prise de position, aucune donnée personnelle dans la justification."
+        )}
+      </li>
+    </ul>
+  </.section>
+
+  <.section title={gettext("Motifs de rejet types")}>
+    <ul class="list-disc space-y-1 pl-5">
+      <li>
+        {gettext("Source absente, non vérifiable, ou ne confirmant pas la valeur proposée.")}
+      </li>
+      <li>{gettext("Valeur imprécise ou incorrecte au regard de la source citée.")}</li>
+      <li>{gettext("Contenu non neutre ou contenant une donnée personnelle.")}</li>
+    </ul>
+  </.section>
+
+  <.section title={gettext("L'appel")}>
+    <p>
+      {gettext(
+        "L'auteur d'une proposition rejetée peut répondre une seule fois (l'appel) ; le relecteur tranche alors définitivement. Une seconde réponse n'est pas possible."
+      )}
+    </p>
+    <p>
+      {gettext(
+        "Limite assumée de cette première version : le même relecteur peut trancher l'appel d'une décision qu'il a lui-même rendue (projet solo). Toute décision, y compris d'appel, est publique et motivée."
+      )}
+    </p>
+  </.section>
+
+  <.section title={gettext("Statistiques")}>
+    <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <.stat_tile
+        :for={{status, count} <- @stats.total_by_status}
+        label={status_label(status)}
+        value={count}
+      />
+    </div>
+
+    <p class="mt-4">
+      <span class="font-semibold text-text">{gettext("Délai médian de décision :")}</span>
+      {median_decision_label(@stats.median_decision_hours)}
+    </p>
+
+    <p>
+      <span class="font-semibold text-text">{gettext("Conflits de synchronisation ouverts :")}</span>
+      {@stats.open_conflicts_count}
+    </p>
+
+    <p :if={@stats.proposals_by_month != []} class="mt-4">
+      <span class="font-semibold text-text">{gettext("Propositions par mois :")}</span>
+    </p>
+    <ul :if={@stats.proposals_by_month != []} class="space-y-1">
+      <li :for={entry <- @stats.proposals_by_month}>{entry.month} : {entry.count}</li>
+    </ul>
+  </.section>
+
+  <p class="mt-8">
+    <.link navigate={~p"/contributions"} class="text-accent hover:underline">
+      {gettext("Voir le flux public des contributions")}
+    </.link>
+  </p>
+</Layouts.page>

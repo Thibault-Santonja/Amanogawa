@@ -82,6 +82,13 @@ defmodule AmanogawaWeb.Router do
       live "/", ExploreLive
       live "/connexion", LoginLive
 
+      # Public transparency feed (issue #038): the chronological index
+      # over the detail page below. Declared before the ":id" route only
+      # for readability, Phoenix.Router dispatches on segment count so
+      # "/contributions" and "/contributions/:id" never actually compete
+      # for a match.
+      live "/contributions", ContributionsLive
+
       # Minimal public detail page (issue #037, completed in #038): every
       # visitor may read it, only its own author (if signed in) sees the
       # appeal form on a `:rejected` proposal with no appeal yet.
@@ -151,6 +158,10 @@ defmodule AmanogawaWeb.Router do
     get "/sources", PageController, :sources
     get "/mentions-legales", PageController, :legal
     get "/confidentialite", PageController, :privacy
+
+    # Public moderation rules and aggregate, factual statistics (issue
+    # #038): no cookie, same reasoning as the three static pages above.
+    get "/moderation", PageController, :moderation
   end
 
   scope "/", AmanogawaWeb do
