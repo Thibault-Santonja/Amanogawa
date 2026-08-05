@@ -166,7 +166,11 @@ defmodule Amanogawa.Contributions do
   def list_revisions(override_id) do
     Revision
     |> where([r], r.override_id == ^override_id)
-    |> order_by([r], asc: r.inserted_at)
+    # `inserted_at` is second-precision (`:utc_datetime`); two revisions of
+    # the same override can share it (a fast accept-then-supersede, or any
+    # test). The UUIDv7 primary key is time-ordered, so it is the strict,
+    # insertion-faithful tiebreaker that keeps the public history stable.
+    |> order_by([r], asc: r.inserted_at, asc: r.id)
     |> Repo.all()
   end
 
@@ -180,7 +184,8 @@ defmodule Amanogawa.Contributions do
   def list_revisions_by_override_ids(override_ids) when is_list(override_ids) do
     Revision
     |> where([r], r.override_id in ^override_ids)
-    |> order_by([r], asc: r.inserted_at)
+    # Same second-precision tiebreaker as `list_revisions/1` above.
+    |> order_by([r], asc: r.inserted_at, asc: r.id)
     |> Repo.all()
     |> Enum.group_by(& &1.override_id)
   end
